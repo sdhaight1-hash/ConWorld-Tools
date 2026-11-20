@@ -38,13 +38,16 @@ button:hover:enabled { border-color: var(--gold); }
 button:focus-visible, #plot:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
 button:disabled { opacity: 0.55; cursor: default; }
 #plot { width: 100%; height: clamp(16rem, 55vh, 32rem); overflow: auto; scrollbar-gutter: stable; background: #13272d; }
-canvas { display: block; margin-inline: auto; }
+#benchmark-link { display: inline-block; color: var(--gold); margin-bottom: 1rem; }
+#graph-layers { display: grid; width: max-content; margin-inline: auto; }
+#graph-layers canvas { display: block; grid-area: 1 / 1; }
 .status { margin: 0; padding: 0.8rem; color: var(--muted); }
 .inspector { padding: 0.9rem; }
 #nodes { list-style: none; padding: 0; margin: 0.8rem 0; display: grid; gap: 0.3rem; }
 #nodes button { display: flex; justify-content: space-between; align-items: center; gap: 0.45rem; width: 100%; text-align: left; font-size: 0.88rem; }
 #nodes span { font-size: 0.76rem; color: var(--muted); }
 #nodes [aria-pressed="true"] { border-color: var(--gold); color: var(--gold); }
+.benchmark #nodes { max-height: 20rem; overflow: auto; }
 .details { padding-top: 0.85rem; border-top: 1px solid var(--border); }
 #connections { margin: 0.5rem 0 0; padding-left: 1rem; font-size: 0.86rem; color: var(--muted); }
 #connections li + li { margin-top: 0.4rem; }

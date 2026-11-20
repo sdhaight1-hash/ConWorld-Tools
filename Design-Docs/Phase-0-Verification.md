@@ -36,6 +36,19 @@ npx playwright install chromium --only-shell
 npm test
 ```
 
+## Renderer benchmark
+
+Install the WASM Rust target and the binding generator used by the lockfile. Build the optional renderer bundle before building or starting the desktop frontend.
+
+```sh
+rustup target add wasm32-unknown-unknown
+cargo install wasm-bindgen-cli --version 0.2.130 --locked
+npm --prefix apps/desktop run build:renderer
+npm --prefix apps/desktop run build
+```
+
+Open **Renderer benchmark** in the native shell. The deterministic fixture has 2,000 nodes and 3,910 edges. Pan with the scrollable diagram, adjust zoom, and select a node in the diagram or inspector. When the adapter and bundle load, wgpu submits the node and edge geometry and Canvas2D draws the labels. **Simulate device loss** destroys the active WebGPU device. **Retry WebGPU** rebuilds the renderer with the same selection, zoom and scroll state. The optional Playwright path for a compatible Chromium software implementation runs with `ATLAS_SOFTWARE_WEBGPU=1 npm test` in `apps/desktop`.
+
 ## Observations
 
 | Check | Observed result |
@@ -46,6 +59,8 @@ npm test
 | AT-32 fallback portion | The native window reported `Canvas2D · WebGPU unavailable` and drew the Northbridge graph. The virtual display had no exposed GPU device. |
 | Browser fallback | Two Playwright tests passed in Chromium Headless Shell 156 with GPU disabled. They exercised keyboard selection, zoom and scroll with WebGPU unavailable, the HTML-only inspector with Canvas2D unavailable, and zero external scene requests. |
 | Native automated smoke | Linux WebKitGTK 2.54.0 reported checked inspector and Canvas2D rendering with `api_unavailable` for WebGPU. |
-| Windows target | The original Phase Zero workflow passed the Windows native build. The Windows runtime smoke now runs in CI. Its result and target GPU behavior require separate evidence. |
+| Hosted Windows fallback | WebView2 157.0.4341.46 ran the embedded app, verified the scene and selected-node pixels, and reported `adapter_unavailable`. [Windows CI evidence](https://github.com/sdhaight1-hash/ConWorld-Tools/actions/runs/44832568493/job/136620893121). |
+| 2,000-node workload | Three fallback browser tests passed, including selection of the final benchmark node. The [embedded Linux capture](../Development-Screenshots/2026-11-20_23-13-39Z_phase-00_renderer_benchmark-canvas-fallback_01.png) records the full benchmark viewport with WebGPU unavailable. |
+| Accelerated benchmark | The WASM renderer built and passed Clippy for `wasm32-unknown-unknown`. Both local Chromium builds exposed a software adapter and lost the device before stable presentation. A separate minimal WebGPU clear also lost its device in this environment. Hardware rendering, successful recovery and timing measurements are unverified. |
 
-The Phase Zero exit still requires running the desktop shell in Windows WebView2, recording the runtime and adapter result, and validating the wgpu/WASM graph or documenting target platform limits with the working fallback. A five-node Canvas2D fixture does not cover the 2,000-label benchmark or device-loss recovery. The branch/time, world identity, transaction and publishing choices are documented contracts for later runtime tests.
+The Phase Zero exit still requires exercising the wgpu/WASM graph on GPU-capable Windows WebView2, or establishing a target platform limitation and verifying the fallback there. The branch/time, world identity, transaction and publishing choices are documented contracts for later runtime tests.

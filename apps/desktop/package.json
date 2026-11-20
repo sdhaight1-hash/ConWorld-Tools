@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host localhost --port 1420 --strictPort",
+    "build:renderer": "node scripts/build-renderer.mjs",
     "build": "tsc --noEmit && vite build",
     "test": "playwright test",
     "tauri": "tauri"

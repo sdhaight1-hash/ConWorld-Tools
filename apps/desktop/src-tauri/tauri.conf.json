@@ -20,8 +20,8 @@
     }],
     "security": {
       "capabilities": ["platform-shell"],
-      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self'; object-src 'none'; base-uri 'none'",
-      "devCsp": "default-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1420; object-src 'none'; base-uri 'none'"
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' ipc: http://ipc.localhost; img-src 'self'; object-src 'none'; base-uri 'none'",
+      "devCsp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1420; object-src 'none'; base-uri 'none'"
     }
   },
   "bundle": {

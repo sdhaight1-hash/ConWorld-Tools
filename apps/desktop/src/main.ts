@@ -1,8 +1,9 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import northbridge from "./northbridge.json";
 import "./style.css";
+import { benchmarkHeight, benchmarkTriangles, benchmarkWidth, createGpuGraph, makeBenchmark, type GpuGraph } from "./graph-benchmark";
 
-type Scene = typeof northbridge;
+export type Scene = typeof northbridge;
 type PlatformScene = { target: string; smoke: boolean; scene: Scene };
 type WebGpuStatus = "available" | "api_unavailable" | "adapter_unavailable" | "probe_failed" | "timed_out";
 
@@ -14,8 +15,6 @@ const webGpuLabels: Record<WebGpuStatus, string> = {
   timed_out: "WebGPU adapter probe timed out",
 };
 
-const width = 680;
-const height = 475;
 const host = document.querySelector<HTMLElement>("#host")!;
 const renderer = document.querySelector<HTMLElement>("#renderer")!;
 
@@ -25,9 +24,19 @@ async function start() {
     : { target: "browser preview", smoke: false, scene: northbridge };
   host.textContent = `Local scene · ${response.target}`;
   document.querySelector<HTMLElement>("#workspace")!.hidden = false;
-  const graph = showScene(response.scene);
+  const benchmark = !response.smoke && new URLSearchParams(location.search).has("benchmark");
+  if (benchmark) {
+    document.body.classList.add("benchmark");
+    document.querySelector("h1")!.textContent = "Renderer benchmark";
+    document.querySelector(".intro")!.textContent = "Inspect, zoom, and pan the 2,000-node fixture.";
+    const link = document.querySelector<HTMLAnchorElement>("#benchmark-link")!;
+    link.textContent = "Back to Northbridge";
+    link.href = location.pathname;
+  }
+  const graph = showScene(benchmark ? makeBenchmark() : response.scene, benchmark);
   const webgpu = await probeWebGpu();
   if (graph) renderer.textContent = `Canvas2D · ${webGpuLabels[webgpu]}`;
+  if (benchmark && graph && webgpu === "available") void graph.tryGpu();
   if (response.smoke) {
     const inspector = document.querySelector<HTMLButtonElement>("#nodes button[data-node='beatrice']");
     inspector?.click();
@@ -43,7 +52,9 @@ async function start() {
   }
 }
 
-function showScene(scene: Scene) {
+function showScene(scene: Scene, benchmark: boolean) {
+  const width = benchmark ? benchmarkWidth : 680;
+  const height = benchmark ? benchmarkHeight : 475;
   const plot = document.querySelector<HTMLElement>("#plot")!;
   const list = document.querySelector<HTMLUListElement>("#nodes")!;
   const connections = document.querySelector<HTMLUListElement>("#connections")!;
@@ -57,22 +68,85 @@ function showScene(scene: Scene) {
   const buttons = new Map<string, HTMLButtonElement>();
   let active = "";
   let zoom = 100;
+  const layers = document.querySelector<HTMLElement>("#graph-layers")!;
+  const retry = document.querySelector<HTMLButtonElement>("#retry-gpu")!;
+  const lose = document.querySelector<HTMLButtonElement>("#lose-gpu")!;
+  let gpu: { canvas: HTMLCanvasElement; graph: GpuGraph } | undefined;
+
+  function fallback(message: string) {
+    const previous = gpu;
+    gpu = undefined;
+    previous?.canvas.remove();
+    previous?.graph.free();
+    lose.disabled = true;
+    retry.disabled = false;
+    renderer.textContent = `Canvas2D · ${message}`;
+    draw();
+  }
+
+  async function tryGpu() {
+    if (gpu) return;
+    document.querySelector<HTMLElement>("#gpu-controls")!.hidden = false;
+    retry.disabled = true;
+    const gpuCanvas = document.createElement("canvas");
+    gpuCanvas.setAttribute("aria-hidden", "true");
+    renderer.textContent = "Canvas2D · starting wgpu";
+    let lost = false;
+    try {
+      const graph = await createGpuGraph(gpuCanvas, (reason) => {
+        lost = true;
+        console.info("wgpu device lost", reason);
+        if (gpu?.canvas === gpuCanvas) fallback("WebGPU device lost");
+      });
+      if (lost) {
+        graph.free();
+        fallback("WebGPU device lost during setup");
+        return;
+      }
+      gpu = { canvas: gpuCanvas, graph };
+      layers.prepend(gpuCanvas);
+      draw();
+      if (gpu) {
+        renderer.textContent = "wgpu WebGPU · 2,000 labeled nodes";
+        lose.disabled = false;
+      }
+    } catch (error) {
+      console.warn("wgpu initialization failed", error);
+      fallback("WebGPU renderer could not start");
+    }
+  }
+  retry.addEventListener("click", () => void tryGpu());
+  lose.addEventListener("click", () => gpu?.graph.simulate_device_loss());
+
 
   function draw() {
     if (!context) return;
-    const fitWidth = Math.min(plot.clientWidth, (plot.offsetHeight * width) / height);
+    const fitWidth = benchmark ? width : Math.min(plot.clientWidth, (plot.offsetHeight * width) / height);
     canvas.width = Math.floor((Math.max(440, fitWidth) * zoom) / 100);
     canvas.height = Math.round((canvas.width * height) / width);
     context.setTransform(canvas.width / width, 0, 0, canvas.height / height, 0, 0);
-    context.strokeStyle = "#273d44";
-    context.beginPath();
-    for (let x = 20; x < width; x += 24) {
-      for (let y = 20; y < height; y += 24) {
-        context.rect(x, y, 0.9, 0.9);
+    if (gpu) {
+      const gpuCanvas = gpu.canvas;
+      if (gpuCanvas.width !== canvas.width) gpuCanvas.width = canvas.width;
+      if (gpuCanvas.height !== canvas.height) gpuCanvas.height = canvas.height;
+      try {
+        gpu.graph.draw(canvas.width, canvas.height, benchmarkTriangles(scene, nodes, active));
+      } catch (error) {
+        console.warn("wgpu draw failed", error);
+        fallback("WebGPU draw failed");
+        return;
       }
+    } else if (!benchmark) {
+      context.strokeStyle = "#273d44";
+      context.beginPath();
+      for (let x = 20; x < width; x += 24) {
+        for (let y = 20; y < height; y += 24) {
+          context.rect(x, y, 0.9, 0.9);
+        }
+      }
+      context.stroke();
     }
-    context.stroke();
-    for (const edge of scene.edges) {
+    for (const edge of gpu ? [] : scene.edges) {
       const from = nodes.get(edge.source);
       const to = nodes.get(edge.target);
       if (!from || !to) continue;
@@ -84,28 +158,31 @@ function showScene(scene: Scene) {
       context.lineTo(to.x, to.y);
       context.stroke();
     }
-    context.font = "600 15px system-ui";
+    context.font = benchmark ? "11px system-ui" : "600 15px system-ui";
     context.textAlign = "center";
     for (const node of scene.nodes) {
-      context.fillStyle = node.id === active ? "#f3d395" : "#a5cfb6";
-      context.beginPath();
-      context.arc(node.x, node.y, node.id === active ? 9 : 6, 0, Math.PI * 2);
-      context.fill();
+      if (!gpu) {
+        context.fillStyle = node.id === active ? "#f3d395" : "#a5cfb6";
+        context.beginPath();
+        const radius = benchmark ? (node.id === active ? 5 : 3) : (node.id === active ? 9 : 6);
+        context.arc(node.x, node.y, radius, 0, Math.PI * 2);
+        context.fill();
+      }
       context.fillStyle = "#f1eee0";
       context.strokeStyle = "#13272d";
       context.lineWidth = 4;
-      context.strokeText(node.label, node.x, node.y + 28);
-      context.fillText(node.label, node.x, node.y + 28);
+      const y = node.y + (benchmark ? 16 : 28);
+      context.strokeText(node.label, node.x, y);
+      context.fillText(node.label, node.x, y);
     }
   }
 
   function select(id: string) {
     const node = nodes.get(id);
     if (!node) return;
+    buttons.get(active)?.setAttribute("aria-pressed", "false");
     active = id;
-    for (const [key, button] of buttons) {
-      button.setAttribute("aria-pressed", String(id === key));
-    }
+    buttons.get(id)?.setAttribute("aria-pressed", "true");
     selection.textContent = node.label;
     const items: HTMLLIElement[] = [];
     for (const edge of scene.edges) {
@@ -127,6 +204,7 @@ function showScene(scene: Scene) {
     const kind = document.createElement("span");
     button.type = "button";
     button.dataset.node = node.id;
+    button.setAttribute("aria-pressed", "false");
     button.textContent = node.label;
     kind.textContent = node.kind;
     button.append(kind);
@@ -146,12 +224,12 @@ function showScene(scene: Scene) {
 
   function setZoom(level: number) {
     zoom = level;
-    zoomIn.disabled = zoom >= 200;
+    zoomIn.disabled = zoom >= (benchmark ? 150 : 200);
     zoomOut.disabled = zoom <= 100;
     reset.textContent = `${zoom}%`;
     draw();
   }
-  zoomIn.addEventListener("click", () => setZoom(Math.min(200, zoom + 25)));
+  zoomIn.addEventListener("click", () => setZoom(Math.min(benchmark ? 150 : 200, zoom + 25)));
   zoomOut.addEventListener("click", () => setZoom(Math.max(100, zoom - 25)));
   reset.addEventListener("click", () => {
     setZoom(100);
@@ -167,6 +245,7 @@ function showScene(scene: Scene) {
   new ResizeObserver(draw).observe(plot);
   setZoom(100);
   return {
+    tryGpu,
     visibleNode(id: string) {
       const node = nodes.get(id);
       if (!node) return false;

@@ -37,3 +37,40 @@ test("the node inspector works when Canvas2D is unavailable", async ({ page }) =
   await expect(page.getByRole("heading", { name: "Merchant Guild" })).toBeVisible();
   await expect(page.getByText("Merchant Guild · Based in · Northbridge")).toBeVisible();
 });
+
+test("the 2,000-node graph remains selectable without WebGPU", async ({ page }) => {
+  await page.addInitScript(() => Object.defineProperty(navigator, "gpu", { value: undefined }));
+  await page.goto("/?benchmark=1");
+  await expect(page.getByRole("heading", { name: "Renderer benchmark" })).toBeVisible();
+  await expect(page.locator("#nodes button")).toHaveCount(2_000);
+  await expect(page.getByRole("status").filter({ hasText: "WebGPU unavailable" })).toBeVisible();
+  await page.locator("#nodes button[data-node='2000']").click();
+  await expect(page.getByRole("heading", { name: "Node 2000" })).toBeVisible();
+});
+
+test("wgpu renders, pans, zooms and recovers from device loss", async ({ page }) => {
+  test.skip(process.env.ATLAS_SOFTWARE_WEBGPU !== "1", "Requires the software WebGPU test configuration");
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto("/?benchmark=1");
+  const gpuStatus = page.getByRole("status").filter({ hasText: "wgpu WebGPU" });
+  await expect(gpuStatus).toContainText("2,000 labeled nodes");
+  const plot = page.getByRole("region", { name: "Scrollable diagram" });
+  await expect(plot.locator("canvas")).toHaveCount(2);
+  const { x, y } = (await plot.locator("#graph").boundingBox())!;
+  await page.mouse.click(x + 90, y + 24);
+  await expect(page.getByRole("heading", { name: "Node 0002" })).toBeVisible();
+  await page.getByRole("button", { name: "Zoom in" }).click();
+  await expect(plot.locator("#graph")).toHaveAttribute("width", "3750");
+  await plot.evaluate((el) => el.scrollTo(760, 310));
+  await expect.poll(() => plot.evaluate((el) => [el.scrollLeft, el.scrollTop])).toEqual([760, 310]);
+  await page.getByRole("button", { name: "Simulate device loss" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "WebGPU device lost" })).toBeVisible();
+  await expect(plot.locator("canvas")).toHaveCount(1);
+  await expect(page.getByRole("heading", { name: "Node 0002" })).toBeVisible();
+  await page.getByRole("button", { name: "Retry WebGPU" }).click();
+  await expect(gpuStatus).toBeVisible();
+  await expect(plot.locator("canvas")).toHaveCount(2);
+  await expect.poll(() => plot.evaluate((el) => [el.scrollLeft, el.scrollTop])).toEqual([760, 310]);
+  expect(errors).toEqual([]);
+});

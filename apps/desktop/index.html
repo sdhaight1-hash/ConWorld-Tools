@@ -13,6 +13,7 @@
     <main>
       <h1>Northbridge</h1>
       <p class="intro">Explore the people, places, and events in the platform fixture.</p>
+      <a id="benchmark-link" href="?benchmark=1">Open renderer benchmark</a>
       <section id="workspace" aria-label="Northbridge scene" hidden>
         <div class="graph">
           <div class="toolbar">
@@ -24,9 +25,13 @@
             </div>
           </div>
           <div id="plot" tabindex="0" role="region" aria-label="Scrollable diagram">
-            <canvas id="graph" aria-hidden="true"></canvas>
+            <div id="graph-layers"><canvas id="graph" aria-hidden="true"></canvas></div>
           </div>
           <p id="renderer" class="status" role="status">Checking WebGPU…</p>
+          <div id="gpu-controls" class="toolbar" hidden>
+            <button type="button" id="retry-gpu" disabled>Retry WebGPU</button>
+            <button type="button" id="lose-gpu" disabled>Simulate device loss</button>
+          </div>
         </div>
         <aside class="inspector" aria-label="Node inspector">
           <h2>Nodes</h2>
