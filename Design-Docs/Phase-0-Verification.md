@@ -19,7 +19,13 @@ npm --prefix apps/desktop run build
 cargo build --workspace --locked --features custom-protocol
 ```
 
-Launch `target/debug/atlas-desktop` on Linux or `target\debug\atlas-desktop.exe` on Windows. The embedded build needs no development web server. A successful native launch displays `Local scene · linux` or `Local scene · windows` along with the five Northbridge nodes. Select a node with Tab and Enter, compare its linked records in the inspector, zoom with the controls, and scroll the focused diagram. A browser preview identifies itself as such.
+Launch `target/debug/atlas-desktop` on Linux or `target\debug\atlas-desktop.exe` on Windows. The embedded build needs no development web server. A successful native launch displays `Local scene · linux` or `Local scene · windows` along with the five Northbridge nodes. Select a node with Tab and Enter, compare its linked records in the inspector, zoom with the controls, and scroll the focused diagram. A browser preview identifies itself as such. The [Linux runtime capture](../Development-Screenshots/2026-11-20_22-52-16Z_phase-00_desktop_keyboard-canvas-fallback_01.png) shows keyboard selection in the embedded desktop window.
+
+The debug build also accepts `--platform-smoke`. It launches the embedded WebView, loads the fixture through Rust IPC, verifies the inspector and a rendered Canvas2D node, and emits one structured report with the native WebView version and WebGPU adapter status. The process exits with a failure code when the scene or Canvas2D verification fails. Windows CI runs this check after building the executable.
+
+```powershell
+./apps/desktop/scripts/windows-platform-smoke.ps1 -Binary ./target/debug/atlas-desktop.exe
+```
 
 ```sh
 cargo fmt --all -- --check
@@ -39,6 +45,7 @@ npm test
 | AT-31 platform portion | The native fixture and frontend assets loaded locally. Full offline authoring, search and publication require the later application phases. |
 | AT-32 fallback portion | The native window reported `Canvas2D · WebGPU unavailable` and drew the Northbridge graph. The virtual display had no exposed GPU device. |
 | Browser fallback | Two Playwright tests passed in Chromium Headless Shell 156 with GPU disabled. They exercised keyboard selection, zoom and scroll with WebGPU unavailable, the HTML-only inspector with Canvas2D unavailable, and zero external scene requests. |
-| Windows target | WebView2 runtime and target GPU behavior are still unverified. CI has a Windows native build job. |
+| Native automated smoke | Linux WebKitGTK 2.54.0 reported checked inspector and Canvas2D rendering with `api_unavailable` for WebGPU. |
+| Windows target | The original Phase Zero workflow passed the Windows native build. The Windows runtime smoke now runs in CI. Its result and target GPU behavior require separate evidence. |
 
 The Phase Zero exit still requires running the desktop shell in Windows WebView2, recording the runtime and adapter result, and validating the wgpu/WASM graph or documenting target platform limits with the working fallback. A five-node Canvas2D fixture does not cover the 2,000-label benchmark or device-loss recovery. The branch/time, world identity, transaction and publishing choices are documented contracts for later runtime tests.

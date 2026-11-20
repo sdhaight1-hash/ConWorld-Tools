@@ -3,7 +3,16 @@ import northbridge from "./northbridge.json";
 import "./style.css";
 
 type Scene = typeof northbridge;
-type PlatformScene = { target: string; scene: Scene };
+type PlatformScene = { target: string; smoke: boolean; scene: Scene };
+type WebGpuStatus = "available" | "api_unavailable" | "adapter_unavailable" | "probe_failed" | "timed_out";
+
+const webGpuLabels: Record<WebGpuStatus, string> = {
+  available: "WebGPU adapter detected",
+  api_unavailable: "WebGPU unavailable",
+  adapter_unavailable: "WebGPU adapter unavailable",
+  probe_failed: "WebGPU adapter probe failed",
+  timed_out: "WebGPU adapter probe timed out",
+};
 
 const width = 680;
 const height = 475;
@@ -13,10 +22,25 @@ const renderer = document.querySelector<HTMLElement>("#renderer")!;
 async function start() {
   const response = isTauri()
     ? await invoke<PlatformScene>("platform_scene")
-    : { target: "browser preview", scene: northbridge };
+    : { target: "browser preview", smoke: false, scene: northbridge };
   host.textContent = `Local scene · ${response.target}`;
   document.querySelector<HTMLElement>("#workspace")!.hidden = false;
-  showScene(response.scene);
+  const graph = showScene(response.scene);
+  const webgpu = await probeWebGpu();
+  if (graph) renderer.textContent = `Canvas2D · ${webGpuLabels[webgpu]}`;
+  if (response.smoke) {
+    const inspector = document.querySelector<HTMLButtonElement>("#nodes button[data-node='beatrice']");
+    inspector?.click();
+    const sceneVerified =
+      document.querySelectorAll("#nodes button").length === 5 &&
+      inspector?.getAttribute("aria-pressed") === "true" &&
+      [...document.querySelectorAll("#connections li")].some(
+        (item) => item.textContent === "Beatrice Thorne · Member of · Merchant Guild",
+      );
+    const canvas2dVerified = graph?.visibleNode("beatrice") ?? false;
+    const observation = { scene_verified: sceneVerified, canvas2d_verified: canvas2dVerified, webgpu };
+    await invoke("complete_platform_smoke", { observation });
+  }
 }
 
 function showScene(scene: Scene) {
@@ -102,6 +126,7 @@ function showScene(scene: Scene) {
     const button = document.createElement("button");
     const kind = document.createElement("span");
     button.type = "button";
+    button.dataset.node = node.id;
     button.textContent = node.label;
     kind.textContent = node.kind;
     button.append(kind);
@@ -141,22 +166,33 @@ function showScene(scene: Scene) {
   });
   new ResizeObserver(draw).observe(plot);
   setZoom(100);
-  void reportWebGpu();
+  return {
+    visibleNode(id: string) {
+      const node = nodes.get(id);
+      if (!node) return false;
+      const x = Math.round((node.x * canvas.width) / width);
+      const y = Math.round((node.y * canvas.height) / height);
+      const [red, green, blue, alpha] = context.getImageData(x, y, 1, 1).data;
+      return red === 243 && green === 211 && blue === 149 && alpha === 255;
+    },
+  };
 }
 
-async function reportWebGpu() {
+async function probeWebGpu(): Promise<WebGpuStatus> {
   const { gpu } = navigator as Navigator & { gpu?: { requestAdapter(): Promise<object | null> } };
-  if (!gpu) {
-    renderer.textContent = "Canvas2D · WebGPU unavailable";
-    return;
-  }
+  if (!gpu) return "api_unavailable";
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const adapter = await gpu.requestAdapter();
-    renderer.textContent = adapter
-      ? "Canvas2D · WebGPU adapter detected"
-      : "Canvas2D · WebGPU adapter unavailable";
+    const timeout = new Promise<"timed_out">((resolve) => {
+      timer = setTimeout(() => resolve("timed_out"), 5_000);
+    });
+    const adapter = gpu.requestAdapter().then((value) => value ? "available" : "adapter_unavailable");
+    return await Promise.race([adapter, timeout]);
   } catch {
-    renderer.textContent = "Canvas2D · WebGPU adapter probe failed";
+    return "probe_failed";
+  } finally {
+    clearTimeout(timer);
   }
 }
 

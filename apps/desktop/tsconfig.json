@@ -3,7 +3,7 @@
     "strict": true,
     "noEmit": true,
     "target": "ES2022",
-    "lib": ["ES2022", "ESNext.Disposable", "DOM"],
+    "lib": ["ES2022", "ESNext.Disposable", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "resolveJsonModule": true,

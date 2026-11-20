@@ -62,4 +62,4 @@ Add entries when actual screenshots or videos are committed. Example format:
 - YYYY-MM-DD HH:mm:ss UTC — [filename](filename) — Issue #N, commit abc123 — What was observed and why this capture matters.
 ```
 
-_No screenshots or videos were added when this guide was created._
+- 2026-11-20 22:52:16 UTC — [2026-11-20_22-52-16Z_phase-00_desktop_keyboard-canvas-fallback_01.png](2026-11-20_22-52-16Z_phase-00_desktop_keyboard-canvas-fallback_01.png) — [Phase Zero #1](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/1), [PR #12](https://github.com/sdhaight1-hash/ConWorld-Tools/pull/12) — The embedded Tauri build on Linux WebKitGTK 2.54.0 displayed Beatrice’s guild membership after keyboard selection, with the Canvas2D graph active and WebGPU unavailable.

@@ -6,16 +6,16 @@ The roadmap is **dependency ordered**, not an invitation to build all systems in
 
 ## Active roadmap issues
 
-- [Roadmap Phase 0 — Architecture Baseline & Platform Feasibility](https://github.com/sdhaight1-hash/ConWoeld-Tools./issues/1)
-- [Roadmap Phase 1 — World Persistence, Temporal Model & Provenance](https://github.com/sdhaight1-hash/ConWoeld-Tools./issues/2)
-- [Roadmap Phase 2 — Relationships, Tags & Event-Driven History](https://github.com/sdhaight1-hash/ConWoeld-Tools./issues/3)
-- [Roadmap Phase 3 — Universal Search, Queries, Backlinks & Discovery](https://github.com/sdhaight1-hash/ConWoeld-Tools./issues/4)
-- [Roadmap Phase 4 — Three-Layer Entries & Composable Canvas](https://github.com/sdhaight1-hash/ConWoeld-Tools./issues/5)
-- [Roadmap Phase 5 — Genealogy, Dynasties, Households & Organizations](https://github.com/sdhaight1-hash/ConWoeld-Tools./issues/6)
-- [Roadmap Phase 6 — Event Studio, Actor Agency & Conflict Atlas](https://github.com/sdhaight1-hash/ConWoeld-Tools./issues/7)
-- [Roadmap Phase 7 — Evidence, Perspectives, Branches & Privacy](https://github.com/sdhaight1-hash/ConWoeld-Tools./issues/8)
-- [Roadmap Phase 8 — Synthetic DNA & Population History](https://github.com/sdhaight1-hash/ConWoeld-Tools./issues/9)
-- [Roadmap Phase 9 — Release Hardening, Export & Optional NPC Integration](https://github.com/sdhaight1-hash/ConWoeld-Tools./issues/10)
+- [Roadmap Phase 0 — Architecture Baseline & Platform Feasibility](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/1)
+- [Roadmap Phase 1 — World Persistence, Temporal Model & Provenance](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/2)
+- [Roadmap Phase 2 — Relationships, Tags & Event-Driven History](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/3)
+- [Roadmap Phase 3 — Universal Search, Queries, Backlinks & Discovery](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/4)
+- [Roadmap Phase 4 — Three-Layer Entries & Composable Canvas](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/5)
+- [Roadmap Phase 5 — Genealogy, Dynasties, Households & Organizations](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/6)
+- [Roadmap Phase 6 — Event Studio, Actor Agency & Conflict Atlas](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/7)
+- [Roadmap Phase 7 — Evidence, Perspectives, Branches & Privacy](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/8)
+- [Roadmap Phase 8 — Synthetic DNA & Population History](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/9)
+- [Roadmap Phase 9 — Release Hardening, Export & Optional NPC Integration](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/10)
 
 All ten issues start **open** and link to their relevant design contracts and acceptance gates. The planned phase number is independent of the GitHub issue number.
 
