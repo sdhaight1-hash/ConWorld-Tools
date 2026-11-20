@@ -1,8 +1,13 @@
 //! Local, author-scoped world persistence for Living History Atlas.
+mod calendar;
 mod store;
 
 use std::path::PathBuf;
 
+pub use calendar::{
+    CalendarCommand, CalendarDate, CalendarDay, CalendarId, CalendarRules, CalendarVersion,
+    LeapCycle,
+};
 pub use store::Store;
 use uuid::Uuid;
 
@@ -188,6 +193,12 @@ pub enum Error {
     InvalidInterval,
     #[error("the edit would change history before the branch boundary")]
     BeforeFork,
+    #[error("invalid calendar rules")]
+    InvalidCalendar,
+    #[error("the day or month does not exist in this calendar year")]
+    InvalidCalendarDate,
+    #[error("the date is outside the representable calendar range")]
+    CalendarOutOfRange,
     #[error("invalid uncertain occurrence bounds")]
     InvalidOccurrence,
     #[error("the requested author revision is outside the world's recorded history")]

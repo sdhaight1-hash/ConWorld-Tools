@@ -9,7 +9,7 @@ use uuid::Uuid;
 use crate::*;
 
 const APPLICATION_ID: i64 = 0x4357_4c44; // CWLD
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 
 pub struct Store {
     conn: Connection,
@@ -46,6 +46,9 @@ impl Store {
         }
         if version < 3 {
             tx.execute_batch(include_str!("../migrations/0003.sql"))?;
+        }
+        if version < 4 {
+            tx.execute_batch(include_str!("../migrations/0004.sql"))?;
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
         tx.commit()?;
@@ -78,6 +81,116 @@ impl Store {
     pub fn world(&self, world: WorldId, scope: Scope) -> Result<World, Error> {
         require_author(scope)?;
         load_world(&self.conn, world)
+    }
+
+    pub fn register_calendar(
+        &mut self,
+        command: &CalendarCommand,
+    ) -> Result<AuthorRevision, Error> {
+        require_author(command.scope)?;
+        command.rules.validate()?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let world = load_world(&tx, command.world)?;
+        let revision = append_revision(
+            &tx,
+            &world,
+            world.main,
+            command.expected,
+            command.command_id,
+            (&command.author, &command.rationale),
+        )?;
+        let rules = &command.rules;
+        let (leap_every, leap_month) = rules
+            .leap
+            .map_or((None, None), |leap| (Some(leap.every), Some(leap.month)));
+        tx.execute(
+            "INSERT INTO calendar_rules (world_id, calendar_id, revision, name, epoch_day, leap_every, leap_month)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![world.id.0.as_bytes(), command.calendar.0.as_bytes(), revision, rules.name, rules.epoch.0, leap_every, leap_month],
+        )?;
+        {
+            let mut insert = tx.prepare(
+                "INSERT INTO calendar_months (world_id, calendar_id, revision, month, length)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+            )?;
+            for (index, length) in rules.month_lengths.iter().enumerate() {
+                insert.execute(params![
+                    world.id.0.as_bytes(),
+                    command.calendar.0.as_bytes(),
+                    revision,
+                    index + 1,
+                    length
+                ])?;
+            }
+        }
+        tx.commit()?;
+        Ok(AuthorRevision(revision))
+    }
+
+    pub fn calendar(
+        &self,
+        world: WorldId,
+        id: CalendarId,
+        revision: AuthorRevision,
+        scope: Scope,
+    ) -> Result<CalendarVersion, Error> {
+        require_author(scope)?;
+        let tx = self.conn.unchecked_transaction()?;
+        let world = load_world(&tx, world)?;
+        if revision < AuthorRevision(0) || revision > world.revision {
+            return Err(Error::InvalidRevision);
+        }
+        let (registered_at, mut rules) = tx
+            .query_row(
+                "SELECT revision, name, epoch_day, leap_every, leap_month FROM calendar_rules
+             WHERE world_id = ?1 AND calendar_id = ?2 AND revision <= ?3
+             ORDER BY revision DESC LIMIT 1",
+                params![world.id.0.as_bytes(), id.0.as_bytes(), revision.0],
+                |row| {
+                    let leap = match (row.get(3)?, row.get(4)?) {
+                        (Some(every), Some(month)) => Some(LeapCycle { every, month }),
+                        (None, None) => None,
+                        _ => return Err(rusqlite::Error::InvalidQuery),
+                    };
+                    Ok((
+                        AuthorRevision(row.get(0)?),
+                        CalendarRules {
+                            name: row.get(1)?,
+                            epoch: WorldDay(row.get(2)?),
+                            month_lengths: Vec::new(),
+                            leap,
+                        },
+                    ))
+                },
+            )
+            .optional()?
+            .ok_or(Error::NotFound)?;
+        {
+            let mut months = tx.prepare(
+                "SELECT month, length FROM calendar_months
+                 WHERE world_id = ?1 AND calendar_id = ?2 AND revision = ?3 ORDER BY month",
+            )?;
+            let mut rows = months.query(params![
+                world.id.0.as_bytes(),
+                id.0.as_bytes(),
+                registered_at.0
+            ])?;
+            while let Some(row) = rows.next()? {
+                if row.get::<_, usize>(0)? != rules.month_lengths.len() + 1 {
+                    return Err(Error::InvalidCalendar);
+                }
+                rules.month_lengths.push(row.get(1)?);
+            }
+        }
+        rules.validate()?;
+        tx.commit()?;
+        Ok(CalendarVersion {
+            id,
+            registered_at,
+            rules,
+        })
     }
 
     pub fn branch_fork(

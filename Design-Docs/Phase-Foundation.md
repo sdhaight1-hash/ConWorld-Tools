@@ -11,7 +11,7 @@ The baseline was [main at 4447975](https://github.com/sdhaight1-hash/ConWorld-To
 | Roadmap phase | Foundation it inherits | First work still required for the phase |
 | --- | --- | --- |
 | [0 — Platform](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/1) | Cargo workspace and Linux/Windows verification workflow | Run a Tauri desktop shell and observe the WebGPU and accessible fallback paths on Windows |
-| [1 — Persistence](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/2) | World-scoped IDs, root branch, recorded versions, valid-time reads, date uncertainty, and SQLite migrations | Implement pinned fork overlays, calendar registration/conversion, typed claims and provenance expansion |
+| [1 — Persistence](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/2) | World-scoped IDs, root branch, recorded versions, valid-time reads, date uncertainty, and SQLite migrations | Add typed claims and expand provenance, including original calendar references on events |
 | [2 — Relationship and event history](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/3) | Historical event identity, source references, atomic multi-object commands, transactional invalidations | Add typed relationships and event/action/effect records, then verify the Northbridge betrayal scenario |
 | [3 — Query and discovery](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/4) | Explicit read context, stable revisions, typed records, committed invalidation rows | Add one bounded query service, an index consumer and deterministic Northbridge query fixtures |
 | [4 — Node, Canvas and Display](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/5) | Stable object references, scope boundary and versioned reads | Bind all three surfaces to the shared query service and verify public projection policies |
@@ -47,6 +47,7 @@ cargo test -p atlas-store --locked
 | AT-26 | Rejected cross-world references and wrong-kind sources, and denied public scope before reads |
 | AT-33, persistence batch | Rolled back identities, versions, audit and invalidation rows. Retried successfully and rejected duplicate and stale commands |
 | AT-14, exact-day forks | A child retained its pinned parent history, diverged after the cut, and reopened from a backup. Nested forks kept sibling evidence isolated, and invalid pre-fork edits rolled back. |
+| Calendar registration and conversion | Signed-year and leap-cycle conversions, inclusive partial-date bounds, world isolation, rule lookup after reopen, and the stability of already-recorded event dates were verified. |
 | Successive fictional states | A later fictional name preserves the earlier interval at the same author revision. Corrections and schema-v1 migration retain prior author views. |
 | Migration guard | Refused a newer schema without rewriting its version |
 
