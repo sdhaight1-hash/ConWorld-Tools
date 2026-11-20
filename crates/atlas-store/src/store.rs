@@ -9,7 +9,7 @@ use uuid::Uuid;
 use crate::*;
 
 const APPLICATION_ID: i64 = 0x4357_4c44; // CWLD
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 pub struct Store {
     conn: Connection,
@@ -43,6 +43,9 @@ impl Store {
         }
         if version < 2 {
             tx.execute_batch(include_str!("../migrations/0002.sql"))?;
+        }
+        if version < 3 {
+            tx.execute_batch(include_str!("../migrations/0003.sql"))?;
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
         tx.commit()?;
@@ -77,10 +80,65 @@ impl Store {
         load_world(&self.conn, world)
     }
 
+    pub fn branch_fork(
+        &self,
+        world: WorldId,
+        branch: BranchId,
+        revision: AuthorRevision,
+        scope: Scope,
+    ) -> Result<Option<Fork>, Error> {
+        require_author(scope)?;
+        let tx = self.conn.unchecked_transaction()?;
+        let world = load_world(&tx, world)?;
+        if revision < AuthorRevision(0) || revision > world.revision {
+            return Err(Error::InvalidRevision);
+        }
+        let fork = load_fork(&tx, world.id, branch, revision)?;
+        tx.commit()?;
+        Ok(fork)
+    }
+
+    pub fn fork(&mut self, command: &ForkCommand) -> Result<Fork, Error> {
+        require_author(command.scope)?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let world = load_world(&tx, command.world)?;
+        if let Some(parent) = load_fork(&tx, world.id, command.parent, world.revision)?
+            && command.day < parent.day
+        {
+            return Err(Error::BeforeFork);
+        }
+        let revision = append_revision(
+            &tx,
+            &world,
+            command.parent,
+            command.expected,
+            command.id,
+            (&command.author, &command.rationale),
+        )?;
+        let child = BranchId(Uuid::new_v4());
+        tx.execute(
+            "INSERT INTO branches (world_id, id, is_main) VALUES (?1, ?2, 0)",
+            params![world.id.0.as_bytes(), child.0.as_bytes()],
+        )?;
+        tx.execute(
+            "INSERT INTO branch_forks (world_id, branch_id, parent_id, fork_day, inherited_revision, created_revision)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![world.id.0.as_bytes(), child.0.as_bytes(), command.parent.0.as_bytes(), command.day.0, world.revision.0, revision],
+        )?;
+        tx.commit()?;
+        Ok(Fork {
+            id: child,
+            parent: command.parent,
+            day: command.day,
+            inherited_revision: world.revision,
+            created_revision: AuthorRevision(revision),
+        })
+    }
+
     pub fn apply(&mut self, command: &Command) -> Result<AuthorRevision, Error> {
         require_author(command.scope)?;
-        validate_text(&command.author, "command author")?;
-        validate_text(&command.rationale, "command rationale")?;
         if command.changes.is_empty() {
             return Err(Error::InvalidInput("empty command"));
         }
@@ -89,35 +147,15 @@ impl Store {
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let world = load_world(&tx, command.world)?;
-        if command.branch != world.main {
-            return Err(Error::NotFound);
-        }
-        if let Some(revision) = tx
-            .query_row(
-                "SELECT revision FROM author_revisions WHERE world_id = ?1 AND command_id = ?2",
-                params![world.id.0.as_bytes(), command.id.as_bytes()],
-                |row| row.get(0),
-            )
-            .optional()?
-        {
-            return Err(Error::DuplicateCommand(AuthorRevision(revision)));
-        }
-        if command.expected != world.revision {
-            return Err(Error::RevisionConflict {
-                expected: command.expected,
-                actual: world.revision,
-            });
-        }
-        let revision = world
-            .revision
-            .0
-            .checked_add(1)
-            .ok_or(Error::InvalidRevision)?;
-        tx.execute(
-            "INSERT INTO author_revisions (world_id, revision, branch_id, command_id, author, rationale)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![world.id.0.as_bytes(), revision, command.branch.0.as_bytes(), command.id.as_bytes(),
-                command.author, command.rationale],
+        let branch = command.branch;
+        let fork = load_fork(&tx, world.id, branch, world.revision)?;
+        let revision = append_revision(
+            &tx,
+            &world,
+            branch,
+            command.expected,
+            command.id,
+            (&command.author, &command.rationale),
         )?;
         let mut changed = HashSet::new();
         for change in &command.changes {
@@ -132,58 +170,7 @@ impl Store {
             if !changed.insert(object.id) {
                 return Err(Error::RepeatedObject);
             }
-            let branch = command.branch;
-            let state_revision = match change {
-                Change::Create(..) => revision,
-                Change::Correct(..) => {
-                    let (state, _) =
-                        latest_state(&tx, object, branch, None)?.ok_or(Error::NotFound)?;
-                    if let Some((_, previous)) = latest_state(&tx, object, branch, Some(state))?
-                        && !matches!(
-                            (previous.record.valid.end_exclusive, record.valid.start),
-                            (Some(end), Some(start)) if end <= start
-                        )
-                    {
-                        return Err(Error::InvalidInterval);
-                    }
-                    state
-                }
-                Change::RecordState(..) => {
-                    let start = record.valid.start.ok_or(Error::InvalidInterval)?;
-                    let (state, mut previous) =
-                        latest_state(&tx, object, branch, None)?.ok_or(Error::NotFound)?;
-                    if previous.record.valid.start.is_some_and(|day| day >= start) {
-                        return Err(Error::InvalidInterval);
-                    }
-                    if previous
-                        .record
-                        .valid
-                        .end_exclusive
-                        .is_none_or(|day| day > start)
-                    {
-                        previous.record.valid.end_exclusive = Some(start);
-                        write_version(
-                            &tx,
-                            branch,
-                            revision,
-                            state,
-                            object,
-                            &previous.record,
-                            false,
-                        )?;
-                    }
-                    revision
-                }
-            };
-            write_version(
-                &tx,
-                branch,
-                revision,
-                state_revision,
-                object,
-                record,
-                matches!(change, Change::Create(..)),
-            )?;
+            apply_change(&tx, branch, fork, revision, change, object, record)?;
             tx.execute(
                 "INSERT INTO invalidations (world_id, revision, object_id) VALUES (?1, ?2, ?3)",
                 params![object.world.0.as_bytes(), revision, object.id.0.as_bytes()],
@@ -205,29 +192,10 @@ impl Store {
         // Keep the context check and object query on the same read snapshot.
         let tx = self.conn.unchecked_transaction()?;
         let world = load_world(&tx, view.world)?;
-        if view.branch != world.main {
-            return Err(Error::NotFound);
-        }
         if view.revision < AuthorRevision(0) || view.revision > world.revision {
             return Err(Error::InvalidRevision);
         }
-        let version = tx.query_row(
-            "SELECT revision, kind, label, valid_start, valid_end, event_day, citation, source_id,
-                    earliest_day, latest_day, date_label
-             FROM object_versions AS v
-             WHERE world_id = ?1 AND object_id = ?2 AND branch_id = ?3 AND revision <= ?4
-               AND (valid_start IS NULL OR valid_start <= ?5)
-               AND (valid_end IS NULL OR valid_end > ?5)
-               AND NOT EXISTS (
-                   SELECT 1 FROM object_versions AS newer
-                   WHERE newer.world_id = v.world_id AND newer.object_id = v.object_id
-                     AND newer.branch_id = v.branch_id AND newer.state_revision = v.state_revision
-                     AND newer.revision > v.revision AND newer.revision <= ?4
-               )
-             ORDER BY state_revision DESC LIMIT 1",
-            params![object.world.0.as_bytes(), object.id.0.as_bytes(), view.branch.0.as_bytes(), view.revision.0, view.day.0],
-            |row| read_version(row, object),
-        ).optional()?;
+        let version = resolve_object(&tx, object, view.branch, view.revision, view.day)?;
         tx.commit()?;
         Ok(version)
     }
@@ -261,6 +229,312 @@ impl Store {
         }
         Ok(())
     }
+}
+
+fn append_revision(
+    tx: &Transaction<'_>,
+    world: &World,
+    branch: BranchId,
+    expected: AuthorRevision,
+    id: Uuid,
+    details: (&str, &str),
+) -> Result<i64, Error> {
+    validate_text(details.0, "command author")?;
+    validate_text(details.1, "command rationale")?;
+    if let Some(revision) = tx
+        .query_row(
+            "SELECT revision FROM author_revisions WHERE world_id = ?1 AND command_id = ?2",
+            params![world.id.0.as_bytes(), id.as_bytes()],
+            |row| row.get(0),
+        )
+        .optional()?
+    {
+        return Err(Error::DuplicateCommand(AuthorRevision(revision)));
+    }
+    if expected != world.revision {
+        return Err(Error::RevisionConflict {
+            expected,
+            actual: world.revision,
+        });
+    }
+    let revision = world
+        .revision
+        .0
+        .checked_add(1)
+        .ok_or(Error::InvalidRevision)?;
+    tx.execute(
+        "INSERT INTO author_revisions (world_id, revision, branch_id, command_id, author, rationale)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![world.id.0.as_bytes(), revision, branch.0.as_bytes(), id.as_bytes(), details.0, details.1],
+    )?;
+    Ok(revision)
+}
+
+fn load_fork(
+    conn: &Connection,
+    world: WorldId,
+    branch: BranchId,
+    at: AuthorRevision,
+) -> Result<Option<Fork>, Error> {
+    conn.query_row(
+        "SELECT f.parent_id, f.fork_day, f.inherited_revision, f.created_revision
+         FROM branches b LEFT JOIN branch_forks f ON f.world_id = b.world_id AND f.branch_id = b.id
+         WHERE b.world_id = ?1 AND b.id = ?2 AND (b.is_main = 1 OR f.created_revision <= ?3)",
+        params![world.0.as_bytes(), branch.0.as_bytes(), at.0],
+        |row| match row.get::<_, Option<[u8; 16]>>(0)? {
+            Some(parent) => Ok(Some(Fork {
+                id: branch,
+                parent: BranchId(Uuid::from_bytes(parent)),
+                day: WorldDay(row.get(1)?),
+                inherited_revision: AuthorRevision(row.get(2)?),
+                created_revision: AuthorRevision(row.get(3)?),
+            })),
+            None => Ok(None),
+        },
+    )
+    .optional()?
+    .ok_or(Error::NotFound)
+}
+
+fn override_start(
+    conn: &Connection,
+    object: ObjectRef,
+    branch: BranchId,
+    at: AuthorRevision,
+) -> Result<Option<WorldDay>, Error> {
+    Ok(conn
+        .query_row(
+            "SELECT starts_at FROM branch_overrides
+         WHERE world_id = ?1 AND branch_id = ?2 AND object_id = ?3 AND revision <= ?4",
+            params![
+                object.world.0.as_bytes(),
+                branch.0.as_bytes(),
+                object.id.0.as_bytes(),
+                at.0
+            ],
+            |row| row.get(0).map(WorldDay),
+        )
+        .optional()?)
+}
+
+fn resolve_object(
+    conn: &Connection,
+    object: ObjectRef,
+    mut branch: BranchId,
+    mut revision: AuthorRevision,
+    requested_day: WorldDay,
+) -> Result<Option<Version>, Error> {
+    let mut day = requested_day;
+    let mut cutoff = None;
+    while let Some(fork) = load_fork(conn, object.world, branch, revision)? {
+        if day >= fork.day
+            && override_start(conn, object, branch, revision)?.is_some_and(|start| start <= day)
+        {
+            break;
+        }
+        cutoff = Some(cutoff.map_or(fork.day, |bound: WorldDay| bound.min(fork.day)));
+        day = day.min(fork.day);
+        branch = fork.parent;
+        revision = fork.inherited_revision;
+    }
+    let version = local_object_at(conn, object, branch, revision, day)?;
+    Ok(version.filter(|version| {
+        version
+            .record
+            .valid
+            .end_exclusive
+            .is_none_or(|end| requested_day < end)
+            && cutoff.is_none_or(|bound| match &version.record.data {
+                ObjectData::HistoricalEvent { occurrence } => match occurrence {
+                    EventDate::Exact(day) => *day <= bound,
+                    EventDate::Uncertain { latest, .. } => latest.is_some_and(|day| day <= bound),
+                    EventDate::Unknown => false,
+                },
+                _ => true,
+            })
+    }))
+}
+
+fn local_object_at(
+    conn: &Connection,
+    object: ObjectRef,
+    branch: BranchId,
+    revision: AuthorRevision,
+    day: WorldDay,
+) -> Result<Option<Version>, Error> {
+    Ok(conn
+        .query_row(
+            "SELECT revision, kind, label, valid_start, valid_end, event_day, citation, source_id,
+                    earliest_day, latest_day, date_label
+             FROM object_versions AS v
+             WHERE world_id = ?1 AND object_id = ?2 AND branch_id = ?3 AND revision <= ?4
+               AND (valid_start IS NULL OR valid_start <= ?5)
+               AND (valid_end IS NULL OR valid_end > ?5)
+               AND NOT EXISTS (
+                   SELECT 1 FROM object_versions AS newer
+                   WHERE newer.world_id = v.world_id AND newer.object_id = v.object_id
+                     AND newer.branch_id = v.branch_id AND newer.state_revision = v.state_revision
+                     AND newer.revision > v.revision AND newer.revision <= ?4
+               )
+             ORDER BY state_revision DESC LIMIT 1",
+            params![
+                object.world.0.as_bytes(),
+                object.id.0.as_bytes(),
+                branch.0.as_bytes(),
+                revision.0,
+                day.0
+            ],
+            |row| read_version(row, object, branch),
+        )
+        .optional()?)
+}
+
+fn written_on_lineage(
+    conn: &Connection,
+    source: ObjectRef,
+    mut branch: BranchId,
+    mut revision: AuthorRevision,
+) -> Result<bool, Error> {
+    loop {
+        let exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM object_versions
+             WHERE world_id = ?1 AND object_id = ?2 AND branch_id = ?3 AND revision <= ?4)",
+            params![
+                source.world.0.as_bytes(),
+                source.id.0.as_bytes(),
+                branch.0.as_bytes(),
+                revision.0
+            ],
+            |row| row.get(0),
+        )?;
+        if exists {
+            return Ok(true);
+        }
+        let Some(fork) = load_fork(conn, source.world, branch, revision)? else {
+            return Ok(false);
+        };
+        branch = fork.parent;
+        revision = fork.inherited_revision;
+    }
+}
+
+fn apply_change(
+    tx: &Transaction<'_>,
+    branch: BranchId,
+    fork: Option<Fork>,
+    revision: i64,
+    change: &Change,
+    object: ObjectRef,
+    record: &Record,
+) -> Result<(), Error> {
+    let prior_revision = AuthorRevision(revision - 1);
+    let existing = latest_state(tx, object, branch, None)?;
+    let mut new_override = None;
+    let mut local_boundary = None;
+    if let Some(fork) = fork {
+        let current = override_start(tx, object, branch, prior_revision)?;
+        let boundary = current.unwrap_or(fork.day);
+        local_boundary = Some(boundary);
+        if record.valid.start.is_some_and(|day| day < boundary)
+            || record
+                .valid
+                .end_exclusive
+                .is_some_and(|day| day <= boundary)
+        {
+            return Err(Error::BeforeFork);
+        }
+        let inherited = if current.is_none() && !matches!(change, Change::Create(..)) {
+            Some(
+                resolve_object(tx, object, branch, prior_revision, fork.day)?
+                    .ok_or(Error::NotFound)?,
+            )
+        } else {
+            None
+        };
+        if let ObjectData::HistoricalEvent { occurrence } = &record.data {
+            let previous = existing
+                .as_ref()
+                .map(|(_, version)| version)
+                .or(inherited.as_ref());
+            let occurrence_unchanged =
+                previous.is_some_and(|version| version.record.data == record.data);
+            let may_predate_fork = match occurrence {
+                EventDate::Exact(day) => *day < fork.day,
+                EventDate::Uncertain { earliest, .. } => earliest.is_none_or(|day| day < fork.day),
+                EventDate::Unknown => false,
+            };
+            if may_predate_fork && !occurrence_unchanged {
+                return Err(Error::BeforeFork);
+            }
+        }
+        if current.is_none() {
+            new_override = Some(match change {
+                Change::RecordState(..) => record.valid.start.ok_or(Error::InvalidInterval)?,
+                _ => fork.day,
+            });
+        }
+    }
+    let state_revision = match (change, existing) {
+        (Change::Create(..), _) => revision,
+        (Change::Correct(..), Some((state, _))) => {
+            if let Some((_, previous)) = latest_state(tx, object, branch, Some(state))?
+                && !matches!(
+                    (previous.record.valid.end_exclusive, record.valid.start),
+                    (Some(end), Some(start)) if end <= start
+                )
+            {
+                return Err(Error::InvalidInterval);
+            }
+            state
+        }
+        (Change::RecordState(..), Some((state, mut previous))) => {
+            let start = record.valid.start.ok_or(Error::InvalidInterval)?;
+            if previous
+                .record
+                .valid
+                .start
+                .or(local_boundary)
+                .is_some_and(|day| day >= start)
+            {
+                return Err(Error::InvalidInterval);
+            }
+            if previous
+                .record
+                .valid
+                .end_exclusive
+                .is_none_or(|day| day > start)
+            {
+                previous.record.valid.end_exclusive = Some(start);
+                write_version(tx, branch, revision, state, object, &previous.record, false)?;
+            }
+            revision
+        }
+        (_, None) if new_override.is_some() => revision,
+        (_, None) => return Err(Error::NotFound),
+    };
+    write_version(
+        tx,
+        branch,
+        revision,
+        state_revision,
+        object,
+        record,
+        matches!(change, Change::Create(..)),
+    )?;
+    if let Some(start) = new_override {
+        tx.execute(
+            "INSERT INTO branch_overrides (world_id, branch_id, object_id, revision, starts_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                object.world.0.as_bytes(),
+                branch.0.as_bytes(),
+                object.id.0.as_bytes(),
+                revision,
+                start.0
+            ],
+        )?;
+    }
+    Ok(())
 }
 
 fn require_author(scope: Scope) -> Result<(), Error> {
@@ -327,7 +601,7 @@ fn latest_state(
                 branch.0.as_bytes(),
                 before
             ],
-            |row| Ok((row.get(11)?, read_version(row, object)?)),
+            |row| Ok((row.get(11)?, read_version(row, object, branch)?)),
         )
         .optional()?)
 }
@@ -384,7 +658,9 @@ fn write_version(
             return Err(Error::InvalidInput("self-citation"));
         }
         match kind_of(tx, source)?.as_deref() {
-            Some("source") => {}
+            Some("source") if written_on_lineage(tx, source, branch, AuthorRevision(revision))? => {
+            }
+            Some("source") => return Err(Error::NotFound),
             Some(_) => return Err(Error::WrongKind),
             None => return Err(Error::NotFound),
         }
@@ -428,7 +704,11 @@ fn write_version(
     Ok(())
 }
 
-fn read_version(row: &rusqlite::Row<'_>, object: ObjectRef) -> rusqlite::Result<Version> {
+fn read_version(
+    row: &rusqlite::Row<'_>,
+    object: ObjectRef,
+    branch: BranchId,
+) -> rusqlite::Result<Version> {
     let data = match row.get::<_, String>(1)?.as_str() {
         "person" => ObjectData::Person,
         "historical_event" => {
@@ -455,6 +735,7 @@ fn read_version(row: &rusqlite::Row<'_>, object: ObjectRef) -> rusqlite::Result<
     Ok(Version {
         object,
         recorded_at: AuthorRevision(row.get(0)?),
+        source_branch: branch,
         record: Record {
             label: row.get(2)?,
             valid: ValidInterval {

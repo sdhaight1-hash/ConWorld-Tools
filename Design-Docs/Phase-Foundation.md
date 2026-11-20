@@ -27,7 +27,7 @@ The tests introduce a small Northbridge persistence fixture. Extend it as typed 
 
 The Phase One branch builds on the desktop and WASM renderer from Phase Zero. The root workspace has one lockfile for `atlas-desktop`, `atlas-renderer`, and `atlas-store`. The store remains a Rust library. The desktop still opens the read-only platform fixture through Tauri IPC.
 
-On Linux, workspace formatting, strict Clippy, the desktop scene test, and all eight persistence integration tests passed together. The dedicated persistence workflow builds only `atlas-store` so it can also run without native desktop libraries.
+On Linux, workspace formatting, strict Clippy, the desktop scene test, and the persistence integration tests passed together at workspace integration. The pinned-fork update then passed eleven store integration tests locally. The dedicated persistence workflow builds only `atlas-store` so it can also run without native desktop libraries.
 
 ## Verified in the first slice
 
@@ -46,6 +46,7 @@ cargo test -p atlas-store --locked
 | AT-16, occurrence slice | Preserved normalized uncertainty bounds and the original label. Distinguished possible, definite and unestablished days |
 | AT-26 | Rejected cross-world references and wrong-kind sources, and denied public scope before reads |
 | AT-33, persistence batch | Rolled back identities, versions, audit and invalidation rows. Retried successfully and rejected duplicate and stale commands |
+| AT-14, exact-day forks | A child retained its pinned parent history, diverged after the cut, and reopened from a backup. Nested forks kept sibling evidence isolated, and invalid pre-fork edits rolled back. |
 | Successive fictional states | A later fictional name preserves the earlier interval at the same author revision. Corrections and schema-v1 migration retain prior author views. |
 | Migration guard | Refused a newer schema without rewriting its version |
 

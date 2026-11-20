@@ -109,6 +109,7 @@ pub struct Version {
     pub object: ObjectRef,
     pub record: Record,
     pub recorded_at: AuthorRevision,
+    pub source_branch: BranchId,
 }
 
 #[derive(Clone, Debug)]
@@ -148,6 +149,27 @@ pub struct Command {
     pub changes: Vec<Change>,
 }
 
+#[derive(Clone, Debug)]
+pub struct ForkCommand {
+    pub world: WorldId,
+    pub parent: BranchId,
+    pub day: WorldDay,
+    pub expected: AuthorRevision,
+    pub id: Uuid,
+    pub author: String,
+    pub rationale: String,
+    pub scope: Scope,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Fork {
+    pub id: BranchId,
+    pub parent: BranchId,
+    pub day: WorldDay,
+    pub inherited_revision: AuthorRevision,
+    pub created_revision: AuthorRevision,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("the requested operation requires the local author scope")]
@@ -164,6 +186,8 @@ pub enum Error {
     RepeatedObject,
     #[error("the end of a valid interval must follow its start")]
     InvalidInterval,
+    #[error("the edit would change history before the branch boundary")]
+    BeforeFork,
     #[error("invalid uncertain occurrence bounds")]
     InvalidOccurrence,
     #[error("the requested author revision is outside the world's recorded history")]

@@ -494,3 +494,343 @@ fn version_one_database_retains_corrections_on_upgrade() -> Result<(), Error> {
     );
     store.verify_foreign_keys(Scope::Author)
 }
+
+fn fork_command(world: &World, parent: BranchId, at: i64, expected: AuthorRevision) -> ForkCommand {
+    ForkCommand {
+        world: world.id,
+        parent,
+        day: WorldDay(at),
+        expected,
+        id: Uuid::new_v4(),
+        author: "Northbridge author".into(),
+        rationale: "Alternate history".into(),
+        scope: Scope::Author,
+    }
+}
+
+#[test]
+fn at_14_fork_pins_history_and_isolates_successive_child_states() -> Result<(), Error> {
+    let dir = tempdir()?;
+    let path = dir.path().join("atlas.sqlite");
+    let backup = dir.path().join("snapshot.sqlite");
+    let mut store = Store::open(&path)?;
+    let world = store.create_world("Northbridge", Scope::Author)?;
+    let alice = ObjectRef::new(world.id);
+    let event = ObjectRef::new(world.id);
+    let first = store.apply(&command(
+        &world,
+        world.revision,
+        vec![
+            Change::Create(alice, person("Alice Vale")),
+            Change::Create(
+                event,
+                Record {
+                    label: "Planned succession".into(),
+                    data: ObjectData::HistoricalEvent {
+                        occurrence: EventDate::Exact(WorldDay(20)),
+                    },
+                    valid: ValidInterval::default(),
+                    source: None,
+                },
+            ),
+        ],
+    ))?;
+    let request = fork_command(&world, world.main, 10, first);
+    let child = store.fork(&request)?;
+    assert_eq!(child.inherited_revision, first);
+    assert_eq!(child.parent, world.main);
+    assert!(
+        matches!(store.fork(&request), Err(Error::DuplicateCommand(revision)) if revision == child.created_revision)
+    );
+
+    let parent_revision = store.apply(&command(
+        &world,
+        child.created_revision,
+        vec![Change::Correct(alice, person("Alice corrected on main"))],
+    ))?;
+    let mut edit = command(
+        &world,
+        parent_revision,
+        vec![Change::RecordState(
+            alice,
+            Record {
+                valid: ValidInterval {
+                    start: Some(WorldDay(13)),
+                    end_exclusive: None,
+                },
+                ..person("Alice of the Guild")
+            },
+        )],
+    );
+    edit.branch = child.id;
+    let child_revision = store.apply(&edit)?;
+    store.backup_to(&backup, Scope::Author)?;
+    drop(store);
+
+    let store = Store::open(backup)?;
+    assert_eq!(
+        store.branch_fork(world.id, child.id, child_revision, Scope::Author)?,
+        Some(child)
+    );
+    assert_eq!(
+        store.branch_fork(world.id, world.main, child_revision, Scope::Author)?,
+        None
+    );
+    assert!(matches!(
+        store.branch_fork(world.id, child.id, child_revision, Scope::Public),
+        Err(Error::CapabilityDenied)
+    ));
+    let in_child = |revision, day| ViewContext {
+        branch: child.id,
+        ..view(&world, revision, day)
+    };
+    assert!(matches!(
+        store.get_object(alice, in_child(first, 9)),
+        Err(Error::NotFound)
+    ));
+    for (revision, day, label, source_branch) in [
+        (child_revision, 9, "Alice Vale", world.main),
+        (child_revision, 12, "Alice Vale", world.main),
+        (child_revision, 13, "Alice of the Guild", child.id),
+        (parent_revision, 13, "Alice Vale", world.main),
+    ] {
+        let result = store.get_object(alice, in_child(revision, day))?.unwrap();
+        assert_eq!(result.record.label, label);
+        assert_eq!(result.source_branch, source_branch);
+    }
+    assert!(
+        store
+            .get_object(event, in_child(child_revision, 20))?
+            .is_none()
+    );
+    assert!(
+        store
+            .get_object(event, view(&world, child_revision, 20))?
+            .is_some()
+    );
+    assert_eq!(
+        store
+            .get_object(alice, view(&world, child_revision, 13))?
+            .unwrap()
+            .record
+            .label,
+        "Alice corrected on main"
+    );
+    store.verify_foreign_keys(Scope::Author)
+}
+
+#[test]
+fn nested_forks_isolate_sibling_evidence_and_reject_pre_fork_edits() -> Result<(), Error> {
+    let mut store = Store::open(":memory:")?;
+    let world = store.create_world("Northbridge", Scope::Author)?;
+    let alice = ObjectRef::new(world.id);
+    let first = store.apply(&command(
+        &world,
+        world.revision,
+        vec![Change::Create(alice, person("Alice Vale"))],
+    ))?;
+    let child = store.fork(&fork_command(&world, world.main, 10, first))?;
+    assert!(matches!(
+        store.fork(&fork_command(&world, child.id, 9, child.created_revision)),
+        Err(Error::BeforeFork)
+    ));
+    let child_source = ObjectRef::new(world.id);
+    let mut edit = command(
+        &world,
+        child.created_revision,
+        vec![
+            Change::Create(
+                child_source,
+                Record {
+                    data: ObjectData::Source {
+                        citation: "Child ledger".into(),
+                    },
+                    ..person("Ledger")
+                },
+            ),
+            Change::Correct(
+                alice,
+                Record {
+                    source: Some(child_source),
+                    ..person("Alice in child")
+                },
+            ),
+        ],
+    );
+    edit.branch = child.id;
+    let child_revision = store.apply(&edit)?;
+    let grandchild = store.fork(&fork_command(&world, child.id, 12, child_revision))?;
+    let sibling = store.fork(&fork_command(
+        &world,
+        world.main,
+        10,
+        grandchild.created_revision,
+    ))?;
+    let mut invalid = command(
+        &world,
+        sibling.created_revision,
+        vec![Change::Correct(
+            alice,
+            Record {
+                source: Some(child_source),
+                ..person("Alice in sibling")
+            },
+        )],
+    );
+    invalid.branch = sibling.id;
+    assert!(matches!(store.apply(&invalid), Err(Error::NotFound)));
+    invalid.changes = vec![Change::Correct(
+        alice,
+        Record {
+            valid: ValidInterval {
+                start: Some(WorldDay(9)),
+                end_exclusive: None,
+            },
+            ..person("Too early")
+        },
+    )];
+    assert!(matches!(store.apply(&invalid), Err(Error::BeforeFork)));
+    assert_eq!(
+        store.world(world.id, Scope::Author)?.revision,
+        sibling.created_revision
+    );
+    let inherited = ViewContext {
+        branch: grandchild.id,
+        ..view(&world, sibling.created_revision, 13)
+    };
+    assert_eq!(
+        store.get_object(alice, inherited)?.unwrap().record.label,
+        "Alice in child"
+    );
+    assert_eq!(
+        store
+            .get_object(child_source, inherited)?
+            .unwrap()
+            .source_branch,
+        child.id
+    );
+    assert!(
+        store
+            .get_object(
+                child_source,
+                ViewContext {
+                    branch: sibling.id,
+                    ..inherited
+                }
+            )?
+            .is_none()
+    );
+    Ok(())
+}
+
+#[test]
+fn fork_respects_inherited_expiration_and_keeps_corrected_overlay_gaps() -> Result<(), Error> {
+    let mut store = Store::open(":memory:")?;
+    let world = store.create_world("Northbridge", Scope::Author)?;
+    let person_id = ObjectRef::new(world.id);
+    let first = store.apply(&command(
+        &world,
+        world.revision,
+        vec![Change::Create(
+            person_id,
+            Record {
+                valid: ValidInterval {
+                    start: None,
+                    end_exclusive: Some(WorldDay(14)),
+                },
+                ..person("Alice Vale")
+            },
+        )],
+    ))?;
+    let child = store.fork(&fork_command(&world, world.main, 10, first))?;
+    let read = |rev, day| ViewContext {
+        branch: child.id,
+        ..view(&world, rev, day)
+    };
+    assert!(
+        store
+            .get_object(person_id, read(child.created_revision, 13))?
+            .is_some()
+    );
+    assert!(
+        store
+            .get_object(person_id, read(child.created_revision, 14))?
+            .is_none()
+    );
+
+    let mut edit = command(
+        &world,
+        child.created_revision,
+        vec![Change::RecordState(
+            person_id,
+            Record {
+                valid: ValidInterval {
+                    start: Some(WorldDay(12)),
+                    end_exclusive: None,
+                },
+                ..person("Alice of the Guild")
+            },
+        )],
+    );
+    edit.branch = child.id;
+    let rev = store.apply(&edit)?;
+    let mut correct = command(
+        &world,
+        rev,
+        vec![Change::Correct(
+            person_id,
+            Record {
+                valid: ValidInterval {
+                    start: Some(WorldDay(13)),
+                    end_exclusive: None,
+                },
+                ..person("Alice of the Guild, corrected")
+            },
+        )],
+    );
+    correct.branch = child.id;
+    let corrected_rev = store.apply(&correct)?;
+    assert_eq!(
+        store
+            .get_object(person_id, read(corrected_rev, 11))?
+            .unwrap()
+            .record
+            .label,
+        "Alice Vale"
+    );
+    assert!(
+        store
+            .get_object(person_id, read(corrected_rev, 12))?
+            .is_none()
+    );
+    assert!(store.get_object(person_id, read(rev, 12))?.is_some());
+    assert!(
+        store
+            .get_object(person_id, read(corrected_rev, 13))?
+            .is_some()
+    );
+
+    let mut backdated_event = command(
+        &world,
+        corrected_rev,
+        vec![Change::Create(
+            ObjectRef::new(world.id),
+            Record {
+                data: ObjectData::HistoricalEvent {
+                    occurrence: EventDate::Exact(WorldDay(9)),
+                },
+                ..person("Backdated succession")
+            },
+        )],
+    );
+    backdated_event.branch = child.id;
+    assert!(matches!(
+        store.apply(&backdated_event),
+        Err(Error::BeforeFork)
+    ));
+    assert_eq!(
+        store.world(world.id, Scope::Author)?.revision,
+        corrected_rev
+    );
+    Ok(())
+}
