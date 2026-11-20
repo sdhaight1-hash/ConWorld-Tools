@@ -50,13 +50,6 @@ pub struct ValidInterval {
     pub end_exclusive: Option<WorldDay>,
 }
 
-impl ValidInterval {
-    fn contains(self, day: WorldDay) -> bool {
-        self.start.is_none_or(|start| start <= day)
-            && self.end_exclusive.is_none_or(|end| day < end)
-    }
-}
-
 /// An occurrence on the world's normalized time axis.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum EventDate {
@@ -121,7 +114,10 @@ pub struct Version {
 #[derive(Clone, Debug)]
 pub enum Change {
     Create(ObjectRef, Record),
+    /// Replace the newest historical state at a new author revision.
     Correct(ObjectRef, Record),
+    /// Append a later historical state. Its start is required and closes a predecessor that overlaps it.
+    RecordState(ObjectRef, Record),
 }
 
 /// Scope comes from the trusted local host, outside the stored world data.

@@ -40,6 +40,7 @@ cargo test --workspace --locked
 | AT-16, occurrence slice | Preserved normalized uncertainty bounds and the original label. Distinguished possible, definite and unestablished days |
 | AT-26 | Rejected cross-world references and wrong-kind sources, and denied public scope before reads |
 | AT-33, persistence batch | Rolled back identities, versions, audit and invalidation rows. Retried successfully and rejected duplicate and stale commands |
+| Successive fictional states | A later fictional name preserves the earlier interval at the same author revision. Corrections and schema-v1 migration retain prior author views. |
 | Migration guard | Refused a newer schema without rewriting its version |
 
 AT-14 needs a parent/child fork implementation. AT-33's linked historical effects need the typed event/effect workflow. Windows desktop runtime, the WebGPU and accessible fallback paths, full archive roundtrip, and public projections are still open.

@@ -357,3 +357,140 @@ fn at_16_uncertain_dates_keep_their_bounds_and_original_label() -> Result<(), Er
     ));
     Ok(())
 }
+
+#[test]
+fn later_fictional_state_preserves_earlier_state_at_same_author_revision() -> Result<(), Error> {
+    let dir = tempdir()?;
+    let path = dir.path().join("atlas.sqlite");
+    let mut store = Store::open(&path)?;
+    let world = store.create_world("Northbridge", Scope::Author)?;
+    let alice = ObjectRef::new(world.id);
+    let first = store.apply(&command(
+        &world,
+        world.revision,
+        vec![Change::Create(alice, person("Alice Vale"))],
+    ))?;
+    let later = Record {
+        valid: ValidInterval {
+            start: Some(WorldDay(10)),
+            end_exclusive: None,
+        },
+        ..person("Alice Thorne")
+    };
+    let second = store.apply(&command(
+        &world,
+        first,
+        vec![Change::RecordState(alice, later.clone())],
+    ))?;
+    assert!(matches!(
+        store.apply(&command(
+            &world,
+            second,
+            vec![Change::RecordState(alice, later.clone())],
+        )),
+        Err(Error::InvalidInterval)
+    ));
+    let corrected = Record {
+        valid: ValidInterval {
+            start: Some(WorldDay(12)),
+            end_exclusive: None,
+        },
+        ..later
+    };
+    let third = store.apply(&command(
+        &world,
+        second,
+        vec![Change::Correct(alice, corrected)],
+    ))?;
+    drop(store);
+    let store = Store::open(&path)?;
+
+    for (revision, day, expected) in [
+        (first, 10, Some("Alice Vale")),
+        (second, 9, Some("Alice Vale")),
+        (second, 10, Some("Alice Thorne")),
+        (third, 9, Some("Alice Vale")),
+        (third, 10, None),
+        (third, 12, Some("Alice Thorne")),
+    ] {
+        let version = store.get_object(alice, view(&world, revision, day))?;
+        assert_eq!(
+            version.as_ref().map(|v| v.record.label.as_str()),
+            expected,
+            "{revision:?} {day}"
+        );
+    }
+    store.verify_foreign_keys(Scope::Author)?;
+    Ok(())
+}
+
+#[test]
+fn version_one_database_retains_corrections_on_upgrade() -> Result<(), Error> {
+    let dir = tempdir()?;
+    let path = dir.path().join("v1.sqlite");
+    let conn = rusqlite::Connection::open(&path)?;
+    conn.pragma_update(None, "foreign_keys", true)?;
+    conn.pragma_update(None, "application_id", 0x4357_4c44_i64)?;
+    conn.pragma_update(None, "user_version", 1)?;
+    conn.execute_batch(include_str!("../migrations/0001.sql"))?;
+    let world = World {
+        id: WorldId(Uuid::from_u128(1)),
+        name: "Legacy Northbridge".into(),
+        main: BranchId(Uuid::from_u128(2)),
+        revision: AuthorRevision(2),
+    };
+    let event = ObjectRef {
+        world: world.id,
+        id: ObjectId(Uuid::from_u128(3)),
+    };
+    let world_id = world.id.0.as_bytes();
+    let branch_id = world.main.0.as_bytes();
+    conn.execute(
+        "INSERT INTO worlds VALUES (?1, ?2)",
+        rusqlite::params![world_id, world.name],
+    )?;
+    conn.execute(
+        "INSERT INTO branches VALUES (?1, ?2, 1)",
+        rusqlite::params![world_id, branch_id],
+    )?;
+    conn.execute(
+        "INSERT INTO objects VALUES (?1, ?2, 'historical_event')",
+        rusqlite::params![world_id, event.id.0.as_bytes()],
+    )?;
+    for (revision, day, label) in [(1, 10, "Old account"), (2, 12, "Corrected account")] {
+        conn.execute(
+            "INSERT INTO author_revisions (world_id, revision, branch_id, command_id, author, rationale)
+             VALUES (?1, ?2, ?3, ?4, 'author', 'test')",
+            rusqlite::params![world_id, revision, branch_id, Uuid::from_u128(10 + revision as u128).as_bytes()],
+        )?;
+        conn.execute(
+            "INSERT INTO object_versions (world_id, object_id, branch_id, revision, kind, label, valid_start, valid_end, event_day)
+             VALUES (?1, ?2, ?3, ?4, 'historical_event', ?5, ?6, ?7, ?6)",
+            rusqlite::params![world_id, event.id.0.as_bytes(), branch_id, revision, label, day, day + 1],
+        )?;
+    }
+    drop(conn);
+    let store = Store::open(&path)?;
+    assert_eq!(
+        store
+            .get_object(event, view(&world, AuthorRevision(1), 10))?
+            .unwrap()
+            .record
+            .label,
+        "Old account"
+    );
+    assert!(
+        store
+            .get_object(event, view(&world, AuthorRevision(2), 10))?
+            .is_none()
+    );
+    assert_eq!(
+        store
+            .get_object(event, view(&world, AuthorRevision(2), 12))?
+            .unwrap()
+            .record
+            .label,
+        "Corrected account"
+    );
+    store.verify_foreign_keys(Scope::Author)
+}

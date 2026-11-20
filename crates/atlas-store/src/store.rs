@@ -9,7 +9,7 @@ use uuid::Uuid;
 use crate::*;
 
 const APPLICATION_ID: i64 = 0x4357_4c44; // CWLD
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 pub struct Store {
     conn: Connection,
@@ -37,10 +37,13 @@ impl Store {
                 }
                 tx.execute_batch(include_str!("../migrations/0001.sql"))?;
                 tx.pragma_update(None, "application_id", APPLICATION_ID)?;
-                tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             }
-            SCHEMA_VERSION if application_id == APPLICATION_ID => {}
+            1..=SCHEMA_VERSION if application_id == APPLICATION_ID => {}
             _ => return Err(Error::WrongDatabase),
+        }
+        if version < 2 {
+            tx.execute_batch(include_str!("../migrations/0002.sql"))?;
+            tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
         tx.commit()?;
         Ok(Self { conn })
@@ -119,9 +122,9 @@ impl Store {
         let mut changed = HashSet::new();
         for change in &command.changes {
             let (object, record) = match change {
-                Change::Create(object, record) | Change::Correct(object, record) => {
-                    (*object, record)
-                }
+                Change::Create(object, record)
+                | Change::Correct(object, record)
+                | Change::RecordState(object, record) => (*object, record),
             };
             if object.world != world.id {
                 return Err(Error::WrongWorld);
@@ -129,13 +132,61 @@ impl Store {
             if !changed.insert(object.id) {
                 return Err(Error::RepeatedObject);
             }
+            let branch = command.branch;
+            let state_revision = match change {
+                Change::Create(..) => revision,
+                Change::Correct(..) => {
+                    let (state, _) =
+                        latest_state(&tx, object, branch, None)?.ok_or(Error::NotFound)?;
+                    if let Some((_, previous)) = latest_state(&tx, object, branch, Some(state))?
+                        && !matches!(
+                            (previous.record.valid.end_exclusive, record.valid.start),
+                            (Some(end), Some(start)) if end <= start
+                        )
+                    {
+                        return Err(Error::InvalidInterval);
+                    }
+                    state
+                }
+                Change::RecordState(..) => {
+                    let start = record.valid.start.ok_or(Error::InvalidInterval)?;
+                    let (state, mut previous) =
+                        latest_state(&tx, object, branch, None)?.ok_or(Error::NotFound)?;
+                    if previous.record.valid.start.is_some_and(|day| day >= start) {
+                        return Err(Error::InvalidInterval);
+                    }
+                    if previous
+                        .record
+                        .valid
+                        .end_exclusive
+                        .is_none_or(|day| day > start)
+                    {
+                        previous.record.valid.end_exclusive = Some(start);
+                        write_version(
+                            &tx,
+                            branch,
+                            revision,
+                            state,
+                            object,
+                            &previous.record,
+                            false,
+                        )?;
+                    }
+                    revision
+                }
+            };
             write_version(
                 &tx,
-                command.branch,
+                branch,
                 revision,
+                state_revision,
                 object,
                 record,
                 matches!(change, Change::Create(..)),
+            )?;
+            tx.execute(
+                "INSERT INTO invalidations (world_id, revision, object_id) VALUES (?1, ?2, ?3)",
+                params![object.world.0.as_bytes(), revision, object.id.0.as_bytes()],
             )?;
         }
         tx.commit()?;
@@ -163,14 +214,22 @@ impl Store {
         let version = tx.query_row(
             "SELECT revision, kind, label, valid_start, valid_end, event_day, citation, source_id,
                     earliest_day, latest_day, date_label
-             FROM object_versions
+             FROM object_versions AS v
              WHERE world_id = ?1 AND object_id = ?2 AND branch_id = ?3 AND revision <= ?4
-             ORDER BY revision DESC LIMIT 1",
-            params![object.world.0.as_bytes(), object.id.0.as_bytes(), view.branch.0.as_bytes(), view.revision.0],
+               AND (valid_start IS NULL OR valid_start <= ?5)
+               AND (valid_end IS NULL OR valid_end > ?5)
+               AND NOT EXISTS (
+                   SELECT 1 FROM object_versions AS newer
+                   WHERE newer.world_id = v.world_id AND newer.object_id = v.object_id
+                     AND newer.branch_id = v.branch_id AND newer.state_revision = v.state_revision
+                     AND newer.revision > v.revision AND newer.revision <= ?4
+               )
+             ORDER BY state_revision DESC LIMIT 1",
+            params![object.world.0.as_bytes(), object.id.0.as_bytes(), view.branch.0.as_bytes(), view.revision.0, view.day.0],
             |row| read_version(row, object),
         ).optional()?;
         tx.commit()?;
-        Ok(version.filter(|version| version.record.valid.contains(view.day)))
+        Ok(version)
     }
 
     pub fn verify_foreign_keys(&self, scope: Scope) -> Result<(), Error> {
@@ -248,10 +307,36 @@ fn kind_of(conn: &Connection, object: ObjectRef) -> Result<Option<String>, Error
         .optional()?)
 }
 
+fn latest_state(
+    conn: &Connection,
+    object: ObjectRef,
+    branch: BranchId,
+    before: Option<i64>,
+) -> Result<Option<(i64, Version)>, Error> {
+    Ok(conn
+        .query_row(
+            "SELECT revision, kind, label, valid_start, valid_end, event_day, citation, source_id,
+                earliest_day, latest_day, date_label, state_revision
+         FROM object_versions
+         WHERE world_id = ?1 AND object_id = ?2 AND branch_id = ?3
+           AND (?4 IS NULL OR state_revision < ?4)
+         ORDER BY state_revision DESC, revision DESC LIMIT 1",
+            params![
+                object.world.0.as_bytes(),
+                object.id.0.as_bytes(),
+                branch.0.as_bytes(),
+                before
+            ],
+            |row| Ok((row.get(11)?, read_version(row, object)?)),
+        )
+        .optional()?)
+}
+
 fn write_version(
     tx: &Transaction<'_>,
     branch: BranchId,
     revision: i64,
+    state_revision: i64,
     object: ObjectRef,
     record: &Record,
     create: bool,
@@ -320,8 +405,8 @@ fn write_version(
         "INSERT INTO object_versions (
              world_id, object_id, branch_id, revision, kind, label,
              valid_start, valid_end, event_day, citation, source_id,
-             earliest_day, latest_day, date_label
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+             earliest_day, latest_day, date_label, state_revision
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
         params![
             object.world.0.as_bytes(),
             object.id.0.as_bytes(),
@@ -337,11 +422,8 @@ fn write_version(
             earliest,
             latest,
             date_label,
+            state_revision,
         ],
-    )?;
-    tx.execute(
-        "INSERT INTO invalidations (world_id, revision, object_id) VALUES (?1, ?2, ?3)",
-        params![object.world.0.as_bytes(), revision, object.id.0.as_bytes()],
     )?;
     Ok(())
 }
