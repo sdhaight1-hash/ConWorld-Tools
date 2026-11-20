@@ -55,6 +55,8 @@ The older files are historical design inputs, **not alternate live specification
 14. **Uncertain date versus exact surrogate:** store uncertainty and 3-valued query result; never invent a day from year-only input.
 15. **Large one-shot program versus vertical proofs:** coherent architecture now, small tested milestones in issues.
 
+The [Phase Zero architecture baseline](ADRs/phase-0-architecture-baseline.md) records the implemented shell and initial decisions for ADR-001, ADR-002, ADR-005, ADR-006, ADR-007 and ADR-011. The [verification log](Phase-0-Verification.md) records platform evidence and open gates. The [Phase One persistence ADR](ADRs/phase-1-persistence-slice.md) records the initial storage and historical-state behavior.
+
 ## Open decisions requiring specific ADRs
 
 | ADR | Question | Time to decide | Required evidence |
@@ -76,8 +78,8 @@ The older files are historical design inputs, **not alternate live specification
 
 ## Change control
 
-Any change to an accepted decision must have an ADR with context, alternatives, impact on invariants, migration strategy, test evidence and specific superseded sections. Update this table and affected specialist spec *together*. Preserve original author intent and use the canonical GitHub repository path, `sdhaight1-hash/ConWorld-Tools`, for downstream issues.
+Any change to an accepted decision must have an ADR with context, alternatives, impact on invariants, migration strategy, test evidence and specific superseded sections. Update this table and affected specialist spec *together*. Preserve original author intent and keep downstream phase issues linked to the canonical repository, `sdhaight1-hash/ConWorld-Tools`.
 
 ## Verification limits
 
-The predecessor packages included a foundational SQLite smoke test. It does **not** prove Rust, WebGPU, Tauri, search, publishing or DNA have been implemented. The [implementation foundation](Phase-Foundation.md) records scenarios executed by the first Rust store. See the [persistence ADR](ADRs/phase-1-persistence-slice.md) for the initial decisions on ADR-001, ADR-003, ADR-005, ADR-006 and ADR-007.
+The predecessor packages included a foundational SQLite smoke test. It does **not** prove Rust, WebGPU, Tauri, search, publishing or DNA have been implemented. The new repository began empty, and these files are **specifications**, not executable products. No acceptance scenario should be marked passed until implemented and actually run.

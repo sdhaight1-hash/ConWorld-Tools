@@ -39,7 +39,17 @@ That same history can be explored through a graph, searched by date or affiliati
 
 The selected architectural direction is **Rust** for the authoritative domain, data, history, and query systems; **HTML/CSS/TypeScript** within **Tauri 2** for the desktop interface; **wgpu** for accelerated graph/map/timeline visualization where supported; and **SQLite** for local, versioned world storage. The GPU/webview integration must be validated, with an accessible non-GPU fallback. External AI and NPC-simulation integration is optional rather than required to use the application.
 
-The first implementation is a headless Rust/SQLite persistence workspace. See the [repository audit and implementation foundation](Design-Docs/Phase-Foundation.md) for the roadmap dependencies, current behavior, and verification commands. The [design documentation index](Design-Docs/README.md) remains the source for the full application design.
+The workspace includes the Phase Zero desktop shell and the Phase One Rust/SQLite persistence library. See the [repository audit and implementation foundation](Design-Docs/Phase-Foundation.md) for the roadmap dependencies, current behavior, and verification commands. The [design documentation index](Design-Docs/README.md) remains the source for the full application design.
+
+### Phase Zero desktop shell
+
+The first desktop build opens a local Northbridge scene through Tauri, with a Canvas2D graph and a keyboard-operable node inspector. See the [desktop build and verification log](Design-Docs/Phase-0-Verification.md) for launch commands and the Windows acceptance criteria.
+
+### Development screenshots and video evidence
+
+The [**Development-Screenshots**](Development-Screenshots/) directory is the project's chronological archive of **real screenshots and screen recordings** captured during development, debugging, testing, and visual reviews. Its [Dev-Screenshots.md guide](Development-Screenshots/Dev-Screenshots.md) defines the filename convention, documentation requirements, and media index.
+
+Use the UTC-based naming pattern `YYYY-MM-DD_HH-mm-ssZ_phase-NN_area_short-description_SS.ext` for both pictures (`.png`, `.webp`, `.jpg`) and videos (`.mp4`, `.webm`). Each important capture should link to its relevant GitHub issue or PR and indicate what was actually observed, including the associated build/commit when known. Recordings and screenshots are **supporting development evidence**, not proof of successful testing on their own; do not present mockups as running software, expose sensitive information, or commit unnecessarily large video files.
 
 ---
 

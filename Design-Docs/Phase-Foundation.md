@@ -23,14 +23,20 @@ The baseline was [main at 4447975](https://github.com/sdhaight1-hash/ConWorld-To
 
 The tests introduce a small Northbridge persistence fixture. Extend it as typed relationships, evidence, query, and publication workflows become executable. Keep canonical state in the same Rust/SQLite model and consume its authorized projections from the desktop and renderer.
 
+## Desktop workspace integration
+
+The Phase One branch builds on the desktop and WASM renderer from Phase Zero. The root workspace has one lockfile for `atlas-desktop`, `atlas-renderer`, and `atlas-store`. The store remains a Rust library. The desktop still opens the read-only platform fixture through Tauri IPC.
+
+On Linux, workspace formatting, strict Clippy, the desktop scene test, and all eight persistence integration tests passed together. The dedicated persistence workflow builds only `atlas-store` so it can also run without native desktop libraries.
+
 ## Verified in the first slice
 
 Run from the repository root with stable Rust and a C compiler for bundled SQLite.
 
 ```sh
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo test --workspace --locked
+cargo clippy -p atlas-store --all-targets --locked -- -D warnings
+cargo test -p atlas-store --locked
 ```
 
 | Scenario | Observed result on Linux, Rust 1.100.0 |
