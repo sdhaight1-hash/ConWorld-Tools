@@ -76,8 +76,8 @@ The older files are historical design inputs, **not alternate live specification
 
 ## Change control
 
-Any change to an accepted decision must have an ADR with context, alternatives, impact on invariants, migration strategy, test evidence and specific superseded sections. Update this table and affected specialist spec *together*. Preserve original author intent, avoid accidental rename of the GitHub repository (which intentionally has a trailing period), and keep downstream phase issues linked to the canonical path.
+Any change to an accepted decision must have an ADR with context, alternatives, impact on invariants, migration strategy, test evidence and specific superseded sections. Update this table and affected specialist spec *together*. Preserve original author intent and use the canonical GitHub repository path, `sdhaight1-hash/ConWorld-Tools`, for downstream issues.
 
 ## Verification limits
 
-The predecessor packages included a foundational SQLite smoke test. It does **not** prove Rust, WebGPU, Tauri, search, publishing or DNA have been implemented. The new repository began empty, and these files are **specifications**, not executable products. No acceptance scenario should be marked passed until implemented and actually run.
+The predecessor packages included a foundational SQLite smoke test. It does **not** prove Rust, WebGPU, Tauri, search, publishing or DNA have been implemented. The [implementation foundation](Phase-Foundation.md) records scenarios executed by the first Rust store. See the [persistence ADR](ADRs/phase-1-persistence-slice.md) for the initial decisions on ADR-001, ADR-003, ADR-005, ADR-006 and ADR-007.

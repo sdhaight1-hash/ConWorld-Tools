@@ -4,7 +4,7 @@
 
 ## Mission
 
-Implement the ConWoeld Tools / Living History Atlas architecture in this repository, following [Design-Docs/README](README.md) and the numbered GitHub **Roadmap Phase N** issues. The repository currently contains only design documents. Do not claim any product runtime or subsystem exists until code/tests actually prove it.
+Implement the ConWorld Tools / Living History Atlas architecture in this repository, following [Design-Docs/README](README.md) and the numbered GitHub **Roadmap Phase N** issues. Check the [implementation foundation](Phase-Foundation.md) and current tests for the code and runtime evidence.
 
 ## Mandatory preflight
 

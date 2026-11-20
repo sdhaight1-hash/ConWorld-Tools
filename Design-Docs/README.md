@@ -1,7 +1,8 @@
-# ConWoeld Tools — Design Documentation
+# ConWorld Tools — Design Documentation
 
 **Working product name:** Living History Atlas  
-**Status:** Reconciled architecture specification, not implemented software  
+**Status:** Reconciled architecture specification with implementation evidence tracked separately
+
 **Baseline:** 2026-11-20 · Revision 1  
 **Location:** `/Design-Docs` is the source of truth for architecture and requirements.
 
@@ -33,21 +34,21 @@
 
 ## Active roadmap issues
 
-- [Roadmap Phase 0 — Architecture Baseline & Platform Feasibility](https://github.com/sdhaight1-hash/ConWoeld-Tools./issues/1)
-- [Roadmap Phase 1 — World Persistence, Temporal Model & Provenance](https://github.com/sdhaight1-hash/ConWoeld-Tools./issues/2)
-- [Roadmap Phase 2 — Relationships, Tags & Event-Driven History](https://github.com/sdhaight1-hash/ConWoeld-Tools./issues/3)
-- [Roadmap Phase 3 — Universal Search, Queries, Backlinks & Discovery](https://github.com/sdhaight1-hash/ConWoeld-Tools./issues/4)
-- [Roadmap Phase 4 — Three-Layer Entries & Composable Canvas](https://github.com/sdhaight1-hash/ConWoeld-Tools./issues/5)
-- [Roadmap Phase 5 — Genealogy, Dynasties, Households & Organizations](https://github.com/sdhaight1-hash/ConWoeld-Tools./issues/6)
-- [Roadmap Phase 6 — Event Studio, Actor Agency & Conflict Atlas](https://github.com/sdhaight1-hash/ConWoeld-Tools./issues/7)
-- [Roadmap Phase 7 — Evidence, Perspectives, Branches & Privacy](https://github.com/sdhaight1-hash/ConWoeld-Tools./issues/8)
-- [Roadmap Phase 8 — Synthetic DNA & Population History](https://github.com/sdhaight1-hash/ConWoeld-Tools./issues/9)
-- [Roadmap Phase 9 — Release Hardening, Export & Optional NPC Integration](https://github.com/sdhaight1-hash/ConWoeld-Tools./issues/10)
+- [Roadmap Phase 0 — Architecture Baseline & Platform Feasibility](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/1)
+- [Roadmap Phase 1 — World Persistence, Temporal Model & Provenance](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/2)
+- [Roadmap Phase 2 — Relationships, Tags & Event-Driven History](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/3)
+- [Roadmap Phase 3 — Universal Search, Queries, Backlinks & Discovery](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/4)
+- [Roadmap Phase 4 — Three-Layer Entries & Composable Canvas](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/5)
+- [Roadmap Phase 5 — Genealogy, Dynasties, Households & Organizations](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/6)
+- [Roadmap Phase 6 — Event Studio, Actor Agency & Conflict Atlas](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/7)
+- [Roadmap Phase 7 — Evidence, Perspectives, Branches & Privacy](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/8)
+- [Roadmap Phase 8 — Synthetic DNA & Population History](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/9)
+- [Roadmap Phase 9 — Release Hardening, Export & Optional NPC Integration](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/10)
 
 All ten issues start **open** and link to their relevant design contracts and acceptance gates. The planned phase number is independent of the GitHub issue number.
 
 ## Current repository state
 
-This repository began empty. These are **design documents only**; no application, migrations, UI, GPU integration, or runtime behavior should be inferred to exist. Earlier v0.1–v0.4 files were source material, not independent competing specifications. Their requirements were rewritten, de-duplicated and traced in [12](12-Decisions-and-Reconciliation.md).
+See the [implementation foundation](Phase-Foundation.md) for the audited baseline, verified behavior and outstanding milestones. Earlier v0.1–v0.4 files are historical design inputs, with traceability in [12](12-Decisions-and-Reconciliation.md).
 
 **First demonstrable milestone:** author two characters, establish a friendship, create a betrayal event with actor/claim/source, apply an explicit relationship effect, and switch the historic date and viewer perspective. Confirm semantic graph, Canvas component, public Display, and search agree about what is visible and why.

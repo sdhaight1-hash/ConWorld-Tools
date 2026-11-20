@@ -1,6 +1,6 @@
 # 08 — Persistence and API Contracts
 
-**Status:** Design contract; no implementation or migration has been executed in this repository.
+**Status:** Design contract. See the [implementation foundation](Phase-Foundation.md) for the executed migration and test results.
 
 ## Storage invariants
 
