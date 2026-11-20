@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::{AuthorRevision, Error, EventDate, Scope, WorldDay, WorldId};
 use uuid::Uuid;
 
@@ -11,6 +13,13 @@ pub struct LeapCycle {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CalendarEra {
+    pub name: String,
+    pub year_one: i64,
+    pub descending: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CalendarRules {
     pub name: String,
     /// World day of year zero, month one, day one.
@@ -18,6 +27,7 @@ pub struct CalendarRules {
     /// Month lengths in calendar order, before leap adjustment.
     pub month_lengths: Vec<u16>,
     pub leap: Option<LeapCycle>,
+    pub eras: Vec<CalendarEra>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -39,6 +49,31 @@ pub struct CalendarVersion {
     pub id: CalendarId,
     pub registered_at: AuthorRevision,
     pub rules: CalendarRules,
+}
+
+impl CalendarVersion {
+    pub fn exact_occurrence(
+        &self,
+        date: CalendarDay,
+        label: impl Into<String>,
+    ) -> Result<EventDate, Error> {
+        let label = label.into();
+        if label.trim().is_empty() {
+            return Err(Error::InvalidInput("exact calendar date label"));
+        }
+        let day = self
+            .rules
+            .normalize(CalendarDate::Day(date), "")?
+            .exact_day()
+            .ok_or(Error::InvalidCalendarDate)?;
+        Ok(EventDate::CalendarExact {
+            day,
+            calendar: self.id,
+            calendar_revision: self.registered_at,
+            date,
+            label,
+        })
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -72,7 +107,35 @@ impl CalendarRules {
         {
             return Err(Error::InvalidCalendar);
         }
+        let mut names = HashSet::new();
+        if self
+            .eras
+            .iter()
+            .any(|era| era.name.trim().is_empty() || !names.insert(era.name.as_str()))
+        {
+            return Err(Error::InvalidCalendar);
+        }
         Ok(())
+    }
+
+    pub fn era_year(&self, name: &str, ordinal_year: u64) -> Result<i64, Error> {
+        self.validate()?;
+        let era = self
+            .eras
+            .iter()
+            .find(|era| era.name == name)
+            .ok_or(Error::NotFound)?;
+        if ordinal_year == 0 {
+            return Err(Error::InvalidCalendarDate);
+        }
+        let offset = i128::from(ordinal_year - 1);
+        let year_one = i128::from(era.year_one);
+        let year = if era.descending {
+            year_one - offset
+        } else {
+            year_one + offset
+        };
+        i64::try_from(year).map_err(|_| Error::CalendarOutOfRange)
     }
 
     /// Converts exact dates or inclusive bounds into the world's normalized day axis.

@@ -9,7 +9,7 @@ use uuid::Uuid;
 use crate::*;
 
 const APPLICATION_ID: i64 = 0x4357_4c44; // CWLD
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 5;
 
 pub struct Store {
     conn: Connection,
@@ -19,7 +19,9 @@ impl Store {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
         let mut conn = Connection::open(path)?;
         conn.busy_timeout(Duration::from_secs(5))?;
-        conn.pragma_update(None, "foreign_keys", true)?;
+        // SQLite requires an unchecked connection during the registry rebuild.
+        // Check the new schema before committing and enable enforcement before returning the store.
+        conn.pragma_update(None, "foreign_keys", false)?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let version: i64 = tx.pragma_query_value(None, "user_version", |row| row.get(0))?;
         let application_id: i64 =
@@ -49,9 +51,14 @@ impl Store {
         }
         if version < 4 {
             tx.execute_batch(include_str!("../migrations/0004.sql"))?;
+        }
+        if version < 5 {
+            tx.execute_batch(include_str!("../migrations/0005.sql"))?;
+            verify_foreign_keys(&tx)?;
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
         tx.commit()?;
+        conn.pragma_update(None, "foreign_keys", true)?;
         Ok(Self { conn })
     }
 
@@ -125,6 +132,13 @@ impl Store {
                 ])?;
             }
         }
+        for (index, era) in rules.eras.iter().enumerate() {
+            tx.execute(
+                "INSERT INTO calendar_eras (world_id, calendar_id, revision, name, position, year_one, descending)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![world.id.0.as_bytes(), command.calendar.0.as_bytes(), revision, era.name, index + 1, era.year_one, era.descending],
+            )?;
+        }
         tx.commit()?;
         Ok(AuthorRevision(revision))
     }
@@ -142,55 +156,9 @@ impl Store {
         if revision < AuthorRevision(0) || revision > world.revision {
             return Err(Error::InvalidRevision);
         }
-        let (registered_at, mut rules) = tx
-            .query_row(
-                "SELECT revision, name, epoch_day, leap_every, leap_month FROM calendar_rules
-             WHERE world_id = ?1 AND calendar_id = ?2 AND revision <= ?3
-             ORDER BY revision DESC LIMIT 1",
-                params![world.id.0.as_bytes(), id.0.as_bytes(), revision.0],
-                |row| {
-                    let leap = match (row.get(3)?, row.get(4)?) {
-                        (Some(every), Some(month)) => Some(LeapCycle { every, month }),
-                        (None, None) => None,
-                        _ => return Err(rusqlite::Error::InvalidQuery),
-                    };
-                    Ok((
-                        AuthorRevision(row.get(0)?),
-                        CalendarRules {
-                            name: row.get(1)?,
-                            epoch: WorldDay(row.get(2)?),
-                            month_lengths: Vec::new(),
-                            leap,
-                        },
-                    ))
-                },
-            )
-            .optional()?
-            .ok_or(Error::NotFound)?;
-        {
-            let mut months = tx.prepare(
-                "SELECT month, length FROM calendar_months
-                 WHERE world_id = ?1 AND calendar_id = ?2 AND revision = ?3 ORDER BY month",
-            )?;
-            let mut rows = months.query(params![
-                world.id.0.as_bytes(),
-                id.0.as_bytes(),
-                registered_at.0
-            ])?;
-            while let Some(row) = rows.next()? {
-                if row.get::<_, usize>(0)? != rules.month_lengths.len() + 1 {
-                    return Err(Error::InvalidCalendar);
-                }
-                rules.month_lengths.push(row.get(1)?);
-            }
-        }
-        rules.validate()?;
+        let version = read_calendar(&tx, world.id, id, revision)?;
         tx.commit()?;
-        Ok(CalendarVersion {
-            id,
-            registered_at,
-            rules,
-        })
+        Ok(version)
     }
 
     pub fn branch_fork(
@@ -212,6 +180,26 @@ impl Store {
     }
 
     pub fn fork(&mut self, command: &ForkCommand) -> Result<Fork, Error> {
+        self.fork_from(command, None)
+    }
+
+    /// The supplied day must agree with the parent's exact event occurrence.
+    pub fn fork_at_event(
+        &mut self,
+        command: &ForkCommand,
+        event: ObjectRef,
+    ) -> Result<Fork, Error> {
+        if event.world != command.world {
+            return Err(Error::WrongWorld);
+        }
+        self.fork_from(command, Some(event))
+    }
+
+    fn fork_from(
+        &mut self,
+        command: &ForkCommand,
+        event: Option<ObjectRef>,
+    ) -> Result<Fork, Error> {
         require_author(command.scope)?;
         let tx = self
             .conn
@@ -230,6 +218,19 @@ impl Store {
             command.id,
             (&command.author, &command.rationale),
         )?;
+        let anchor = if let Some(event) = event {
+            let origin = resolve_object(&tx, event, command.parent, world.revision, command.day)?
+                .ok_or(Error::NotFound)?;
+            match &origin.record.data {
+                ObjectData::HistoricalEvent { occurrence }
+                    if occurrence.exact_day() == Some(command.day) => {}
+                ObjectData::HistoricalEvent { .. } => return Err(Error::InvalidOccurrence),
+                _ => return Err(Error::WrongKind),
+            }
+            Some(origin.reference())
+        } else {
+            None
+        };
         let child = BranchId(Uuid::new_v4());
         tx.execute(
             "INSERT INTO branches (world_id, id, is_main) VALUES (?1, ?2, 0)",
@@ -240,6 +241,13 @@ impl Store {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![world.id.0.as_bytes(), child.0.as_bytes(), command.parent.0.as_bytes(), command.day.0, world.revision.0, revision],
         )?;
+        if let Some(event) = anchor {
+            tx.execute(
+                "INSERT INTO fork_anchors (world_id, child_branch, event_id, event_branch, event_state_revision, event_revision)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![world.id.0.as_bytes(), child.0.as_bytes(), event.object.id.0.as_bytes(), event.branch.0.as_bytes(), event.state_revision.0, event.recorded_at.0],
+            )?;
+        }
         tx.commit()?;
         Ok(Fork {
             id: child,
@@ -247,6 +255,7 @@ impl Store {
             day: command.day,
             inherited_revision: world.revision,
             created_revision: AuthorRevision(revision),
+            anchor,
         })
     }
 
@@ -276,6 +285,7 @@ impl Store {
                 Change::Create(object, record)
                 | Change::Correct(object, record)
                 | Change::RecordState(object, record) => (*object, record),
+                Change::EventEffect { target, record, .. } => (*target, record),
             };
             if object.world != world.id {
                 return Err(Error::WrongWorld);
@@ -283,7 +293,55 @@ impl Store {
             if !changed.insert(object.id) {
                 return Err(Error::RepeatedObject);
             }
+            let effect = match change {
+                Change::EventEffect { event, .. } => {
+                    if event.world != object.world {
+                        return Err(Error::WrongWorld);
+                    }
+                    if *event == object || record.source.is_none() {
+                        return Err(Error::InvalidInput(
+                            "event effect requires a distinct target and a source",
+                        ));
+                    }
+                    let day = record.valid.start.ok_or(Error::InvalidInterval)?;
+                    let origin =
+                        resolve_object(&tx, *event, branch, AuthorRevision(revision), day)?
+                            .ok_or(Error::NotFound)?;
+                    match origin.record.data {
+                        ObjectData::HistoricalEvent { ref occurrence }
+                            if occurrence.exact_day().is_some_and(|on| on <= day) => {}
+                        ObjectData::HistoricalEvent { .. } => return Err(Error::InvalidOccurrence),
+                        _ => return Err(Error::WrongKind),
+                    }
+                    let before = resolve_object(&tx, object, branch, world.revision, day)?
+                        .ok_or(Error::NotFound)?;
+                    Some((origin.reference(), before.reference(), day))
+                }
+                _ => None,
+            };
             apply_change(&tx, branch, fork, revision, change, object, record)?;
+            if let Some((event, before, day)) = effect {
+                tx.execute(
+                    "INSERT INTO historical_effects (world_id, target_id, branch_id, revision,
+                         event_id, event_branch, event_state_revision, event_revision,
+                         before_branch, before_state_revision, before_revision, day)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                    params![
+                        object.world.0.as_bytes(),
+                        object.id.0.as_bytes(),
+                        branch.0.as_bytes(),
+                        revision,
+                        event.object.id.0.as_bytes(),
+                        event.branch.0.as_bytes(),
+                        event.state_revision.0,
+                        event.recorded_at.0,
+                        before.branch.0.as_bytes(),
+                        before.state_revision.0,
+                        before.recorded_at.0,
+                        day.0
+                    ],
+                )?;
+            }
             tx.execute(
                 "INSERT INTO invalidations (world_id, revision, object_id) VALUES (?1, ?2, ?3)",
                 params![object.world.0.as_bytes(), revision, object.id.0.as_bytes()],
@@ -313,16 +371,44 @@ impl Store {
         Ok(version)
     }
 
+    pub fn effect_on(
+        &self,
+        target: ObjectRef,
+        view: ViewContext,
+    ) -> Result<Option<HistoricalEffect>, Error> {
+        let Some(after) = self
+            .get_object(target, view)?
+            .map(|version| version.reference())
+        else {
+            return Ok(None);
+        };
+        // Corrections retain the provenance of the state they update.
+        Ok(self.conn.query_row(
+            "SELECT event_id, event_branch, event_state_revision, event_revision,
+                    before_branch, before_state_revision, before_revision, day
+             FROM historical_effects WHERE world_id = ?1 AND target_id = ?2 AND branch_id = ?3 AND revision = ?4",
+            params![target.world.0.as_bytes(), target.id.0.as_bytes(), after.branch.0.as_bytes(), after.state_revision.0],
+            |row| Ok(HistoricalEffect {
+                event: VersionRef {
+                    object: ObjectRef { world: target.world, id: ObjectId(Uuid::from_bytes(row.get(0)?)) },
+                    branch: BranchId(Uuid::from_bytes(row.get(1)?)),
+                    state_revision: AuthorRevision(row.get(2)?),
+                    recorded_at: AuthorRevision(row.get(3)?),
+                },
+                before: VersionRef {
+                    object: target, branch: BranchId(Uuid::from_bytes(row.get(4)?)),
+                    state_revision: AuthorRevision(row.get(5)?),
+                    recorded_at: AuthorRevision(row.get(6)?),
+                },
+                after: VersionRef { recorded_at: after.state_revision, ..after },
+                day: WorldDay(row.get(7)?),
+            }),
+        ).optional()?)
+    }
+
     pub fn verify_foreign_keys(&self, scope: Scope) -> Result<(), Error> {
         require_author(scope)?;
-        let violation = self
-            .conn
-            .query_row("PRAGMA foreign_key_check", [], |row| row.get(0))
-            .optional()?;
-        match violation {
-            Some(table) => Err(Error::Integrity(table)),
-            None => Ok(()),
-        }
+        verify_foreign_keys(&self.conn)
     }
 
     pub fn backup_to(&self, path: impl AsRef<Path>, scope: Scope) -> Result<(), Error> {
@@ -342,6 +428,79 @@ impl Store {
         }
         Ok(())
     }
+}
+
+fn read_calendar(
+    conn: &Connection,
+    world: WorldId,
+    id: CalendarId,
+    revision: AuthorRevision,
+) -> Result<CalendarVersion, Error> {
+    let (registered_at, mut rules) = conn
+        .query_row(
+            "SELECT revision, name, epoch_day, leap_every, leap_month FROM calendar_rules
+             WHERE world_id = ?1 AND calendar_id = ?2 AND revision <= ?3
+             ORDER BY revision DESC LIMIT 1",
+            params![world.0.as_bytes(), id.0.as_bytes(), revision.0],
+            |row| {
+                let leap = match (row.get(3)?, row.get(4)?) {
+                    (Some(every), Some(month)) => Some(LeapCycle { every, month }),
+                    (None, None) => None,
+                    _ => return Err(rusqlite::Error::InvalidQuery),
+                };
+                Ok((
+                    AuthorRevision(row.get(0)?),
+                    CalendarRules {
+                        name: row.get(1)?,
+                        epoch: WorldDay(row.get(2)?),
+                        month_lengths: Vec::new(),
+                        leap,
+                        eras: Vec::new(),
+                    },
+                ))
+            },
+        )
+        .optional()?
+        .ok_or(Error::NotFound)?;
+    {
+        let mut months = conn.prepare(
+            "SELECT month, length FROM calendar_months
+                 WHERE world_id = ?1 AND calendar_id = ?2 AND revision = ?3 ORDER BY month",
+        )?;
+        let mut rows = months.query(params![
+            world.0.as_bytes(),
+            id.0.as_bytes(),
+            registered_at.0
+        ])?;
+        while let Some(row) = rows.next()? {
+            if row.get::<_, usize>(0)? != rules.month_lengths.len() + 1 {
+                return Err(Error::InvalidCalendar);
+            }
+            rules.month_lengths.push(row.get(1)?);
+        }
+    }
+    let mut eras = conn.prepare(
+        "SELECT name, year_one, descending FROM calendar_eras
+         WHERE world_id = ?1 AND calendar_id = ?2 AND revision = ?3 ORDER BY position",
+    )?;
+    rules.eras = eras
+        .query_map(
+            params![world.0.as_bytes(), id.0.as_bytes(), registered_at.0],
+            |row| {
+                Ok(CalendarEra {
+                    name: row.get(0)?,
+                    year_one: row.get(1)?,
+                    descending: row.get(2)?,
+                })
+            },
+        )?
+        .collect::<rusqlite::Result<_>>()?;
+    rules.validate()?;
+    Ok(CalendarVersion {
+        id,
+        registered_at,
+        rules,
+    })
 }
 
 fn append_revision(
@@ -390,8 +549,10 @@ fn load_fork(
     at: AuthorRevision,
 ) -> Result<Option<Fork>, Error> {
     conn.query_row(
-        "SELECT f.parent_id, f.fork_day, f.inherited_revision, f.created_revision
+        "SELECT f.parent_id, f.fork_day, f.inherited_revision, f.created_revision,
+                a.event_id, a.event_branch, a.event_state_revision, a.event_revision
          FROM branches b LEFT JOIN branch_forks f ON f.world_id = b.world_id AND f.branch_id = b.id
+         LEFT JOIN fork_anchors a ON a.world_id = f.world_id AND a.child_branch = f.branch_id
          WHERE b.world_id = ?1 AND b.id = ?2 AND (b.is_main = 1 OR f.created_revision <= ?3)",
         params![world.0.as_bytes(), branch.0.as_bytes(), at.0],
         |row| match row.get::<_, Option<[u8; 16]>>(0)? {
@@ -401,6 +562,18 @@ fn load_fork(
                 day: WorldDay(row.get(1)?),
                 inherited_revision: AuthorRevision(row.get(2)?),
                 created_revision: AuthorRevision(row.get(3)?),
+                anchor: match row.get::<_, Option<[u8; 16]>>(4)? {
+                    Some(event) => Some(VersionRef {
+                        object: ObjectRef {
+                            world,
+                            id: ObjectId(Uuid::from_bytes(event)),
+                        },
+                        branch: BranchId(Uuid::from_bytes(row.get(5)?)),
+                        state_revision: AuthorRevision(row.get(6)?),
+                        recorded_at: AuthorRevision(row.get(7)?),
+                    }),
+                    None => None,
+                },
             })),
             None => Ok(None),
         },
@@ -459,7 +632,7 @@ fn resolve_object(
             .is_none_or(|end| requested_day < end)
             && cutoff.is_none_or(|bound| match &version.record.data {
                 ObjectData::HistoricalEvent { occurrence } => match occurrence {
-                    EventDate::Exact(day) => *day <= bound,
+                    EventDate::Exact(day) | EventDate::CalendarExact { day, .. } => *day <= bound,
                     EventDate::Uncertain { latest, .. } => latest.is_some_and(|day| day <= bound),
                     EventDate::Unknown => false,
                 },
@@ -478,7 +651,7 @@ fn local_object_at(
     Ok(conn
         .query_row(
             "SELECT revision, kind, label, valid_start, valid_end, event_day, citation, source_id,
-                    earliest_day, latest_day, date_label
+                    earliest_day, latest_day, date_label, state_revision
              FROM object_versions AS v
              WHERE world_id = ?1 AND object_id = ?2 AND branch_id = ?3 AND revision <= ?4
                AND (valid_start IS NULL OR valid_start <= ?5)
@@ -497,7 +670,7 @@ fn local_object_at(
                 revision.0,
                 day.0
             ],
-            |row| read_version(row, object, branch),
+            |row| read_version(conn, row, object, branch),
         )
         .optional()?)
 }
@@ -572,7 +745,7 @@ fn apply_change(
             let occurrence_unchanged =
                 previous.is_some_and(|version| version.record.data == record.data);
             let may_predate_fork = match occurrence {
-                EventDate::Exact(day) => *day < fork.day,
+                EventDate::Exact(day) | EventDate::CalendarExact { day, .. } => *day < fork.day,
                 EventDate::Uncertain { earliest, .. } => earliest.is_none_or(|day| day < fork.day),
                 EventDate::Unknown => false,
             };
@@ -582,7 +755,9 @@ fn apply_change(
         }
         if current.is_none() {
             new_override = Some(match change {
-                Change::RecordState(..) => record.valid.start.ok_or(Error::InvalidInterval)?,
+                Change::RecordState(..) | Change::EventEffect { .. } => {
+                    record.valid.start.ok_or(Error::InvalidInterval)?
+                }
                 _ => fork.day,
             });
         }
@@ -600,7 +775,7 @@ fn apply_change(
             }
             state
         }
-        (Change::RecordState(..), Some((state, mut previous))) => {
+        (Change::RecordState(..) | Change::EventEffect { .. }, Some((state, mut previous))) => {
             let start = record.valid.start.ok_or(Error::InvalidInterval)?;
             if previous
                 .record
@@ -648,6 +823,16 @@ fn apply_change(
         )?;
     }
     Ok(())
+}
+
+fn verify_foreign_keys(conn: &Connection) -> Result<(), Error> {
+    let violation = conn
+        .query_row("PRAGMA foreign_key_check", [], |row| row.get(0))
+        .optional()?;
+    match violation {
+        Some(table) => Err(Error::Integrity(table)),
+        None => Ok(()),
+    }
 }
 
 fn require_author(scope: Scope) -> Result<(), Error> {
@@ -714,7 +899,7 @@ fn latest_state(
                 branch.0.as_bytes(),
                 before
             ],
-            |row| Ok((row.get(11)?, read_version(row, object, branch)?)),
+            |row| Ok((row.get(11)?, read_version(conn, row, object, branch)?)),
         )
         .optional()?)
 }
@@ -735,6 +920,26 @@ fn write_version(
     }
     let (kind, occurrence, citation) = match &record.data {
         ObjectData::Person => ("person", &EventDate::Unknown, None),
+        ObjectData::Claim {
+            subject,
+            predicate,
+            statement,
+        } => {
+            validate_text(predicate, "claim predicate")?;
+            validate_text(statement, "claim statement")?;
+            if subject.world != object.world {
+                return Err(Error::WrongWorld);
+            }
+            if *subject == object || record.source.is_none() {
+                return Err(Error::InvalidInput(
+                    "claim requires a distinct subject and an asserting source",
+                ));
+            }
+            if !written_on_lineage(tx, *subject, branch, AuthorRevision(revision))? {
+                return Err(Error::NotFound);
+            }
+            ("claim", &EventDate::Unknown, None)
+        }
         ObjectData::HistoricalEvent { occurrence } => ("historical_event", occurrence, None),
         ObjectData::Source { citation } => {
             validate_text(citation, "source citation")?;
@@ -742,7 +947,9 @@ fn write_version(
         }
     };
     let (event_day, earliest, latest, date_label) = match occurrence {
-        EventDate::Exact(day) => (Some(day.0), None, None, None),
+        EventDate::Exact(day) | EventDate::CalendarExact { day, .. } => {
+            (Some(day.0), None, None, None)
+        }
         EventDate::Unknown => (None, None, None, None),
         EventDate::Uncertain {
             earliest,
@@ -763,6 +970,29 @@ fn write_version(
             )
         }
     };
+    if let EventDate::CalendarExact {
+        day,
+        calendar,
+        calendar_revision,
+        date,
+        label,
+    } = occurrence
+    {
+        validate_text(label, "exact calendar date label")?;
+        if calendar_revision.0 >= revision {
+            return Err(Error::InvalidRevision);
+        }
+        let version = read_calendar(tx, object.world, *calendar, *calendar_revision)?;
+        if version.registered_at != *calendar_revision
+            || version
+                .rules
+                .normalize(CalendarDate::Day(*date), "")?
+                .exact_day()
+                != Some(*day)
+        {
+            return Err(Error::InvalidCalendarDate);
+        }
+    }
     if let Some(source) = record.source {
         if source.world != object.world {
             return Err(Error::WrongWorld);
@@ -770,12 +1000,11 @@ fn write_version(
         if source == object {
             return Err(Error::InvalidInput("self-citation"));
         }
-        match kind_of(tx, source)?.as_deref() {
-            Some("source") if written_on_lineage(tx, source, branch, AuthorRevision(revision))? => {
-            }
-            Some("source") => return Err(Error::NotFound),
-            Some(_) => return Err(Error::WrongKind),
-            None => return Err(Error::NotFound),
+        if !written_on_lineage(tx, source, branch, AuthorRevision(revision))? {
+            return Err(Error::NotFound);
+        }
+        if kind_of(tx, source)?.as_deref() != Some("source") {
+            return Err(Error::WrongKind);
         }
     }
     match (create, kind_of(tx, object)?.as_deref()) {
@@ -814,22 +1043,74 @@ fn write_version(
             state_revision,
         ],
     )?;
+    if let ObjectData::Claim {
+        subject,
+        predicate,
+        statement,
+    } = &record.data
+    {
+        tx.execute(
+            "INSERT INTO claim_versions (world_id, claim_id, branch_id, revision, state_revision, subject_id, predicate, statement)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![object.world.0.as_bytes(), object.id.0.as_bytes(), branch.0.as_bytes(),
+                revision, state_revision, subject.id.0.as_bytes(), predicate, statement],
+        )?;
+    }
+    if let EventDate::CalendarExact {
+        calendar,
+        calendar_revision,
+        date,
+        label,
+        ..
+    } = occurrence
+    {
+        tx.execute(
+            "INSERT INTO event_calendar_dates (world_id, event_id, branch_id, revision, state_revision,
+                 calendar_id, calendar_revision, year, month, day, original_label)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![object.world.0.as_bytes(), object.id.0.as_bytes(), branch.0.as_bytes(), revision,
+                state_revision, calendar.0.as_bytes(), calendar_revision.0, date.year, date.month, date.day, label],
+        )?;
+    }
     Ok(())
 }
 
 fn read_version(
+    conn: &Connection,
     row: &rusqlite::Row<'_>,
     object: ObjectRef,
     branch: BranchId,
 ) -> rusqlite::Result<Version> {
     let data = match row.get::<_, String>(1)?.as_str() {
         "person" => ObjectData::Person,
+        "claim" => conn.query_row(
+            "SELECT subject_id, predicate, statement FROM claim_versions
+             WHERE world_id = ?1 AND claim_id = ?2 AND branch_id = ?3 AND revision = ?4 AND state_revision = ?5",
+            params![object.world.0.as_bytes(), object.id.0.as_bytes(), branch.0.as_bytes(), row.get::<_, i64>(0)?, row.get::<_, i64>(11)?],
+            |claim| Ok(ObjectData::Claim {
+                subject: ObjectRef { world: object.world, id: ObjectId(Uuid::from_bytes(claim.get(0)?)) },
+                predicate: claim.get(1)?,
+                statement: claim.get(2)?,
+            }),
+        )?,
         "historical_event" => {
             let occurrence = match (
                 row.get::<_, Option<i64>>(5)?,
                 row.get::<_, Option<String>>(10)?,
             ) {
-                (Some(day), None) => EventDate::Exact(WorldDay(day)),
+                (Some(day), None) => conn.query_row(
+                    "SELECT calendar_id, calendar_revision, year, month, day, original_label
+                     FROM event_calendar_dates WHERE world_id = ?1 AND event_id = ?2 AND branch_id = ?3
+                        AND revision = ?4 AND state_revision = ?5",
+                    params![object.world.0.as_bytes(), object.id.0.as_bytes(), branch.0.as_bytes(), row.get::<_, i64>(0)?, row.get::<_, i64>(11)?],
+                    |calendar| Ok(EventDate::CalendarExact {
+                        day: WorldDay(day),
+                        calendar: CalendarId(Uuid::from_bytes(calendar.get(0)?)),
+                        calendar_revision: AuthorRevision(calendar.get(1)?),
+                        date: CalendarDay { year: calendar.get(2)?, month: calendar.get(3)?, day: calendar.get(4)? },
+                        label: calendar.get(5)?,
+                    }),
+                ).optional()?.unwrap_or(EventDate::Exact(WorldDay(day))),
                 (None, Some(label)) => EventDate::Uncertain {
                     earliest: row.get::<_, Option<i64>>(8)?.map(WorldDay),
                     latest: row.get::<_, Option<i64>>(9)?.map(WorldDay),
@@ -849,6 +1130,7 @@ fn read_version(
         object,
         recorded_at: AuthorRevision(row.get(0)?),
         source_branch: branch,
+        state_revision: AuthorRevision(row.get(11)?),
         record: Record {
             label: row.get(2)?,
             valid: ValidInterval {

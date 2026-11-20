@@ -8,6 +8,11 @@ fn years() -> CalendarRules {
         epoch: WorldDay(100),
         month_lengths: vec![10, 10],
         leap: Some(LeapCycle { every: 4, month: 2 }),
+        eras: vec![CalendarEra {
+            name: "Before Founding".into(),
+            year_one: -1,
+            descending: true,
+        }],
     }
 }
 
@@ -167,6 +172,11 @@ fn stored_calendars_are_world_scoped_and_updates_keep_prior_rules() -> Result<()
         day: 1,
     });
     assert_eq!(original.registered_at, first);
+    assert_eq!(original.rules.era_year("Before Founding", 5)?, -5);
+    assert!(matches!(
+        original.rules.era_year("Before Founding", 0),
+        Err(Error::InvalidCalendarDate)
+    ));
     assert_eq!(
         original.rules.normalize(date, "")?,
         EventDate::Exact(WorldDay(110))

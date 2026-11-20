@@ -48,7 +48,7 @@ CREATE TABLE objects (
 CREATE INDEX objects_by_kind ON objects(world_id, kind);
 ~~~
 
-Production migrations additionally need branch version overlays, type-specific endpoint constraints, time interval validations, persistent evidence and author revision history. Earlier foundation SQL in the v0.2 package is a reference prototype, **not accepted as the project production schema**.
+The Phase One migrations implement branch overlays, world-scoped typed evidence, interval checks, author history and exact version references for event effects. Later phases add domain-specific endpoints, index consumers and portable archives. Earlier foundation SQL in the v0.2 package is a reference prototype, **not accepted as the project production schema**.
 
 ## Transaction contract
 
@@ -104,4 +104,4 @@ At minimum: WrongWorld, WrongKind, RevisionConflict, UnresolvableCalendar, Inval
 
 ## Migration gate
 
-Before marking persistence complete: run migration on fresh DB, reopen, run foreign_key_check, test branch forks/revisions, verify rollback of multi-effect event, delete/merge protections, index rebuild, backup restore and full export/import. No test in this specification is evidence that the application is implemented.
+Phase One verifies fresh migrations, upgrade and reopen, foreign-key checks, pinned branch and author-revision behavior, multi-effect event rollback, and SQLite backup restore. Delete and merge policies, derived-index rebuild and full export/import remain gates for the phases that introduce those features. No test in this specification is evidence that the application is implemented.

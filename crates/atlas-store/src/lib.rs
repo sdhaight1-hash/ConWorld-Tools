@@ -5,8 +5,8 @@ mod store;
 use std::path::PathBuf;
 
 pub use calendar::{
-    CalendarCommand, CalendarDate, CalendarDay, CalendarId, CalendarRules, CalendarVersion,
-    LeapCycle,
+    CalendarCommand, CalendarDate, CalendarDay, CalendarEra, CalendarId, CalendarRules,
+    CalendarVersion, LeapCycle,
 };
 pub use store::Store;
 use uuid::Uuid;
@@ -59,6 +59,13 @@ pub struct ValidInterval {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum EventDate {
     Exact(WorldDay),
+    CalendarExact {
+        day: WorldDay,
+        calendar: CalendarId,
+        calendar_revision: AuthorRevision,
+        date: CalendarDay,
+        label: String,
+    },
     Uncertain {
         earliest: Option<WorldDay>,
         latest: Option<WorldDay>,
@@ -75,10 +82,19 @@ pub enum Certainty {
 }
 
 impl EventDate {
+    pub fn exact_day(&self) -> Option<WorldDay> {
+        match self {
+            Self::Exact(day) | Self::CalendarExact { day, .. } => Some(*day),
+            _ => None,
+        }
+    }
+
     /// Inclusive bounds describe possible occurrence days, independent of the record interval.
     pub fn certainty_on(&self, day: WorldDay) -> Certainty {
         match self {
-            Self::Exact(exact) if *exact == day => Certainty::Definitely,
+            Self::Exact(exact) | Self::CalendarExact { day: exact, .. } if *exact == day => {
+                Certainty::Definitely
+            }
             Self::Uncertain {
                 earliest, latest, ..
             } if *earliest == Some(day) && *latest == Some(day) => Certainty::Definitely,
@@ -97,8 +113,17 @@ impl EventDate {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ObjectData {
     Person,
-    HistoricalEvent { occurrence: EventDate },
-    Source { citation: String },
+    HistoricalEvent {
+        occurrence: EventDate,
+    },
+    Source {
+        citation: String,
+    },
+    Claim {
+        subject: ObjectRef,
+        predicate: String,
+        statement: String,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -115,6 +140,34 @@ pub struct Version {
     pub record: Record,
     pub recorded_at: AuthorRevision,
     pub source_branch: BranchId,
+    pub state_revision: AuthorRevision,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct VersionRef {
+    pub object: ObjectRef,
+    pub branch: BranchId,
+    pub recorded_at: AuthorRevision,
+    pub state_revision: AuthorRevision,
+}
+
+impl Version {
+    pub fn reference(&self) -> VersionRef {
+        VersionRef {
+            object: self.object,
+            branch: self.source_branch,
+            recorded_at: self.recorded_at,
+            state_revision: self.state_revision,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HistoricalEffect {
+    pub event: VersionRef,
+    pub before: VersionRef,
+    pub after: VersionRef,
+    pub day: WorldDay,
 }
 
 #[derive(Clone, Debug)]
@@ -124,6 +177,12 @@ pub enum Change {
     Correct(ObjectRef, Record),
     /// Append a later historical state. Its start is required and closes a predecessor that overlaps it.
     RecordState(ObjectRef, Record),
+    /// Append a sourced state as an explicitly recorded consequence of an event.
+    EventEffect {
+        event: ObjectRef,
+        target: ObjectRef,
+        record: Record,
+    },
 }
 
 /// Scope comes from the trusted local host, outside the stored world data.
@@ -173,6 +232,7 @@ pub struct Fork {
     pub day: WorldDay,
     pub inherited_revision: AuthorRevision,
     pub created_revision: AuthorRevision,
+    pub anchor: Option<VersionRef>,
 }
 
 #[derive(Debug, thiserror::Error)]
