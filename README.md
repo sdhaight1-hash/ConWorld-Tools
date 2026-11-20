@@ -41,6 +41,10 @@ The selected architectural direction is **Rust** for the authoritative domain, d
 
 This is a **design-first project**, not a claim that these capabilities are already implemented. Work is organized into dependency-ordered roadmap phases, with acceptance tests and observable results required before a feature is marked complete. The detailed source of truth is [the design documentation index](Design-Docs/README.md); see also the [product charter](Design-Docs/00-Product-Charter.md), [system architecture](Design-Docs/02-System-Architecture.md), [three-layer entry design](Design-Docs/06-Three-Layer-Entries-and-Canvas.md), and [delivery roadmap](Design-Docs/10-Delivery-Roadmap.md).
 
+### Phase Zero desktop shell
+
+The first desktop build opens a local Northbridge scene through Tauri, with a Canvas2D graph and a keyboard-operable node inspector. See the [desktop build and verification log](Design-Docs/Phase-0-Verification.md) for launch commands and the Windows acceptance criteria.
+
 ### Development screenshots and video evidence
 
 The [**Development-Screenshots**](Development-Screenshots/) directory is the project's chronological archive of **real screenshots and screen recordings** captured during development, debugging, testing, and visual reviews. Its [Dev-Screenshots.md guide](Development-Screenshots/Dev-Screenshots.md) defines the filename convention, documentation requirements, and media index.
