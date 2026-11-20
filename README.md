@@ -45,6 +45,12 @@ This is a **design-first project**, not a claim that these capabilities are alre
 
 The first desktop build opens a local Northbridge scene through Tauri, with a Canvas2D graph and a keyboard-operable node inspector. See the [desktop build and verification log](Design-Docs/Phase-0-Verification.md) for launch commands and the Windows acceptance criteria.
 
+### Development screenshots and video evidence
+
+The [**Development-Screenshots**](Development-Screenshots/) directory is the project's chronological archive of **real screenshots and screen recordings** captured during development, debugging, testing, and visual reviews. Its [Dev-Screenshots.md guide](Development-Screenshots/Dev-Screenshots.md) defines the filename convention, documentation requirements, and media index.
+
+Use the UTC-based naming pattern `YYYY-MM-DD_HH-mm-ssZ_phase-NN_area_short-description_SS.ext` for both pictures (`.png`, `.webp`, `.jpg`) and videos (`.mp4`, `.webm`). Each important capture should link to its relevant GitHub issue or PR and indicate what was actually observed, including the associated build/commit when known. Recordings and screenshots are **supporting development evidence**, not proof of successful testing on their own; do not present mockups as running software, expose sensitive information, or commit unnecessarily large video files.
+
 ---
 
 This repository uses GitHub Issues to manage **roadmap phases, proposed research, and genuinely new features**. The rules below are instructions for human contributors and **AI architects/coding agents**. They apply whenever an AI considers creating, revising, or closing an issue.
