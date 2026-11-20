@@ -2,6 +2,47 @@
 
 **ConWorld Tools** is a local-first fictional worldbuilding, genealogy, relationship-mapping, and historical knowledge system. Its architecture and original implementation roadmap live in **[Design-Docs](Design-Docs/README.md)**.
 
+## Project overview
+
+**ConWorld Tools** (working application name: **Living History Atlas**) is a planned, **local-first desktop application for building and exploring deeply interconnected fictional worlds**. It combines the capabilities of a fictional genealogy program, historical encyclopedia, knowledge graph, relationship tracker, event and conflict mapper, and visual entry designer into one coherent system.
+
+The central idea is that a world is more than a collection of character profiles. **People, families, organizations, factions, locations, property, beliefs, events, and relationships all have identities, connections, and histories.** Those connections can begin, change, end, conflict with one another, or be understood differently by different observers. The goal is to let an author discover not only *who or what is connected*, but also *when, how, and why*.
+
+### What the program is designed to do
+
+- **Worlds and historical records:** Build isolated worlds with their own calendars, timelines, places, cultures, organizations, historical sources, and potentially alternative-history branches. Record both established world facts and disputed accounts without confusing them.
+- **Genealogy and populations:** Model biological, legal, adoptive, and social family ties; households, marriages, dynasties, inheritance, succession, migration, and lineage. The longer-term design includes **synthetic DNA ancestry and relative matching** for fictional populations—not actual human DNA testing.
+- **Relationships and affiliations:** Connect people, groups, institutions, events, assets, and concepts using typed, directional, time-bounded relationships. Apply custom tags, track asymmetric feelings or beliefs, and follow the complete evolution of relationships, including their causes and consequences.
+- **Events, actors, and conflicts:** Record historical events with participants, actors, stakeholders, affiliations, motives, actions, outcomes, and evidence. Map event-to-event causation, organizational alignments, multiparty conflicts, shifting allegiances, political struggles, feuds, and long-term effects.
+- **Search, queries, and discovery:** Search names, aliases, keywords, sources, images, historical periods, connections, and graph paths. Find backlinks, identify possible links from text or annotated images, and suggest missing or draft nodes. **Suggested links are not automatically accepted as historical facts.**
+- **Evidence, perspective, and publication:** Distinguish author-established truth from testimony, rumor, interpretation, uncertainty, and what individual characters know. Explore the world as it stood at a chosen date or from a chosen perspective, while keeping unpublished material out of public-facing results.
+
+### Three connected layers for every entry
+
+The application is designed around **three complementary representations of the same underlying world data**:
+
+| Layer | Purpose |
+| --- | --- |
+| **Node Studio** | Create semantic nodes—characters, relationships, factions, events, conflicts, places, and more—and build, inspect, search, and progressively discover their connections. |
+| **Canvas Studio** | Design attractive, reusable entries using templates, responsive layout primitives (grids, stacks, panels, overlays), rich text, images, and embedded components such as family trees, timelines, maps, or query-driven lists. Choose which elements are eligible for display. |
+| **Display Studio** | Present a polished, navigable, read-only view of the authorized entry, with links, contextual search, and appropriate date/perspective filtering. Hidden author content must not leak through links, search results, image hotspots, or other components. |
+
+**The three layers do not maintain separate copies of character or historical data.** They reference one shared world model. A change to a relationship or organization can therefore appear consistently in its node graph, a Canvas timeline or table, and a published page.
+
+### An example of the intended experience
+
+An author creates two characters who were childhood friends and connects them to rival merchant families. Years later, a disputed inheritance and a betrayal change their relationship. The author links the events, documents the actors and conflicting accounts, and adds an organizational conflict involving both families. Moving a historical timeline reveals the friendship before the betrayal, the estrangement afterward, and a later political alliance that does not erase their personal distrust.
+
+That same history can be explored through a graph, searched by date or affiliation, embedded in a character-page template, and presented to readers with confidential information withheld.
+
+### Planned technical foundation
+
+The selected architectural direction is **Rust** for the authoritative domain, data, history, and query systems; **HTML/CSS/TypeScript** within **Tauri 2** for the desktop interface; **wgpu** for accelerated graph/map/timeline visualization where supported; and **SQLite** for local, versioned world storage. The GPU/webview integration must be validated, with an accessible non-GPU fallback. External AI and NPC-simulation integration is optional rather than required to use the application.
+
+This is a **design-first project**, not a claim that these capabilities are already implemented. Work is organized into dependency-ordered roadmap phases, with acceptance tests and observable results required before a feature is marked complete. The detailed source of truth is [the design documentation index](Design-Docs/README.md); see also the [product charter](Design-Docs/00-Product-Charter.md), [system architecture](Design-Docs/02-System-Architecture.md), [three-layer entry design](Design-Docs/06-Three-Layer-Entries-and-Canvas.md), and [delivery roadmap](Design-Docs/10-Delivery-Roadmap.md).
+
+---
+
 This repository uses GitHub Issues to manage **roadmap phases, proposed research, and genuinely new features**. The rules below are instructions for human contributors and **AI architects/coding agents**. They apply whenever an AI considers creating, revising, or closing an issue.
 
 ## AI Systems Instruction — Lola
