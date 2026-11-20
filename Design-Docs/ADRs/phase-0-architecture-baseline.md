@@ -1,0 +1,31 @@
+# Phase Zero architecture baseline
+
+**Status:** Phase Zero implementation baseline. Target platform observations are recorded in the [verification log](../Phase-0-Verification.md).
+
+## Native shell and rendering
+
+**ADR-002.** Tauri 2 embeds a local Vite-built web app. Use an accessible HTML node list and Canvas2D graph in a shared view so users can inspect and select nodes with or without an accelerated renderer. The shell probes browser WebGPU for diagnostics. The Phase Zero graph uses Canvas2D. The future Rust/wgpu renderer needs a WASM canvas adapter and an authorized scene DTO. The 2,000-label benchmark, WebView2 rendering and device-loss recovery require a renderer spike on Windows.
+
+**ADR-011.** Start with vanilla TypeScript and semantic HTML. The platform slice has one view and a local fixture, so the additional UI framework dependency has no present use. Revisit this choice when studio workflows need a shared component lifecycle.
+
+```mermaid
+flowchart TD
+    A["Tauri local window"] --> B["TypeScript controls"]
+    B --> C["Read-only Rust command"]
+    C --> D["Typed scene fixture"]
+    D --> E["Canvas2D graph"]
+    D --> F["Keyboard-operable node list"]
+    B --> G["WebGPU adapter probe"]
+    C -. "Phase One" .-> H["Domain and SQLite store"]
+```
+
+The Rust 2024 workspace starts with `apps/desktop/src-tauri`. The Vite shell and browser smoke tests live in `apps/desktop`. The Phase One store belongs in `crates/atlas-store` behind the app facade. Reusable query and renderer crates should appear with working consumers. The current command returns a typed, read-only diagnostic scene. The scene fixture carries no private data or mutation capability.
+
+## Contracts for later phases
+
+- **ADR-001, history.** Keep fictional day, author revision and branch independent. Use half-open exact intervals and preserve uncertainty. A fork pins the inherited author revision so later parent edits require deliberate reconciliation. Settle the exact inheritance cut and edge cases against the Phase One branch fixtures.
+- **ADR-005, authorization.** Native capabilities come from the trusted app host. Restrict Phase Zero to a single local window and read-only command. For world data, resolve world/branch/time and audience capability in Rust before producing rows, scenes, counts or caches. Public reads need a narrower capability and explicit publication policy.
+- **ADR-006, storage.** Use bundled SQLite so desktop builds carry a known engine. Open with foreign keys enabled, use typed schema and world-scoped references, and wrap a versioned migration in a transaction. Phase One owns the migration, engine version and tested backup behavior.
+- **ADR-007, custom types.** Store stable typed identities in a shared registry. User-defined categories and labels can extend governed metadata on known kinds. A new authoritative payload or endpoint kind requires explicit Rust and storage validation.
+
+See the original [architecture](../02-System-Architecture.md) and [decision register](../12-Decisions-and-Reconciliation.md).

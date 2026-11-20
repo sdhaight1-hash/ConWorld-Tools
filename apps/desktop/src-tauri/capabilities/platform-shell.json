@@ -1,0 +1,6 @@
+{
+  "identifier": "platform-shell",
+  "description": "The local shell can load the read-only platform fixture.",
+  "windows": ["main"],
+  "permissions": ["allow-platform-scene"]
+}

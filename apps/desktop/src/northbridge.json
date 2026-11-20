@@ -1,0 +1,16 @@
+{
+  "nodes": [
+    { "id": "alice", "label": "Alice Vale", "kind": "Person", "x": 162, "y": 145 },
+    { "id": "beatrice", "label": "Beatrice Thorne", "kind": "Person", "x": 449, "y": 124 },
+    { "id": "letter", "label": "Disclosed Letter", "kind": "Event", "x": 306, "y": 261 },
+    { "id": "guild", "label": "Merchant Guild", "kind": "Organization", "x": 552, "y": 312 },
+    { "id": "northbridge", "label": "Northbridge", "kind": "Place", "x": 188, "y": 392 }
+  ],
+  "edges": [
+    { "source": "alice", "target": "letter", "label": "Appears in" },
+    { "source": "beatrice", "target": "letter", "label": "Appears in" },
+    { "source": "beatrice", "target": "guild", "label": "Member of" },
+    { "source": "letter", "target": "northbridge", "label": "Took place in" },
+    { "source": "guild", "target": "northbridge", "label": "Based in" }
+  ]
+}
