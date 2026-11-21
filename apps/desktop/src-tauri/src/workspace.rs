@@ -8,7 +8,7 @@ use atlas_store::{
     ActionOutcome, AuthorRevision, Change, ClaimAudience, Command, Definition, EventDate,
     EventRole, ObjectData, ObjectId, ObjectRef, Record, Scope, Store, ValidInterval, ViewContext,
     World, WorldDay, WorldId,
-    query::{Direction, QUERY_SCHEMA_VERSION, QueryFilter, QuerySpec},
+    query::{Direction, QUERY_SCHEMA_VERSION, QueryFilter, QuerySpec, SaveNamedLabelQuery},
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -426,15 +426,15 @@ impl AuthorWorkspace {
         let query_id = request.query_id.as_deref().map(id).transpose()?;
         let mut store = self.lock()?;
         let saved = store
-            .save_named_label_query(
-                WorldId(id(&request.world_id)?),
-                AuthorRevision(request.expected_revision),
-                query_id,
-                &request.name,
-                &spec,
-                Uuid::new_v4(),
-                Scope::Author,
-            )
+            .save_named_label_query(SaveNamedLabelQuery {
+                world_id: WorldId(id(&request.world_id)?),
+                expected: AuthorRevision(request.expected_revision),
+                query_id: query_id,
+                name: &request.name,
+                spec: &spec,
+                command_id: Uuid::new_v4(),
+                scope: Scope::Author,
+            })
             .map_err(|error| error.to_string())?;
         Ok(saved.id.to_string())
     }
