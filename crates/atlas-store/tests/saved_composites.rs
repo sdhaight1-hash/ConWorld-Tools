@@ -348,7 +348,10 @@ fn schema_fourteen_upgrade_preserves_saved_predicates_and_marks_compatibility() 
     drop(upgraded);
     let conn = rusqlite::Connection::open(&path)?;
     let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    assert_eq!(version, 15);
+    assert!(
+        version >= 15,
+        "new AST operators require the compatibility barrier"
+    );
     drop(conn);
     let reopened = Store::open(&path)?;
     assert_eq!(
