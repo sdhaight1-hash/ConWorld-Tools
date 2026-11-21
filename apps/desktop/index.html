@@ -79,6 +79,21 @@
         </form>
         <div id="author-world-content" hidden>
           <p id="author-world-info" class="hint"></p>
+          <section id="author-query" aria-label="Historical search" class="query-panel">
+            <h3>Search the historical snapshot</h3>
+            <form id="author-query-form" class="query-form">
+              <label>Find name <input name="term" maxlength="800" required placeholder="Person, event, source, or relationship" /></label>
+              <label>Match names
+                <select name="mode">
+                  <option value="contains">Contains text</option>
+                  <option value="exact">Exact name (show duplicates)</option>
+                </select>
+              </label>
+              <button type="submit">Search history</button>
+            </form>
+            <p id="author-query-status" role="status" aria-live="polite" class="hint">Search the selected world, historical day, and author revision.</p>
+            <ul id="author-query-results" aria-label="Historical search results"></ul>
+          </section>
           <div class="editor-forms">
             <form id="author-create-person" class="editor-form">
               <h3>Create person</h3>
