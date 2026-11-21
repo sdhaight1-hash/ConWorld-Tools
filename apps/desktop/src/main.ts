@@ -104,9 +104,14 @@ async function showHistory(smoke: boolean): Promise<boolean> {
 
 type AuthorWorld = { id: string; name: string; revision: number };
 type AuthorPerson = { id: string; label: string };
+type AuthorCause = {
+  day: number; event: string; actor: string | null;
+  action: string | null; intent: string | null; outcome: string | null; source: string;
+};
 type AuthorRelationship = {
   id: string; subject_id: string; target_id: string; kind: string;
   trust: number | null; tags: string[]; starts_at: number | null;
+  cause: AuthorCause | null;
 };
 type AuthorSnapshot = {
   world: AuthorWorld; day: number; people: AuthorPerson[]; relationships: AuthorRelationship[];
@@ -178,10 +183,23 @@ async function showAuthorWorkspace() {
     }));
     relationshipList.replaceChildren(...snapshot.relationships.map((bond) => {
       const item = document.createElement("li");
-      item.textContent = (people.get(bond.subject_id) ?? bond.subject_id) + " → " +
+      const description = document.createElement("p");
+      description.textContent = (people.get(bond.subject_id) ?? bond.subject_id) + " → " +
         (people.get(bond.target_id) ?? bond.target_id) + " · " + bond.kind +
         " · trust " + (bond.trust ?? "unscored") + " · " +
         (bond.tags.join(", ") || "no tags") + " · since day " + (bond.starts_at ?? "unknown");
+      item.append(description);
+      if (bond.cause) {
+        const evidence = document.createElement("p");
+        evidence.className = "hint";
+        evidence.textContent = "Why it changed (day " + bond.cause.day + "): " +
+          bond.cause.event + (bond.cause.actor ? " · " + bond.cause.actor : "") +
+          (bond.cause.action ? " · " + bond.cause.action : "") +
+          (bond.cause.outcome ? " (" + bond.cause.outcome + ")" : "") +
+          (bond.cause.intent ? " · intent: " + bond.cause.intent : "") +
+          " · source: " + bond.cause.source;
+        item.append(evidence);
+      }
       return item;
     }));
     relationshipForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = snapshot.people.length < 2;

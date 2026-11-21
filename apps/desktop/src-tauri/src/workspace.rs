@@ -37,6 +37,18 @@ pub struct RelationshipSummary {
     trust: Option<u8>,
     tags: Vec<String>,
     starts_at: Option<i64>,
+    cause: Option<CauseSummary>,
+}
+
+#[derive(Serialize)]
+pub struct CauseSummary {
+    day: i64,
+    event: String,
+    actor: Option<String>,
+    action: Option<String>,
+    intent: Option<String>,
+    outcome: Option<&'static str>,
+    source: String,
 }
 
 #[derive(Serialize)]
@@ -186,6 +198,13 @@ impl AuthorWorkspace {
                     trust,
                     tags,
                 } => relationships.push(RelationshipSummary {
+                    cause: Self::explain(
+                        &store,
+                        &world,
+                        version.object,
+                        version.record.source,
+                        day,
+                    )?,
                     id: object_id,
                     subject_id: subject.id.0.to_string(),
                     target_id: target.id.0.to_string(),
@@ -205,6 +224,84 @@ impl AuthorWorkspace {
             people,
             relationships,
         })
+    }
+
+    fn explain(
+        store: &Store,
+        world: &World,
+        bond: ObjectRef,
+        source: Option<ObjectRef>,
+        day: i64,
+    ) -> Result<Option<CauseSummary>, String> {
+        let context = view(world, day);
+        let Some(effect) = store
+            .effect_on(bond, context)
+            .map_err(|error| error.to_string())?
+        else {
+            return Ok(None);
+        };
+        let event = store
+            .get_object(effect.event.object, context)
+            .map_err(|error| error.to_string())?
+            .ok_or("Source event is not available at this historical day")?;
+        let mut actor = None;
+        let mut action = None;
+        let mut intent = None;
+        let mut outcome = None;
+        if let Some(link) = effect.action {
+            let version = store
+                .get_object(link.object, context)
+                .map_err(|error| error.to_string())?
+                .ok_or("Source actor action is not available at this historical day")?;
+            if let ObjectData::ActorAction {
+                actor: actor_id,
+                action: action_name,
+                intent: action_intent,
+                outcome: action_outcome,
+                ..
+            } = version.record.data
+            {
+                actor = Some(
+                    store
+                        .get_object(actor_id, context)
+                        .map_err(|error| error.to_string())?
+                        .ok_or("Event actor is unavailable")?
+                        .record
+                        .label,
+                );
+                action = Some(action_name);
+                intent = Some(action_intent);
+                outcome = Some(match action_outcome {
+                    ActionOutcome::Attempted => "attempted",
+                    ActionOutcome::Succeeded => "succeeded",
+                    ActionOutcome::Failed => "failed",
+                });
+            } else {
+                return Err("Effect references an object that is not an actor action".into());
+            }
+        }
+        let source = if let Some(source) = source {
+            let source = store
+                .get_object(source, context)
+                .map_err(|error| error.to_string())?
+                .ok_or("Event source is unavailable")?;
+            if let ObjectData::Source { citation } = source.record.data {
+                citation
+            } else {
+                return Err("Event evidence does not reference a source".into());
+            }
+        } else {
+            "No source cited".into()
+        };
+        Ok(Some(CauseSummary {
+            day: effect.day.0,
+            event: event.record.label,
+            actor,
+            action,
+            intent,
+            outcome,
+            source,
+        }))
     }
 
     fn create_person(&self, world_id: &str, name: &str) -> Result<(), String> {
@@ -509,6 +606,14 @@ mod tests {
         assert_eq!(after.relationships[0].id, relationship);
         assert_eq!(after.relationships[0].trust, Some(12));
         assert_eq!(after.relationships[0].tags, vec!["estranged"]);
+        let cause = after.relationships[0].cause.as_ref().unwrap();
+        assert_eq!(cause.event, "Disclosed letter");
+        assert_eq!(cause.actor.as_deref(), Some("Beatrice"));
+        assert_eq!(cause.outcome, Some("succeeded"));
+        assert_eq!(cause.day, 10);
+        assert_eq!(cause.source, "Northbridge folio 14");
+        assert!(reopened.snapshot(&world_id, 9)?.relationships[0]
+            .cause.is_none());
         assert_eq!(
             reopened.snapshot(&world_id, 9)?.relationships[0].trust,
             Some(90)
