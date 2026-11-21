@@ -305,8 +305,8 @@ fn schema_eleven_upgrade_preserves_legacy_query_versions() -> Result<(), Error> 
 }
 
 #[test]
-fn schema_fourteen_upgrade_preserves_saved_predicates_and_marks_compatibility()
--> Result<(), Error> {
+fn schema_fourteen_upgrade_preserves_saved_predicates_and_marks_compatibility() -> Result<(), Error>
+{
     let dir = tempdir()?;
     let path = dir.path().join("schema-14.sqlite");
     let mut store = Store::open(&path)?;
