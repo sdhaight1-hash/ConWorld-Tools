@@ -1984,16 +1984,42 @@ impl Store {
         }
         let matches_name = matching_spans(statement, &target.record.label)
             .contains(&(review.start_byte, review.end_byte));
-        let matches_alias = if matches_name {
-            false
+        let span = statement.get(review.start_byte..review.end_byte);
+        let matches_alias = if let Some(span) = span.filter(|span| {
+            !matches_name
+                && span.len() <= 200
+                && matching_spans(statement, span).contains(&(review.start_byte, review.end_byte))
+        }) {
+            // Only a current, dated alias of this person can justify this span.
+            let mut aliases = tx.prepare(
+                "SELECT v.label FROM person_alias_name_keys k
+                 JOIN person_alias_versions v ON v.world_id = k.world_id
+                     AND v.alias_id = k.alias_id AND v.revision = k.revision
+                 JOIN person_aliases a ON a.world_id = k.world_id AND a.id = k.alias_id
+                 WHERE k.world_id = ?1 AND a.person_id = ?2 AND k.name_key = ?5
+                   AND v.revision = (SELECT MAX(revision) FROM person_alias_versions
+                       WHERE world_id = a.world_id AND alias_id = a.id AND revision <= ?3)
+                   AND v.active = 1 AND (v.starts_at IS NULL OR v.starts_at <= ?4)
+                   AND (v.ends_before IS NULL OR v.ends_before > ?4)",
+            )?;
+            let mut labels = aliases.query(params![
+                view.world.0.as_bytes(),
+                review.target.id.0.as_bytes(),
+                view.revision.0,
+                view.day.0,
+                span.to_lowercase()
+            ])?;
+            let mut found = false;
+            while let Some(row) = labels.next()? {
+                let label: String = row.get(0)?;
+                if label == span || (span.is_ascii() && label.eq_ignore_ascii_case(span)) {
+                    found = true;
+                    break;
+                }
+            }
+            found
         } else {
-            active_alias_versions(&tx, view)?
-                .iter()
-                .filter(|alias| alias.person == review.target && alias.matches_day(view.day))
-                .any(|alias| {
-                    matching_spans(statement, &alias.label)
-                        .contains(&(review.start_byte, review.end_byte))
-                })
+            false
         };
         if !matches_name && !matches_alias {
             return Err(Error::InvalidInput(

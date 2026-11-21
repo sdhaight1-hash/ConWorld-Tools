@@ -732,5 +732,27 @@ fn controlled_previews_refresh_only_changed_sources_and_match_fresh_reads() -> R
     assert!(read(&store, rename, None, 100)?.rows.is_empty());
     store.rebuild_search_index(Scope::Author)?;
     assert_eq!(read(&store, written, None, 100)?.rows, before.rows);
+    // Each claim stays under budget alone, but their shared prefix causes
+    // 3,126 unsuccessful comparisons per claim, exceeding 100,000 over 32 claims.
+    let people = (0..3_126)
+        .map(|i| {
+            Change::Create(
+                ObjectRef::new(world.id),
+                record(&format!("Zzz {i}"), ObjectData::Person),
+            )
+        })
+        .collect();
+    let dictionary = store.apply(&command(&world, rename, people))?;
+    assert!(read(&store, dictionary, None, 100)?.rows.is_empty());
+    let changes = (0..32)
+        .map(|_| Change::Create(ObjectRef::new(world.id), claim("Report", "Zzz unknown")))
+        .collect();
+    let busy = store.apply(&command(&world, dictionary, changes))?;
+    let deadline = QueryControl::new(Duration::from_secs(120))?;
+    assert!(matches!(
+        store.discover_mentions_controlled(view(&world, busy, 0), None, 100, &deadline),
+        Err(Error::QueryBudgetExceeded)
+    ));
+    assert!(read(&store, dictionary, None, 100)?.rows.is_empty());
     Ok(())
 }
