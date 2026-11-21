@@ -1,4 +1,4 @@
-use atlas_store::{discovery::MentionDiscovery, *};
+use atlas_store::*;
 use uuid::Uuid;
 
 fn command(world: &World, expected: AuthorRevision, changes: Vec<Change>) -> Command {
