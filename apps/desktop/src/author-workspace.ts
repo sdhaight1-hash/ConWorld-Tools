@@ -109,6 +109,7 @@ export async function showAuthorWorkspace(
   const info = document.querySelector<HTMLElement>("#author-world-info")!;
   const status = document.querySelector<HTMLElement>("#author-status")!;
   const queryForm = document.querySelector<HTMLFormElement>("#author-query-form")!;
+  const pathForm = document.querySelector<HTMLFormElement>("#author-path-form")!;
   const queryResults = document.querySelector<HTMLUListElement>("#author-query-results")!;
   const queryStatus = document.querySelector<HTMLElement>("#author-query-status")!;
   const graph = document.querySelector<HTMLElement>("#workspace")!;
@@ -189,6 +190,7 @@ export async function showAuthorWorkspace(
     for (const control of [worldSelect, dayInput, revisionInput]) control.disabled = saving;
     worldForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = saving;
     queryForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = !snapshot || saving;
+    pathForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = !snapshot || !people.length || saving;
   }
 
   const definitionFor = (category: Definition["category"], label: string) =>
@@ -453,6 +455,7 @@ export async function showAuthorWorkspace(
     const target = field<HTMLSelectElement>(relationshipForm, "target");
     options(subject, people);
     options(target, people);
+    options(field<HTMLSelectElement>(pathForm, "start"), people);
     if (people.length > 1 && subject.value === target.value) {
       target.value = people.find((person) => person.id !== subject.value)!.id;
     }
@@ -512,22 +515,19 @@ export async function showAuthorWorkspace(
       : "World loaded. Edits are saved locally.";
   }
 
-  function runSearch(mode: string, term: string) {
+  function runQuery(message: string, execute: () => Promise<SearchResult>) {
     if (!snapshot || saving) return;
     const sequence = ++querySequence;
-    const worldId = snapshot.world.id;
-    const day = snapshot.day;
-    const revision = selectedRevision();
     queryResults.replaceChildren();
-    queryStatus.textContent = mode === "backlinks" ? "Finding incoming references…" : "Searching historical records…";
+    queryStatus.textContent = message;
     void (async () => {
       try {
-        const result = await invoke<SearchResult>("workspace_search", { worldId, day, revision, mode, term, limit: 100 });
-        if (sequence !== querySequence) return;
+        const result = await execute();
+        if (sequence !== querySequence || !snapshot) return;
         const graphIds = new Set([
-          ...snapshot!.people.map((item) => item.id),
-          ...snapshot!.relationships.map((item) => item.id),
-          ...snapshot!.events.map((item) => item.id),
+          ...snapshot.people.map((item) => item.id),
+          ...snapshot.relationships.map((item) => item.id),
+          ...snapshot.events.map((item) => item.id),
         ]);
         for (const row of result.rows) {
           const item = document.createElement("li");
@@ -560,10 +560,37 @@ export async function showAuthorWorkspace(
     })();
   }
 
+  function runSearch(mode: string, term: string) {
+    if (!snapshot || saving) return;
+    const worldId = snapshot.world.id;
+    const day = snapshot.day;
+    const revision = selectedRevision();
+    runQuery(mode === "backlinks" ? "Finding incoming references…" : "Searching historical records…",
+      () => invoke<SearchResult>("workspace_search", { worldId, day, revision, mode, term, limit: 100 }));
+  }
+
   queryForm.addEventListener("submit", (event) => {
     event.preventDefault();
     runSearch(field<HTMLSelectElement>(queryForm, "mode").value,
       field<HTMLInputElement>(queryForm, "term").value.trim());
+  });
+
+  pathForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (!snapshot || saving) return;
+    const request = {
+      world_id: snapshot.world.id,
+      day: snapshot.day,
+      revision: selectedRevision(),
+      start_id: value(pathForm, "start"),
+      kind: value(pathForm, "kind").trim(),
+      direction: value(pathForm, "direction"),
+      max_depth: Number(value(pathForm, "max_depth")),
+      max_visited: Number(value(pathForm, "max_visited")),
+      limit: 100,
+    };
+    runQuery("Exploring historical relationship paths…",
+      () => invoke<SearchResult>("workspace_query_path", { request }));
   });
 
   async function refreshWorlds(preferred = worldSelect.value) {

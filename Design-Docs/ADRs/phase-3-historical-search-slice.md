@@ -1,6 +1,6 @@
 # Phase 3 — Saved-World Historical Search Slice
 
-**Status:** Implemented on [draft PR #20](https://github.com/sdhaight1-hash/ConWorld-Tools/pull/20), pending CI and native runtime validation. **Tracks:** [Roadmap Phase 3 #4](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/4). **Base audited:** `main` at `cce6ec9a552885da5e26684f208ffd63a72dff57` (2026-11-21 UTC).
+**Status:** Initial historical name/backlink search merged in [PR #20](https://github.com/sdhaight1-hash/ConWorld-Tools/pull/20) at `93036d0`, verified by [Linux/Windows CI run 44872977952](https://github.com/sdhaight1-hash/ConWorld-Tools/actions/runs/44872977952). Bounded relationship path UI is the follow-up, pending validation. **Tracks:** [Roadmap Phase 3 #4](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/4). **Base audited:** `main` at `cce6ec9a552885da5e26684f208ffd63a72dff57` (2026-11-21 UTC).
 
 ## Audit and existing boundaries
 
@@ -42,3 +42,9 @@ Run `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --lock
 6. Only expose authorized public/character search after prefilter/count/snippet/caching side-channel tests pass; preserve a single Rust query authority across Node/Canvas/Display.
 
 **Migration impact:** none in this slice. Future FTS5 and saved-query tables require versioned migrations and upgrade/reopen tests. **Status integrity:** code committed and automated checks pending; no claim of full Phase 3 or native Windows acceptance.
+
+## Follow-up slice — bounded Node relationship paths
+
+The existing `QueryFilter::RelationshipPath` already implements directed bounded BFS over the selected historical snapshot. Surface that read via a typed author-only Tauri command (`workspace_query_path`) and HTML controls for starting person, relationship kind, direction, maximum hops (1–16), visited-node budget (1–2,000), and result limit. Reuse the original query projection and accessible results view; the frontend never traverses relationships or infers new facts. Changing world/day/author revision clears stale results. This involves no migrations and leaves the original FTS5/plan/saved-query gaps unchanged.
+
+**Acceptance:** backend test covers outgoing/incoming path, historical day, old author revision, visit-budget truncation and invalid input. Playwright mock-native test verifies IPC parameters, selection, truncation notice and view invalidation. Run native CI and note that a mock-native Playwright test is not an authentic native search screenshot. Stage under Phase 3 issue #4; do not claim universal query completion.

@@ -91,6 +91,20 @@
               </label>
               <button type="submit">Search history</button>
             </form>
+            <form id="author-path-form" class="query-form query-path-form">
+              <label>Start person <select name="start" required></select></label>
+              <label>Relationship kind <input name="kind" list="relationship-kinds" maxlength="200" value="friendship" required /></label>
+              <label>Direction
+                <select name="direction">
+                  <option value="outgoing">Outgoing</option>
+                  <option value="incoming">Incoming</option>
+                  <option value="both">Both</option>
+                </select>
+              </label>
+              <label>Maximum hops <input name="max_depth" type="number" min="1" max="16" step="1" value="2" required /></label>
+              <label>Visited budget <input name="max_visited" type="number" min="1" max="2000" step="1" value="100" required /></label>
+              <button type="submit">Explore connections</button>
+            </form>
             <p id="author-query-status" role="status" aria-live="polite" class="hint">Search the selected world, historical day, and author revision.</p>
             <ul id="author-query-results" aria-label="Historical search results"></ul>
           </section>
