@@ -31,8 +31,11 @@ type Predicate = { op: "contains" | "exact" | "exact_alias" | "full_text" | "cla
   { op: "has_source"; source_id: string } |
   { op: "and" | "or"; filters: Predicate[] } |
   { op: "not"; filter: Predicate };
+type ParameterValue = { type: "text" | "object_kind"; value: string } |
+  { type: "source"; world_id: string; source_id: string };
+type QueryParameter = { name: string; default: ParameterValue };
 type SavedQuery = { id: string; name: string; mode: "contains" | "exact" | "alias" | "fulltext" | "claimtext" | "composite";
-  term: string; predicate?: Predicate | null; limit: number; recorded_at: number };
+  term: string; predicate?: Predicate | null; limit: number; recorded_at: number; parameters?: QueryParameter[] };
 type MentionDiscovery = { revision: number; truncated: boolean; rows: {
   source_id: string; source_branch: string; source_state_revision: number; source_revision: number;
   source_label: string; statement: string; target_id: string; target_label: string; matched_label?: string;
@@ -137,6 +140,8 @@ export async function showAuthorWorkspace(
   const runSavedQuery = document.querySelector<HTMLButtonElement>("#author-run-saved-query")!;
   const saveComposite = document.querySelector<HTMLButtonElement>("#author-save-composite-query")!;
   const savedSelect = saveQueryForm.elements.namedItem("query_id") as HTMLSelectElement;
+  const parameterFields = document.querySelector<HTMLElement>("#author-saved-parameters")!;
+  const parameterInputs = new Map<string, HTMLInputElement | HTMLSelectElement>();
   const focusHint = document.querySelector<HTMLElement>("#author-search-focus")!;
   const pathForm = document.querySelector<HTMLFormElement>("#author-path-form")!;
   const participantEventsForm = document.querySelector<HTMLFormElement>("#author-participant-events-form")!;
@@ -504,6 +509,9 @@ export async function showAuthorWorkspace(
     const worldId = worldSelect.value;
     const previous = snapshot;
     snapshot = undefined;
+    parameterFields.hidden = true;
+    parameterFields.replaceChildren();
+    parameterInputs.clear();
     focusedPerson = undefined;
     syncButtons();
     content.hidden = !worldId;
@@ -532,6 +540,7 @@ export async function showAuthorWorkspace(
     options(savedSelect, [{ id: "", label: "New saved search" },
       ...savedQueries.map((query) => ({ id: query.id, label: query.name + " · " + query.id.slice(0, 8) }))],
       worldChanged ? "" : savedSelect.value);
+    renderSavedParameters();
     people = next.people;
     personNames = new Map(people.map((person) => [person.id, person.label]));
     if (worldChanged) {
@@ -852,6 +861,37 @@ export async function showAuthorWorkspace(
       field<HTMLInputElement>(queryForm, "term").value.trim());
   });
 
+  function renderSavedParameters() {
+    const query = savedQueries.find((item) => item.id === savedSelect.value);
+    const parameters = query?.parameters ?? [];
+    parameterInputs.clear();
+    parameterFields.replaceChildren();
+    parameterFields.hidden = parameters.length === 0;
+    field<HTMLInputElement>(saveQueryForm, "parameterize").checked = parameters.length > 0;
+    if (!parameters.length) return;
+    const legend = document.createElement("legend");
+    legend.textContent = "Run-time parameters (defaults from saved definition)";
+    parameterFields.append(legend);
+    for (const parameter of parameters) {
+      const label = document.createElement("label");
+      label.textContent = parameter.name.replaceAll("_", " ");
+      let control: HTMLInputElement | HTMLSelectElement;
+      if (parameter.default.type === "object_kind") {
+        control = document.createElement("select");
+        for (const kind of ["person", "definition", "relationship", "event_involvement", "actor_action", "historical_event", "source", "claim"]) {
+          control.add(new Option(kind.replaceAll("_", " "), kind));
+        }
+      } else {
+        control = document.createElement("input");
+        control.maxLength = parameter.default.type === "source" ? 36 : 800;
+      }
+      control.value = parameter.default.type === "source" ? parameter.default.source_id : parameter.default.value;
+      parameterInputs.set(parameter.name, control);
+      label.append(control);
+      parameterFields.append(label);
+    }
+  }
+
   savedSelect.addEventListener("change", () => {
     const query = savedQueries.find((item) => item.id === savedSelect.value);
     if (query) {
@@ -861,12 +901,31 @@ export async function showAuthorWorkspace(
         field<HTMLSelectElement>(queryForm, "mode").value = query.mode;
       }
     }
+    renderSavedParameters();
     syncButtons();
   });
 
   runSavedQuery.addEventListener("click", () => {
     const query = savedQueries.find((item) => item.id === savedSelect.value);
-    if (!query) return;
+    if (!query || !snapshot) return;
+    if (query.parameters?.length) {
+      const bindings = query.parameters.map((parameter) => {
+        const value = parameterInputs.get(parameter.name)?.value ?? "";
+        return { name: parameter.name, value: parameter.default.type === "source"
+          ? { type: "source", world_id: snapshot!.world.id, source_id: value }
+          : { type: parameter.default.type, value } };
+      });
+      const request = {
+        world_id: snapshot.world.id,
+        day: snapshot.day,
+        revision: snapshot.view_revision,
+        query_id: query.id,
+        bindings,
+      };
+      runQuery("Replaying saved query with typed parameters…",
+        (requestId) => invoke<SearchResult>("workspace_replay_saved_query", { request, requestId }));
+      return;
+    }
     if (query.mode === "composite") {
       if (!query.predicate || !snapshot) {
         queryStatus.textContent = "Saved composite predicate is unavailable.";
@@ -905,6 +964,7 @@ export async function showAuthorWorkspace(
       expected_revision: snapshot.world.revision,
       query_id: savedSelect.value || null,
       name: value(saveQueryForm, "name"),
+      ...(field<HTMLInputElement>(saveQueryForm, "parameterize").checked ? { parameterize: true } : {}),
       mode: value(queryForm, "mode"),
       term,
       limit: 100,
@@ -916,6 +976,7 @@ export async function showAuthorWorkspace(
         const savedId = await invoke<string>("workspace_save_query", { request });
         await refresh();
         savedSelect.value = savedId;
+        renderSavedParameters();
         queryStatus.textContent = "Saved search definition to world history.";
       } catch (error) {
         queryStatus.textContent = "Unable to save search: " + String(error);
@@ -986,6 +1047,7 @@ export async function showAuthorWorkspace(
       expected_revision: snapshot.world.revision,
       query_id: savedSelect.value || null,
       name: queryName,
+      ...(field<HTMLInputElement>(saveQueryForm, "parameterize").checked ? { parameterize: true } : {}),
       mode: "composite",
       term: "",
       predicate,
@@ -998,6 +1060,7 @@ export async function showAuthorWorkspace(
         const savedId = await invoke<string>("workspace_save_query", { request });
         await refresh();
         savedSelect.value = savedId;
+        renderSavedParameters();
         queryStatus.textContent = "Saved combined query definition to author history.";
       } catch (error) {
         queryStatus.textContent = "Unable to save combined query: " + String(error);

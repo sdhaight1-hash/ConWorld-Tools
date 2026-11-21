@@ -1260,3 +1260,68 @@ test("cancels exact pending search and ignores cancelled or superseded replies",
   await expect(page.locator("#author-query-results li")).toHaveCount(0);
   await expect(cancel).toBeHidden();
 });
+
+test("saved parameters use typed bindings and server-side saved identity", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "world", name: "Parameterized archive", revision: 2 };
+    const saved: Record<string, unknown>[] = [];
+    const calls: unknown[] = [];
+    Object.assign(window, {
+      isTauri: true,
+      __parameterCalls: calls,
+      __TAURI_INTERNALS__: {
+        invoke: async (command: string, args: Record<string, unknown>) => {
+          if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+          if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+          if (command === "workspace_worlds") return [world];
+          if (command === "workspace_snapshot") return {
+            world: { ...world }, day: args.day, view_revision: args.revision ?? world.revision,
+            people: [], relationships: [], events: [], definitions: [], aliases: [],
+          };
+          if (command === "workspace_saved_queries") return saved.filter(item => Number(item.recorded_at) <= Number(args.revision ?? world.revision));
+          if (command === "workspace_save_query") {
+            const request = args.request as Record<string, unknown>;
+            calls.push({ operation: "save", ...request });
+            world.revision++;
+            saved.push({ id: "parameterized", name: request.name, mode: "fulltext", term: request.term,
+              limit: request.limit, recorded_at: world.revision,
+              parameters: [{ name: "label_phrase_1", default: { type: "text", value: request.term } }] });
+            return "parameterized";
+          }
+          if (command === "workspace_replay_saved_query") {
+            calls.push({ operation: "replay", ...args });
+            const request = args.request as { revision: number; bindings: { value: { value: string } }[] };
+            return { revision: request.revision, truncated: false,
+              rows: [{ id: "record", label: request.bindings[0].value.value, kind: "person" }] };
+          }
+          throw new Error("Unexpected mock command: " + command);
+        },
+      },
+    });
+  });
+  await page.goto("/");
+  const form = page.locator("#author-query-form");
+  const saved = page.locator("#author-save-query-form");
+  await form.getByLabel("Find name").fill("Alice");
+  await form.getByLabel("Match names").selectOption("fulltext");
+  await saved.getByLabel("Saved search name").fill("Find a person");
+  await saved.getByLabel("Allow typed values to change at replay").check();
+  await saved.getByRole("button", { name: "Save search definition" }).click();
+  const parameter = saved.getByLabel("label phrase 1");
+  await expect(parameter).toHaveValue("Alice");
+  await parameter.fill("Bob");
+  await saved.getByRole("button", { name: "Run saved search" }).click();
+  await expect(page.locator("#author-query-results")).toContainText("Bob");
+  const calls = await page.evaluate(() => (window as unknown as { __parameterCalls: unknown[] }).__parameterCalls);
+  expect(calls).toMatchObject([
+    { operation: "save", parameterize: true, term: "Alice" },
+    { operation: "replay", request: { world_id: "world", revision: 3, query_id: "parameterized",
+      bindings: [{ name: "label_phrase_1", value: { type: "text", value: "Bob" } }] } },
+  ]);
+  await page.getByRole("button", { name: "Refresh historical view" }).click();
+  await expect(parameter).toHaveValue("Alice");
+  await page.locator("#author-revision").fill("2");
+  await page.locator("#author-revision").blur();
+  await expect(page.locator("#author-saved-parameters")).toBeHidden();
+  await expect(saved.getByRole("button", { name: "Run saved search" })).toBeDisabled();
+});
