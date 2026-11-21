@@ -47,6 +47,8 @@ The first desktop build opens a local Northbridge scene through Tauri, with a Ca
 
 ### Starting the desktop foundation
 
+**Windows double-click launcher:** Run [`start.bat`](start.bat) from the repository root. It checks for npm and Cargo, installs desktop npm dependencies if missing, then runs Tauri's development command so Vite starts automatically. Keep the console open while using the app. If startup fails, the console stays open with the error. This requires the [Tauri Windows prerequisites](https://v2.tauri.app/start/prerequisites/); it is a developer launcher, not a packaged installer.
+
 For live frontend development, in `apps/desktop` run `npm ci` followed by `npm run tauri dev`. This starts the Vite listener and Tauri window together at `http://127.0.0.1:1420`.
 
 For a **standalone executable with no localhost server**, in `apps/desktop` run `npm ci && npm run build`, then from the repository root run `cargo build --locked -p atlas-desktop`. Launch `target/debug/atlas-desktop.exe` (Windows) or `target/debug/atlas-desktop` (Linux). Rebuild older executables; a raw dev-mode executable without Vite can show `ERR_CONNECTION_REFUSED`. See [Phase Zero launch diagnostics](Design-Docs/Phase-0-Verification.md).

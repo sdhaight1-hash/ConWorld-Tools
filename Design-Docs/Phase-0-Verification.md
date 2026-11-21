@@ -4,6 +4,8 @@
 
 ## Run from a checkout
 
+**Windows shortcut:** Double-click [`start.bat`](../start.bat) at the repository root. It works when the checkout path includes spaces, checks for `npm` and `cargo`, installs `apps/desktop/node_modules` with `npm ci` when Tauri CLI is missing, and runs `npm run tauri dev` from the correct folder. On failure it displays the error rather than closing immediately. This uses the live Vite development server; do not open an old development executable directly.
+
 Install stable Rust and Node.js 24. Install the [Tauri native prerequisites](https://v2.tauri.app/start/prerequisites/) for the operating system. Windows uses the MSVC build tools and Edge WebView2.
 
 ```sh
