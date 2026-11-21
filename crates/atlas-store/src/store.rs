@@ -14,7 +14,7 @@ use crate::query::{
 use crate::*;
 
 pub(crate) const APPLICATION_ID: i64 = 0x4357_4c44; // CWLD
-pub(crate) const SCHEMA_VERSION: i64 = 12;
+pub(crate) const SCHEMA_VERSION: i64 = 13;
 
 pub struct Store {
     conn: Connection,
@@ -80,6 +80,9 @@ impl Store {
         }
         if version < 12 {
             tx.execute_batch(include_str!("../migrations/0012.sql"))?;
+        }
+        if version < 13 {
+            tx.execute_batch(include_str!("../migrations/0013.sql"))?;
             verify_foreign_keys(&tx)?;
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
@@ -142,6 +145,128 @@ impl Store {
         )?;
         tx.commit()?;
         Ok(())
+    }
+
+
+    /// Find candidate IDs via canonical typed involvement indexes, then resolve
+    /// every identity through the authoritative world/branch/day/revision view.
+    /// Never treat an older, future or other-branch involvement row as current.
+    pub(crate) fn indexed_involvements_at(
+        &self,
+        view: ViewContext,
+        focus: ObjectRef,
+        role: Option<&EventRole>,
+        by_participant: bool,
+        limit: usize,
+    ) -> Result<crate::query::QueryResult, Error> {
+        require_author(view.scope)?;
+        if focus.world != view.world {
+            return Err(Error::WrongWorld);
+        }
+        if let Some(EventRole::Custom(definition)) = role
+            && definition.world != view.world
+        {
+            return Err(Error::WrongWorld);
+        }
+        self.validate_query_view(view)?;
+        let tx = self.conn.unchecked_transaction()?;
+        let focus_version = resolve_object(&tx, focus, view.branch, view.revision, view.day)?;
+        let allowed = focus_version.is_some_and(|version| {
+            matches!(
+                (&version.record.data, by_participant),
+                (ObjectData::Person, true) | (ObjectData::HistoricalEvent { .. }, false)
+            )
+        });
+        if !allowed {
+            return Ok(crate::query::QueryResult {
+                rows: Vec::new(),
+                revision: view.revision,
+                truncated: false,
+            });
+        }
+        const RAW_BUDGET: i64 = 10_000;
+        let candidates = {
+            let sql = if by_participant {
+                "SELECT DISTINCT involvement_id FROM event_involvement_versions
+                 WHERE world_id = ?1 AND participant_id = ?2
+                 ORDER BY involvement_id LIMIT ?3"
+            } else {
+                "SELECT DISTINCT involvement_id FROM event_involvement_versions
+                 WHERE world_id = ?1 AND event_id = ?2
+                 ORDER BY involvement_id LIMIT ?3"
+            };
+            let mut statement = tx.prepare(sql)?;
+            statement
+                .query_map(
+                    params![view.world.0.as_bytes(), focus.id.0.as_bytes(), RAW_BUDGET + 1],
+                    |row| row.get::<_, [u8; 16]>(0),
+                )?
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        if candidates.len() > RAW_BUDGET as usize {
+            return Err(Error::QueryBudgetExceeded);
+        }
+        let mut rows = Vec::new();
+        let mut events = HashSet::new();
+        for id in candidates {
+            let object = ObjectRef {
+                world: view.world,
+                id: ObjectId(Uuid::from_bytes(id)),
+            };
+            let Some(involvement) =
+                resolve_object(&tx, object, view.branch, view.revision, view.day)?
+            else {
+                continue;
+            };
+            let ObjectData::EventInvolvement {
+                event,
+                participant,
+                role: recorded_role,
+            } = &involvement.record.data else {
+                continue;
+            };
+            if (by_participant && participant != &focus)
+                || (!by_participant && event != &focus)
+                || role.is_some_and(|wanted| wanted != recorded_role)
+            {
+                continue;
+            }
+            let required = if by_participant { *event } else { *participant };
+            let Some(target_version) =
+                resolve_object(&tx, required, view.branch, view.revision, view.day)?
+            else {
+                continue;
+            };
+            let expected = if by_participant {
+                matches!(&target_version.record.data, ObjectData::HistoricalEvent { .. })
+            } else {
+                matches!(&target_version.record.data, ObjectData::Person)
+            };
+            if !expected {
+                continue;
+            }
+            if by_participant {
+                if events.insert(*event) {
+                    rows.push(target_version);
+                }
+            } else {
+                rows.push(involvement);
+            }
+        }
+        rows.sort_by(|a, b| {
+            a.record
+                .label
+                .cmp(&b.record.label)
+                .then(a.object.id.0.cmp(&b.object.id.0))
+        });
+        let truncated = rows.len() > limit;
+        rows.truncate(limit);
+        tx.commit()?;
+        Ok(crate::query::QueryResult {
+            rows,
+            revision: view.revision,
+            truncated,
+        })
     }
 
     /// Indexed phrase search still resolves every candidate through the authoritative

@@ -240,6 +240,14 @@ impl Store {
             QueryFilter::ClaimFullTextPhrase(phrase) => {
                 return self.indexed_claim_phrase_at(phrase, view, spec.limit);
             }
+            QueryFilter::EventRole { event, role } => {
+                return self.indexed_involvements_at(view, *event, Some(role), false, spec.limit);
+            }
+            QueryFilter::ParticipantEvents { participant, role } => {
+                return self.indexed_involvements_at(
+                    view, *participant, role.as_ref(), true, spec.limit,
+                );
+            }
             _ => {}
         }
         let objects = self.objects_at(view, 2_000)?;
@@ -286,52 +294,8 @@ impl Store {
                     })
                     .collect()
             }
-            QueryFilter::EventRole { event, role } => {
-                same_world(*event, view)?;
-                if let EventRole::Custom(definition) = role {
-                    same_world(*definition, view)?;
-                }
-                objects.into_iter().filter(|item| matches!(&item.record.data,
-                    ObjectData::EventInvolvement { event: candidate, participant, role: candidate_role }
-                        if candidate == event && candidate_role == role
-                            && visible.contains(event) && visible.contains(participant)
-                )).collect()
-            }
-            QueryFilter::ParticipantEvents { participant, role } => {
-                same_world(*participant, view)?;
-                if let Some(EventRole::Custom(definition)) = role {
-                    same_world(*definition, view)?;
-                }
-                let person_visible = objects.iter().any(|item| {
-                    item.object == *participant && matches!(&item.record.data, ObjectData::Person)
-                });
-                if !person_visible {
-                    Vec::new()
-                } else {
-                    let events: HashSet<_> = objects
-                        .iter()
-                        .filter_map(|item| match &item.record.data {
-                            ObjectData::EventInvolvement {
-                                event,
-                                participant: member,
-                                role: recorded,
-                            } if member == participant
-                                && role.is_none_or(|wanted| wanted == *recorded)
-                                && visible.contains(event) =>
-                            {
-                                Some(*event)
-                            }
-                            _ => None,
-                        })
-                        .collect();
-                    objects
-                        .into_iter()
-                        .filter(|item| {
-                            events.contains(&item.object)
-                                && matches!(&item.record.data, ObjectData::HistoricalEvent { .. })
-                        })
-                        .collect()
-                }
+            QueryFilter::EventRole { .. } | QueryFilter::ParticipantEvents { .. } => {
+                unreachable!("handled by indexed event participation path")
             }
             QueryFilter::RelationshipPath {
                 start,
