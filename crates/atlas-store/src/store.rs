@@ -35,6 +35,7 @@ const QUERY_LINEAGE: &str = "WITH RECURSIVE lineage(branch_id, max_revision) AS 
 pub struct Store {
     conn: Connection,
     query_control: RefCell<Option<QueryControl>>,
+    pub(crate) mention_preview: RefCell<Option<crate::discovery::MentionPreview>>,
 }
 
 // Always remove the connection-local callback, including on error or unwind.
@@ -175,6 +176,7 @@ impl Store {
         Ok(Self {
             conn,
             query_control: RefCell::new(None),
+            mention_preview: RefCell::new(None),
         })
     }
 
@@ -355,6 +357,7 @@ impl Store {
             "REINDEX discovery_person_prefix_idx; REINDEX discovery_alias_prefix_idx;",
         )?;
         tx.commit()?;
+        *self.mention_preview.get_mut() = None;
         Ok(())
     }
 
