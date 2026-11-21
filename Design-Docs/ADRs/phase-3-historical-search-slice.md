@@ -14,9 +14,9 @@ Important limits: `objects_at` has a 2,000-visible-object cap and a 10,000-candi
 
 Expose **the existing Rust query service**, not a second frontend search implementation:
 
-- A trusted, author-only `workspace_search` Tauri command accepts world, normalized fictional day, optional author revision, exact/substring match mode, search text and result budget.
+- A trusted, author-only `workspace_search` Tauri command accepts world, normalized fictional day, optional author revision, exact/substring/backlink match mode, search text or target ID, and result budget.
 - Rust loads the current world, constructs the same explicit `ViewContext`, validates query schema and budget via `Store::execute_query`, and serializes stable IDs, labels, typed record categories, source revision and truncation.
-- Desktop HTML renders keyboard-accessible results; duplicate names show their separate stable IDs. Only records already present in the graph have active navigation buttons. Non-graph records remain readable text and never promise a nonexistent graph selection.
+- Desktop HTML renders keyboard-accessible results; duplicate names show their separate stable IDs. Only records already present in the graph have active navigation buttons. Non-graph records remain readable text and never promise a nonexistent graph selection. Every search hit also offers a read-only **Find references** action backed by the typed `Backlinks(ObjectRef)` filter.
 - Any world/day/revision change clears stale results and invalidates outstanding asynchronous requests. No search result or inferred mention mutates the world.
 - Search remains **author-only**. Do not reuse this command as Display/public search. Phase 7 hardens per-audience prefiltering, and Phase 3 still needs a policy-aware search engine before public exposure.
 
@@ -24,7 +24,7 @@ No new migration, external dependency, renderer change, or alternate source of t
 
 ## Verification / acceptance map
 
-- **AT-21 / AT-35 partial:** two people with the same label are separate search hits; selecting one uses its unique object ID. No mention discovery implemented.
+- **AT-21 / AT-35 partial:** two people with the same label are separate search hits; selecting one uses its unique object ID. Backlink lookup is stable-ID based rather than ambiguous text based. No mention discovery implemented.
 - **AT-23 partial:** `QuerySpec` validates the result budget and preserves truncation/error behavior. General cancellation and scalable graph planner remain open.
 - **Temporal/revision:** search reads one world/day/revision context and returns the chosen revision, including older archived author history.
 - **UI:** Playwright mock-native bridge tests search payloads, results, navigation and invalidation on revision change. This is **not** a native Tauri screenshot or live Rust IPC proof.
@@ -38,7 +38,7 @@ Run `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --lock
 2. Add FTS5 plus rebuildable search indexes with transactional invalidation, incremental/rebuilt equivalence checks, and measured 1k/10k/50k performance.
 3. Implement durable versioned saved queries and typed bindings, including scope and dependency invalidation.
 4. Add explicit link/backlink indexes, alias collision proposals, mention provenance, approval/rejection and draft ghost nodes; never infer guild membership automatically.
-5. Expand the Node query builder to typed event-role, path, backlink and provenance filters; add robust pagination, query cancellation and UI feedback.
+5. Expand the Node query builder to typed event-role, path and provenance filters (beyond the current backlink shortcut); add robust pagination, query cancellation and UI feedback.
 6. Only expose authorized public/character search after prefilter/count/snippet/caching side-channel tests pass; preserve a single Rust query authority across Node/Canvas/Display.
 
 **Migration impact:** none in this slice. Future FTS5 and saved-query tables require versioned migrations and upgrade/reopen tests. **Status integrity:** code committed and automated checks pending; no claim of full Phase 3 or native Windows acceptance.
