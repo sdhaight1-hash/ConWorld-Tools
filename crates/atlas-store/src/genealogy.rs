@@ -99,7 +99,12 @@ impl Store {
             return Err(Error::CapabilityDenied);
         }
         let pedigree = Pedigree::at(view.world, view.day, records)?;
-        let snapshot = self.objects_at(view, 2_000)?;
+        let references = pedigree
+            .links
+            .iter()
+            .flat_map(|link| [link.parent, link.child])
+            .collect();
+        let snapshot = self.referenced_versions(view, references)?;
         let people: HashSet<_> = snapshot
             .into_iter()
             .filter(|item| matches!(item.record.data, ObjectData::Person))

@@ -15,14 +15,14 @@ use crate::{
 
 pub const QUERY_SCHEMA_VERSION: u16 = 1;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct QuerySpec {
     pub schema_version: u16,
     pub filter: QueryFilter,
     pub limit: usize,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum QueryFilter {
     LabelContains(String),
     ExactLabel(String),
@@ -173,7 +173,7 @@ impl PredicateInput {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Direction {
     Outgoing,
     Incoming,

@@ -14,37 +14,37 @@ const MAX_ELEMENTS: usize = 512;
 const MAX_DEPTH: usize = 16;
 const MAX_QUERIES: usize = 16;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ElementId(pub Uuid);
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LayoutDocument {
     pub schema_version: u16,
     pub entry: ObjectRef,
     pub root: LayoutElement,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LayoutElement {
     pub id: ElementId,
     pub audience: ClaimAudience,
     pub content: ElementContent,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ElementContent {
     Stack(Vec<LayoutElement>),
     Text(String),
     Query(QuerySpec),
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DisplayElement {
     pub id: ElementId,
     pub content: DisplayContent,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum DisplayContent {
     Stack(Vec<DisplayElement>),
     Text(String),
@@ -87,6 +87,26 @@ impl LayoutDocument {
                     return Err(Error::InvalidInput("layout text length"));
                 }
                 _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    /// The query engine currently returns author records. Such bindings can
+    /// live in private subtrees but cannot be released to any reader.
+    pub(crate) fn validate_publication(&self) -> Result<(), Error> {
+        let mut pending = vec![(&self.root, ClaimAudience::Public)];
+        while let Some((element, parent)) = pending.pop() {
+            let audience = restrict(element.audience, parent);
+            if audience == ClaimAudience::Author {
+                continue;
+            }
+            match &element.content {
+                ElementContent::Query(_) => return Err(Error::CapabilityDenied),
+                ElementContent::Stack(children) => {
+                    pending.extend(children.iter().map(|child| (child, audience)))
+                }
+                ElementContent::Text(_) => {}
             }
         }
         Ok(())

@@ -55,7 +55,15 @@ impl Store {
         {
             return Err(Error::QueryBudgetExceeded);
         }
-        let snapshot = self.objects_at(view, 2_000)?;
+        let references = std::iter::once(start)
+            .chain(
+                links
+                    .iter()
+                    .filter(|link| link.status == LinkStatus::Confirmed)
+                    .flat_map(|link| [link.cause, link.consequence, link.source]),
+            )
+            .collect();
+        let snapshot = self.referenced_versions(view, references)?;
         let mut events = HashMap::new();
         let mut sources = HashSet::new();
         for item in snapshot {

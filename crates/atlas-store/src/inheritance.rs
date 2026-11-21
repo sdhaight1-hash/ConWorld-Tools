@@ -65,3 +65,34 @@ fn mix(value: u64) -> u64 {
     value = (value ^ (value >> 27)).wrapping_mul(0x94d049bb133111eb);
     value ^ (value >> 31)
 }
+
+/// Shared dimensionless intervals from the same immediate fictional contributor.
+/// Distinct people can have zero overlap even with a shared biological parent.
+pub fn shared_segments(
+    pedigree: &Pedigree,
+    first: ObjectRef,
+    second: ObjectRef,
+    seed: u64,
+    model: u16,
+) -> Result<Vec<SyntheticSegment>, Error> {
+    if first == second {
+        return Err(Error::InvalidInput("select two distinct people"));
+    }
+    let left = fictional_segments(pedigree, first, seed, model)?;
+    let right = fictional_segments(pedigree, second, seed, model)?;
+    let mut shared = Vec::new();
+    for a in left {
+        for b in right {
+            let start = a.start.max(b.start);
+            let end = a.end.min(b.end);
+            if a.contributor == b.contributor && start < end {
+                shared.push(SyntheticSegment {
+                    start,
+                    end,
+                    contributor: a.contributor,
+                });
+            }
+        }
+    }
+    Ok(shared)
+}

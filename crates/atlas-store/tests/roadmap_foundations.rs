@@ -449,3 +449,193 @@ fn phase_9_backup_is_verified_read_only_and_preserves_query_references() -> Resu
     ));
     Ok(())
 }
+
+#[test]
+fn character_page_replays_author_queries_and_revokes_reader_access_after_restore()
+-> Result<(), Error> {
+    use atlas_store::archive::restore_archive;
+    let mut store = Store::open(":memory:")?;
+    let world = seed(&mut store)?;
+    let entry = id(&world, 1);
+    let block = |audience, content| LayoutElement {
+        id: ElementId(Uuid::new_v4()),
+        audience,
+        content,
+    };
+    let document = LayoutDocument {
+        entry,
+        schema_version: LAYOUT_SCHEMA_VERSION,
+        root: block(
+            ClaimAudience::Public,
+            ElementContent::Stack(vec![
+                block(
+                    ClaimAudience::Public,
+                    ElementContent::Text("Gazette biography".into()),
+                ),
+                block(
+                    ClaimAudience::Author,
+                    ElementContent::Stack(vec![
+                        block(
+                            ClaimAudience::Public,
+                            ElementContent::Text("Sealed testimony".into()),
+                        ),
+                        block(
+                            ClaimAudience::Public,
+                            ElementContent::Query(query(QueryFilter::ExactLabel(
+                                "Alice Vale".into(),
+                            ))),
+                        ),
+                    ]),
+                ),
+            ]),
+        ),
+    };
+    let author = view(&world, 13);
+    let public = |revision| ViewContext {
+        revision,
+        scope: Scope::Public,
+        ..author
+    };
+    assert!(
+        store
+            .display_entry(public(author.revision), entry)?
+            .is_none()
+    );
+    let mut unsafe_binding = document.clone();
+    if let ElementContent::Stack(blocks) = &mut unsafe_binding.root.content {
+        blocks[1].audience = ClaimAudience::Public;
+    }
+    assert!(matches!(
+        store.save_entry_layout(author, &unsafe_binding, true, Uuid::new_v4()),
+        Err(Error::CapabilityDenied)
+    ));
+    let published = store.save_entry_layout(author, &document, true, Uuid::new_v4())?;
+    assert!(matches!(
+        store.save_entry_layout(author, &document, false, Uuid::new_v4()),
+        Err(Error::RevisionConflict { .. })
+    ));
+    assert!(matches!(
+        store.entry_layout(public(published), entry),
+        Err(Error::CapabilityDenied)
+    ));
+    let page = store.display_entry(public(published), entry)?.unwrap();
+    let DisplayContent::Stack(visible) = page.content else {
+        panic!("expected page")
+    };
+    assert_eq!(visible.len(), 1);
+    assert_eq!(
+        visible[0].content,
+        DisplayContent::Text("Gazette biography".into())
+    );
+    let pinned = ViewContext {
+        revision: published,
+        ..author
+    };
+    let projected = store.display_entry(pinned, entry)?.unwrap();
+    let DisplayContent::Stack(children) = projected.content else {
+        panic!("expected root")
+    };
+    let DisplayContent::Stack(private) = &children[1].content else {
+        panic!("expected notes")
+    };
+    assert!(
+        matches!(&private[1].content, DisplayContent::QueryRows{records, ..} if records.len()==2)
+    );
+    let revoked = store.save_entry_layout(pinned, &document, false, Uuid::new_v4())?;
+    let dir = tempfile::tempdir()?;
+    let backup = dir.path().join("export.sqlite");
+    let destination = dir.path().join("restored.sqlite");
+    store.backup_to(&backup, Scope::Author)?;
+    let manifest = restore_archive(&backup, &destination, Scope::Author)?;
+    assert_eq!(manifest.worlds[0].revision, revoked);
+    let before = std::fs::read(&destination)?;
+    assert!(restore_archive(&backup, &destination, Scope::Author).is_err());
+    assert_eq!(before, std::fs::read(&destination)?);
+    let restored = Store::open(&destination)?;
+    assert_eq!(
+        restored.entry_layout(pinned, entry)?,
+        Some((document, true))
+    );
+    assert!(restored.display_entry(public(revoked), entry)?.is_none());
+    assert!(matches!(
+        restored.display_entry(public(published), entry),
+        Err(Error::InvalidRevision)
+    ));
+    Ok(())
+}
+
+#[test]
+fn focused_family_and_event_reads_survive_a_large_unrelated_population() -> Result<(), Error> {
+    use atlas_store::inheritance::shared_segments;
+    let mut store = Store::open(":memory:")?;
+    let world = seed(&mut store)?;
+    let revision = store.apply(&Command {
+        world: world.id,
+        branch: world.main,
+        expected: AuthorRevision(1),
+        id: Uuid::new_v4(),
+        scope: Scope::Author,
+        author: "Fixture".into(),
+        rationale: "Unrelated residents".into(),
+        changes: (0..2_001)
+            .map(|_| {
+                Change::Create(
+                    ObjectRef::new(world.id),
+                    Record {
+                        label: "Resident".into(),
+                        valid: ValidInterval::default(),
+                        source: None,
+                        data: ObjectData::Person,
+                    },
+                )
+            })
+            .collect(),
+    })?;
+    let view = ViewContext {
+        revision,
+        ..view(&world, 13)
+    };
+    assert!(matches!(
+        store.objects_at(view, 2_000),
+        Err(Error::QueryBudgetExceeded)
+    ));
+    let mut links = vec![];
+    for child in [3, 12] {
+        for parent in [1, 2] {
+            links.push(Parentage {
+                parent: id(&world, parent),
+                child: id(&world, child),
+                kind: ParentageKind::Biological,
+                accepted: true,
+                valid: ValidInterval::default(),
+            });
+        }
+    }
+    let pedigree = store.pedigree_at(view, &links)?;
+    let a = id(&world, 3);
+    let b = id(&world, 12);
+    let shared = shared_segments(&pedigree, a, b, 481, MODEL_VERSION)?;
+    assert_eq!(
+        shared,
+        shared_segments(&pedigree, b, a, 481, MODEL_VERSION)?
+    );
+    assert!(!shared.is_empty());
+    for s in &shared {
+        assert!(s.start < s.end && s.end <= MODEL_LENGTH);
+    }
+    let start = id(&world, 6);
+    let impact = store.confirmed_impact(
+        view,
+        start,
+        &[CausalLink {
+            cause: start,
+            consequence: id(&world, 7),
+            source: id(&world, 9),
+            status: LinkStatus::Confirmed,
+        }],
+        2,
+        10,
+    )?;
+    assert_eq!(impact.events, vec![id(&world, 7)]);
+    Ok(())
+}

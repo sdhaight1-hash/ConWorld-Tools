@@ -2095,6 +2095,66 @@ pub fn workspace_save_query(
 }
 
 #[tauri::command]
+pub fn workspace_entry_layout(
+    workspace: State<'_, AuthorWorkspace>,
+    world_id: String,
+    entry_id: String,
+    revision: i64,
+    day: i64,
+) -> Result<Option<(atlas_store::layout::LayoutDocument, bool)>, String> {
+    let store = workspace.lock()?;
+    let world = store
+        .world(WorldId(id(&world_id)?), Scope::Author)
+        .map_err(|e| e.to_string())?;
+    let context = ViewContext {
+        revision: AuthorRevision(revision),
+        ..view(&world, day)
+    };
+    store
+        .entry_layout(context, reference(world.id, &entry_id)?)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn workspace_save_layout(
+    workspace: State<'_, AuthorWorkspace>,
+    world_id: String,
+    day: i64,
+    expected_revision: i64,
+    document: atlas_store::layout::LayoutDocument,
+    published: bool,
+) -> Result<(), String> {
+    let mut store = workspace.lock()?;
+    let world = AuthorWorkspace::edit_world(&store, &world_id, expected_revision)?;
+    store
+        .save_entry_layout(view(&world, day), &document, published, Uuid::new_v4())
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn workspace_public_entry(
+    workspace: State<'_, AuthorWorkspace>,
+    world_id: String,
+    entry_id: String,
+    day: i64,
+) -> Result<Option<atlas_store::layout::DisplayElement>, String> {
+    let store = workspace.lock()?;
+    let world = store
+        .world(WorldId(id(&world_id)?), Scope::Author)
+        .map_err(|e| e.to_string())?;
+    store
+        .display_entry(
+            ViewContext {
+                scope: Scope::Public,
+                ..view(&world, day)
+            },
+            reference(world.id, &entry_id)?,
+        )
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn workspace_create_person(
     workspace: State<'_, AuthorWorkspace>,
     world_id: String,

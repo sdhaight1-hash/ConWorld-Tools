@@ -1,3 +1,4 @@
+import { openEntryEditor } from "./entry-editor";
 import { invoke } from "@tauri-apps/api/core";
 import type { Scene } from "./main";
 
@@ -436,6 +437,14 @@ export async function showAuthorWorkspace(
       control.addEventListener("click", action);
       panel.append(control);
     }
+    const current = snapshot;
+    if (current && people.some(person => person.id === id)) {
+      button("Open character page", () => {
+        panel.replaceChildren();
+        void openEntryEditor(panel, current.world.id, id, current.day, current.view_revision,
+          !revisionInput.value.trim(), async () => { await refresh(); selectNode(id); });
+      });
+    }
     if (event) {
       eventDetails(panel, event, name);
       if (snapshot) evidencePanel(panel, event, snapshot);
@@ -693,6 +702,17 @@ export async function showAuthorWorkspace(
               syncButtons();
               field(pathForm, "kind").focus();
             });
+            const pageButton = document.createElement("button");
+            pageButton.type = "button";
+            pageButton.textContent = "Open character page";
+            pageButton.addEventListener("click", () => {
+              const current = snapshot;
+              if (!current || sequence !== querySequence) return;
+              pageButton.disabled = true;
+              void openEntryEditor(item, current.world.id, row.id, current.day, current.view_revision,
+                !revisionInput.value.trim(), refresh);
+            });
+            item.append(pageButton);
             item.append(focus);
           }
           const references = document.createElement("button");
