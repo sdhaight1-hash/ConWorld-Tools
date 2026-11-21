@@ -753,6 +753,7 @@ impl Store {
         if !(1..=2_000).contains(&limit) {
             return Err(Error::InvalidInput("object listing limit"));
         }
+        self.validate_query_view(view)?;
         let tx = self.conn.unchecked_transaction()?;
         let world = load_world(&tx, view.world)?;
         if view.revision < AuthorRevision(0) || view.revision > world.revision {
