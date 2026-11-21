@@ -34,3 +34,26 @@ The Northbridge integration fixture creates Alice and Beatrice with separate dir
 - A desktop Rust test creates an on-disk temporary database, adds people/relationship and a source-backed event effect, verifies same-day rejection, closes/reopens the file and checks earlier/later states and citation. The store separately checks bounded listing, world isolation and public denial. Browser preview does not expose native author data.
 
 **Still needed for full Phase Two:** multiple independently authored event actors, author revision selection, configurable relation/role vocabularies, richer claims/knowledge and perspective-aware views. Full publication security belongs to Phase Seven. No development screenshot is claimed without observing an actual running application.
+
+## Phase Two audit and data-integrity hardening (2026-11-20/21)
+
+This pass re-inspected the root README; historical, temporal, agency, storage, query, and verification contracts; current GitHub issues/PRs; screenshot rules; SQLite migrations; store/renderer/calendar crates; Tauri command and capability code; browser forms; and Windows/Linux CI workflows. It does **not** claim full verification of unimplemented roadmap systems or a native user-machine screenshot.
+
+| Risk | Code-confirmed cause | Resolution and acceptance evidence |
+| --- | --- | --- |
+| High — valid objects omitted | A global SQL ID limit was applied **before** branch/day visibility. Future or other-branch records could consume the quota ahead of visible people. | `Store::objects_at` now filters history before the return limit. Deterministic-ID regression tests prove low-ID future entries no longer eclipse current characters. |
+| High — silent incomplete listings | The 2,000-object projection returned an incomplete list without communicating truncation, making missing people appear deleted. | Explicit `Error::QueryBudgetExceeded` when the result limit or the temporary 10,000-candidate scan budget is reached. |
+| High — wrong day from blank field | JavaScript `Number("") === 0` silently turned a cleared date field into fictional day zero. | Required HTML date input plus explicit nonempty signed-integer and safe-range validation; browser mock-bridge test ensures no write invocation on blank day. |
+| High — archived author revision could be edited | Workspace always projected current author revision, without safely pinning an older one. | Optional revision-scoped snapshot; event attribution reads the same revision; forms are read-only while a revision is pinned. Rust reopen test compares states and cause before/after revision. |
+| Known Phase Two scale boundary | Temporary reader scans IDs and resolves historical records individually; it is not yet an indexed, paginated query service. | 10,000-candidate and 2,000-visible-record limits fail explicitly rather than silently; true indexed pagination belongs to Roadmap Phase Three. |
+
+### Test and integration boundaries
+
+- Rust unit/integration coverage: author scope, world isolation, historical visibility, overflow error, event effect rollback, revision history, reopen and source attribution.
+- Frontend: browser fallback without native author content; native-command bridge **mock** for missing-day handling and archived-revision read-only behavior. A mocked native bridge is not evidence of a native Windows WebView run.
+- CI gates: Rust formatter, Clippy and workspace tests on both platforms, Linux Playwright, and native Windows WebView2 smoke. Link the final successful run to the Phase Two issue only after it completes.
+- This pass required no change to SQLite migrations, stable identities, factual authority, publication scopes, or the three-layer architecture.
+
+### Outstanding investigations and limitations
+
+The current author workspace remains narrow: no general node graph editing, full event actor roster, authored relationship type catalog, human-friendly calendar input, evidence/claim browser, published perspectives, public search, or end-user backup/export. Northbridge is still a separate platform fixture. Browsing older author revisions is read-only; new edits commit against the current revision through `Store::apply`. GPU-capable WebView2, device-loss and performance measurement retain separate platform acceptance gates. Development screenshots/videos may only be committed from observations of actual running software.
