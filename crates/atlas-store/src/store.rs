@@ -365,10 +365,10 @@ impl Store {
             name: name.into(),
             spec: QuerySpec {
                 filter: match kind {
-                    "contains" => QueryFilter::LabelContains(term.into()),
-                    "exact" => QueryFilter::ExactLabel(term.into()),
-                    "fulltext" => QueryFilter::FullTextPhrase(term.into()),
-                    "claimtext" => QueryFilter::ClaimFullTextPhrase(term.into()),
+                    "contains" => QueryFilter::LabelContains(term),
+                    "exact" => QueryFilter::ExactLabel(term),
+                    "fulltext" => QueryFilter::FullTextPhrase(term),
+                    "claimtext" => QueryFilter::ClaimFullTextPhrase(term),
                     _ => spec.filter.clone(),
                 },
                 ..spec.clone()
