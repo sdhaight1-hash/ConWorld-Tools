@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
-use crate::graph::walk;
 use crate::{
     AuthorRevision, Error, EventRole, ObjectData, ObjectRef, Scope, Store, Version, ViewContext,
     WorldId,
@@ -265,11 +264,13 @@ impl Store {
                     spec.limit,
                 );
             }
+            QueryFilter::RelationshipPath { .. } => {
+                return self.indexed_relationship_path_at(view, &spec.filter, spec.limit);
+            }
             _ => {}
         }
         let objects = self.objects_at(view, 2_000)?;
         let visible: HashSet<_> = objects.iter().map(|version| version.object).collect();
-        let mut truncated = false;
         let mut rows: Vec<_> = match &spec.filter {
             QueryFilter::FullTextPhrase(_) | QueryFilter::ClaimFullTextPhrase(_) => {
                 unreachable!("handled by the indexed FTS5 query path")
@@ -314,48 +315,8 @@ impl Store {
             QueryFilter::EventRole { .. } | QueryFilter::ParticipantEvents { .. } => {
                 unreachable!("handled by indexed event participation path")
             }
-            QueryFilter::RelationshipPath {
-                start,
-                kind,
-                direction,
-                max_depth,
-                max_visited,
-            } => {
-                same_world(*start, view)?;
-                let kind = search_label(kind)?;
-                if !(1..=16).contains(max_depth) || !(1..=2_000).contains(max_visited) {
-                    return Err(Error::InvalidInput("relationship traversal budget"));
-                }
-                let mut edges = HashMap::<ObjectRef, Vec<ObjectRef>>::new();
-                for item in &objects {
-                    if let ObjectData::Relationship {
-                        subject,
-                        target,
-                        kind: label,
-                        ..
-                    } = &item.record.data
-                        && label.to_lowercase() == kind
-                        && visible.contains(subject)
-                        && visible.contains(target)
-                    {
-                        if *direction != Direction::Incoming {
-                            edges.entry(*subject).or_default().push(*target);
-                        }
-                        if *direction != Direction::Outgoing {
-                            edges.entry(*target).or_default().push(*subject);
-                        }
-                    }
-                }
-                let (visited, limited) = if visible.contains(start) {
-                    walk(*start, &mut edges, *max_depth, *max_visited)
-                } else {
-                    (HashSet::new(), false)
-                };
-                truncated = limited;
-                objects
-                    .into_iter()
-                    .filter(|item| item.object != *start && visited.contains(&item.object))
-                    .collect()
+            QueryFilter::RelationshipPath { .. } => {
+                unreachable!("handled by indexed relationship path")
             }
         };
         rows.sort_by(|a, b| {
@@ -364,7 +325,7 @@ impl Store {
                 .cmp(&b.record.label)
                 .then(a.object.id.0.cmp(&b.object.id.0))
         });
-        truncated |= rows.len() > spec.limit;
+        let truncated = rows.len() > spec.limit;
         rows.truncate(spec.limit);
         Ok(QueryResult {
             rows,
@@ -587,7 +548,7 @@ fn same_world(object: ObjectRef, view: ViewContext) -> Result<(), Error> {
     }
 }
 
-fn search_label(raw: &str) -> Result<String, Error> {
+pub(crate) fn search_label(raw: &str) -> Result<String, Error> {
     let text = raw.trim();
     if text.is_empty() || text.len() > 800 {
         return Err(Error::InvalidInput("query label"));
