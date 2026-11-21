@@ -21,6 +21,10 @@ flowchart TD
 
 The Rust 2024 workspace starts with `apps/desktop/src-tauri`. The Vite shell and browser smoke tests live in `apps/desktop`. The Phase One store belongs in `crates/atlas-store` behind the app facade. Reusable query and renderer crates should appear with working consumers. The current command returns a typed, read-only diagnostic scene. The scene fixture carries no private data or mutation capability.
 
+## Desktop startup invariants
+
+For direct Cargo builds, `custom-protocol` is a default feature so the WebView loads the built frontend rather than a development localhost server. During `npm run tauri dev`, the Tauri CLI runs Vite and uses `http://127.0.0.1:1420` instead. Both URLs, the CSP WebSocket origin and Vite's strict port are checked together in a Node test. Windows CI tests the default Cargo build's embedded WebView so missing assets or a silent dependency on a live Vite process cannot go unnoticed.
+
 ## Contracts for later phases
 
 - **ADR-001, history.** Keep fictional day, author revision and branch independent. Use half-open exact intervals and preserve uncertainty. A fork pins the inherited author revision so later parent edits require deliberate reconciliation. Settle the exact inheritance cut and edge cases against the Phase One branch fixtures.

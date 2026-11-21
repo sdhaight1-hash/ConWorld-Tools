@@ -55,9 +55,9 @@ jobs:
       - name: Install and build the webview frontend
         working-directory: apps/desktop
         run: npm ci && npm run build:renderer && npm run build
-      - run: cargo +stable clippy --workspace --all-targets --locked --features custom-protocol -- -D warnings
-      - run: cargo +stable test --workspace --locked --features custom-protocol
-      - run: cargo +stable build --workspace --locked --features custom-protocol
+      - run: cargo +stable clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo +stable test --workspace --locked
+      - run: cargo +stable build --workspace --locked
       - name: Native Windows WebView2 smoke test
         if: runner.os == 'Windows'
         shell: pwsh

@@ -45,6 +45,12 @@ The workspace includes the Phase Zero desktop shell and the Phase One Rust/SQLit
 
 The first desktop build opens a local Northbridge scene through Tauri, with a Canvas2D graph and a keyboard-operable node inspector. See the [desktop build and verification log](Design-Docs/Phase-0-Verification.md) for launch commands and the Windows acceptance criteria.
 
+### Starting the desktop foundation
+
+For live frontend development, in `apps/desktop` run `npm ci` followed by `npm run tauri dev`. This starts the Vite listener and Tauri window together at `http://127.0.0.1:1420`.
+
+For a **standalone executable with no localhost server**, in `apps/desktop` run `npm ci && npm run build`, then from the repository root run `cargo build --locked -p atlas-desktop`. Launch `target/debug/atlas-desktop.exe` (Windows) or `target/debug/atlas-desktop` (Linux). Rebuild older executables; a raw dev-mode executable without Vite can show `ERR_CONNECTION_REFUSED`. See [Phase Zero launch diagnostics](Design-Docs/Phase-0-Verification.md).
+
 ### Development screenshots and video evidence
 
 The [**Development-Screenshots**](Development-Screenshots/) directory is the project's chronological archive of **real screenshots and screen recordings** captured during development, debugging, testing, and visual reviews. Its [Dev-Screenshots.md guide](Development-Screenshots/Dev-Screenshots.md) defines the filename convention, documentation requirements, and media index.

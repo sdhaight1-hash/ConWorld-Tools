@@ -36,6 +36,18 @@ npx playwright install chromium --only-shell
 npm test
 ```
 
+## Launch-mode diagnosis: Windows connection refused
+
+A user-supplied screenshot dated 2026-11-20 shows `ERR_CONNECTION_REFUSED` inside the Tauri window. This confirms the WebView attempted to access an unavailable localhost server, but does not establish the exact launch command or whether Vite exited, was never started, or used a different address.
+
+**Development with hot reload:** run `npm ci` and then `npm run tauri dev` from `apps/desktop`. The Tauri CLI runs the `beforeDevCommand` Vite task and waits for `http://127.0.0.1:1420`. Keep the Vite process running. A bare executable compiled with `--no-default-features` expects the same dev server.
+
+**Direct standalone debug executable:** build the frontend from `apps/desktop` using `npm ci && npm run build`, then run `cargo build --locked -p atlas-desktop` at repository root. The crate now enables `custom-protocol` by default, so `target/debug/atlas-desktop.exe` loads embedded assets even without a Vite server. Old executables must be rebuilt. An initial build without `apps/desktop/dist` can fail at compile time; this is preferable to silently opening a broken WebView.
+
+**Regression controls:** Tauri devUrl, Vite bind host/port and CSP WebSocket origin all use IPv4 loopback `127.0.0.1:1420`. A Node test checks this static contract. CI now compiles the Windows standalone desktop **with Cargo defaults** and runs the native WebView2 smoke; previously CI explicitly enabled custom-protocol, masking behavior of a direct build.
+
+If `tauri dev` still cannot load, first inspect the Vite terminal and the reachability of `http://127.0.0.1:1420` from the affected machine. Do not paper over server failures with retry loops or by disabling security policy. A Windows runtime reproduction of the original screenshot remains necessary to prove the exact user-host cause.
+
 ## Renderer benchmark
 
 Install the WASM Rust target and the binding generator used by the lockfile. Build the optional renderer bundle before building or starting the desktop frontend.
