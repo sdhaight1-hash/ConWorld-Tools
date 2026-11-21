@@ -17,7 +17,7 @@ use crate::query::{
 use crate::*;
 
 pub(crate) const APPLICATION_ID: i64 = 0x4357_4c44; // CWLD
-pub(crate) const SCHEMA_VERSION: i64 = 17;
+pub(crate) const SCHEMA_VERSION: i64 = 18;
 
 pub struct Store {
     conn: Connection,
@@ -98,6 +98,9 @@ impl Store {
         if version < 17 {
             tx.execute_batch(include_str!("../migrations/0017.sql"))?;
             rebuild_alias_name_index(&tx)?;
+        }
+        if version < 18 {
+            tx.execute_batch(include_str!("../migrations/0018.sql"))?;
         }
         if version < SCHEMA_VERSION {
             verify_foreign_keys(&tx)?;
@@ -633,6 +636,116 @@ impl Store {
                 .then(a.object.id.0.cmp(&b.object.id.0))
         });
         truncated |= rows.len() > limit;
+        rows.truncate(limit);
+        tx.commit()?;
+        Ok(QueryResult {
+            rows,
+            revision: view.revision,
+            truncated,
+        })
+    }
+
+    /// Indexed reverse lookup over typed references and exact reviewed mentions.
+    /// Candidate rows never substitute for the selected authoritative version.
+    pub(crate) fn indexed_backlinks_at(
+        &self,
+        view: ViewContext,
+        target: ObjectRef,
+        limit: usize,
+    ) -> Result<crate::query::QueryResult, Error> {
+        use crate::query::{QueryResult, refers_to};
+
+        require_author(view.scope)?;
+        if target.world != view.world {
+            return Err(Error::WrongWorld);
+        }
+        self.validate_query_view(view)?;
+        // The review helper uses its own read transaction at this same immutable
+        // author revision. Do not nest SQLite read transactions.
+        let approved = self.approved_mention_sources_at(view, target)?;
+        let tx = self.conn.unchecked_transaction()?;
+        if resolve_object(&tx, target, view.branch, view.revision, view.day)?.is_none() {
+            return Ok(QueryResult {
+                rows: Vec::new(),
+                revision: view.revision,
+                truncated: false,
+            });
+        }
+        const CANDIDATE_BUDGET: usize = 10_000;
+        let candidates = {
+            let mut statement = tx.prepare(
+                "SELECT object_id FROM object_versions
+                 WHERE world_id = ?1 AND source_id = ?2 AND revision <= ?3
+                 UNION
+                 SELECT relationship_id FROM relationship_versions
+                 WHERE world_id = ?1 AND subject_id = ?2 AND revision <= ?3
+                 UNION
+                 SELECT relationship_id FROM relationship_versions
+                 WHERE world_id = ?1 AND target_id = ?2 AND revision <= ?3
+                 UNION
+                 SELECT involvement_id FROM event_involvement_versions
+                 WHERE world_id = ?1 AND event_id = ?2 AND revision <= ?3
+                 UNION
+                 SELECT involvement_id FROM event_involvement_versions
+                 WHERE world_id = ?1 AND participant_id = ?2 AND revision <= ?3
+                 UNION
+                 SELECT involvement_id FROM event_involvement_versions
+                 WHERE world_id = ?1 AND role_definition_id = ?2 AND revision <= ?3
+                 UNION
+                 SELECT action_id FROM actor_action_versions
+                 WHERE world_id = ?1 AND event_id = ?2 AND revision <= ?3
+                 UNION
+                 SELECT action_id FROM actor_action_versions
+                 WHERE world_id = ?1 AND actor_id = ?2 AND revision <= ?3
+                 UNION
+                 SELECT action_id FROM actor_action_versions
+                 WHERE world_id = ?1 AND target_id = ?2 AND revision <= ?3
+                 UNION
+                 SELECT claim_id FROM claim_versions
+                 WHERE world_id = ?1 AND subject_id = ?2 AND revision <= ?3
+                 ORDER BY 1 LIMIT ?4",
+            )?;
+            statement
+                .query_map(
+                    params![
+                        view.world.0.as_bytes(),
+                        target.id.0.as_bytes(),
+                        view.revision.0,
+                        (CANDIDATE_BUDGET + 1) as i64
+                    ],
+                    |row| row.get::<_, [u8; 16]>(0),
+                )?
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        if candidates.len() > CANDIDATE_BUDGET {
+            return Err(Error::QueryBudgetExceeded);
+        }
+        let mut ids = approved.clone();
+        ids.extend(candidates.into_iter().map(|id| ObjectRef {
+            world: view.world,
+            id: ObjectId(Uuid::from_bytes(id)),
+        }));
+        if ids.len() > CANDIDATE_BUDGET {
+            return Err(Error::QueryBudgetExceeded);
+        }
+        let mut rows = Vec::new();
+        for source in ids {
+            if let Some(version) =
+                resolve_object(&tx, source, view.branch, view.revision, view.day)?
+                && (version.record.source == Some(target)
+                    || refers_to(&version.record.data, target)
+                    || approved.contains(&source))
+            {
+                rows.push(version);
+            }
+        }
+        rows.sort_by(|a, b| {
+            a.record
+                .label
+                .cmp(&b.record.label)
+                .then(a.object.id.0.cmp(&b.object.id.0))
+        });
+        let truncated = rows.len() > limit;
         rows.truncate(limit);
         tx.commit()?;
         Ok(QueryResult {
