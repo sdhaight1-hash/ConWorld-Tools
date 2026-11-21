@@ -1,0 +1,31 @@
+name: Preserve verified focused discovery capture
+on:
+  push:
+    branches: ["work/phase-3-focused-evidence"]
+    paths: [".github/workflows/preserve-phase3-discovery.yml"]
+permissions:
+  actions: read
+  contents: write
+jobs:
+  preserve:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Restore exact inspected image
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh run download 44939778595 --repo "$GITHUB_REPOSITORY" --name phase-03-browser-focused-discovery --dir "$RUNNER_TEMP/capture"
+          image='2026-11-21_19-18-45Z_phase-03_discovery_focused-claim_01.png'
+          printf '%s  %s\n' 'd37cf4c628d548f80176fd0355f31bde9e5d3741ce870e8deba0b14724f00115' "$RUNNER_TEMP/capture/$image" | sha256sum -c -
+          test ! -e "Development-Screenshots/$image"
+          cp "$RUNNER_TEMP/capture/$image" "Development-Screenshots/$image"
+          printf '\n%s\n' '- 2026-11-21 19:18:45 UTC — [Focused historical claim discovery](2026-11-21_19-18-45Z_phase-03_discovery_focused-claim_01.png) — [Phase 3 #4](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/4), [PR #44](https://github.com/sdhaight1-hash/ConWorld-Tools/pull/44), build [41d31df](https://github.com/sdhaight1-hash/ConWorld-Tools/commit/41d31dfbb0ea85f0a7d046bbf6483a5efef1622e), [CI run](https://github.com/sdhaight1-hash/ConWorld-Tools/actions/runs/44939778595). Actual Chromium Playwright capture with synthetic native IPC: oversized-world focused claim preview, pinned revision, exact source span and separate collision metadata. Not native Tauri/SQLite runtime proof.' >> Development-Screenshots/Dev-Screenshots.md
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add "Development-Screenshots/$image" Development-Screenshots/Dev-Screenshots.md
+          git rm .github/workflows/preserve-phase3-discovery.yml
+          git commit -m "Archive verified focused claim discovery screenshot"
+          git push origin "HEAD:refs/heads/work/phase-3-focused-evidence"
