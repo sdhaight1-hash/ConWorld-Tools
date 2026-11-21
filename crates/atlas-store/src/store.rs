@@ -7,7 +7,8 @@ use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, 
 use uuid::Uuid;
 
 use crate::discovery::{
-    MentionCandidate, MentionDisposition, PersonAlias, ReviewMention, SavePersonAlias, matching_spans,
+    MentionCandidate, MentionDisposition, PersonAlias, ReviewMention, SavePersonAlias,
+    matching_spans,
 };
 use crate::query::{
     PredicateInput, QUERY_SCHEMA_VERSION, QueryFilter, QuerySpec, SaveNamedLabelQuery,
@@ -123,7 +124,6 @@ impl Store {
         Ok(())
     }
 
-
     /// Latest alias metadata known by the selected author revision.
     /// Aliases are main-branch author metadata until branch-aware alias
     /// inheritance is specified; no alias rows are projected into forks.
@@ -156,7 +156,9 @@ impl Store {
         {
             return Err(Error::InvalidInterval);
         }
-        let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let world = load_world(&tx, request.world)?;
         let person = resolve_object(
             &tx,
@@ -164,17 +166,20 @@ impl Store {
             world.main,
             request.expected,
             request.day,
-        )?.ok_or(Error::NotFound)?;
+        )?
+        .ok_or(Error::NotFound)?;
         if !matches!(person.record.data, ObjectData::Person) {
             return Err(Error::WrongKind);
         }
         let id = request.alias_id.unwrap_or_else(Uuid::new_v4);
         if request.alias_id.is_some() {
-            let existing: Option<[u8; 16]> = tx.query_row(
-                "SELECT person_id FROM person_aliases WHERE world_id = ?1 AND id = ?2",
-                params![world.id.0.as_bytes(), id.as_bytes()],
-                |row| row.get(0),
-            ).optional()?;
+            let existing: Option<[u8; 16]> = tx
+                .query_row(
+                    "SELECT person_id FROM person_aliases WHERE world_id = ?1 AND id = ?2",
+                    params![world.id.0.as_bytes(), id.as_bytes()],
+                    |row| row.get(0),
+                )
+                .optional()?;
             if existing != Some(*request.person.id.0.as_bytes()) {
                 return Err(Error::NotFound);
             }
@@ -190,7 +195,11 @@ impl Store {
         if request.alias_id.is_none() {
             tx.execute(
                 "INSERT INTO person_aliases (world_id, id, person_id) VALUES (?1, ?2, ?3)",
-                params![world.id.0.as_bytes(), id.as_bytes(), request.person.id.0.as_bytes()],
+                params![
+                    world.id.0.as_bytes(),
+                    id.as_bytes(),
+                    request.person.id.0.as_bytes()
+                ],
             )?;
         }
         tx.execute(
@@ -1156,7 +1165,9 @@ impl Store {
                 })
         };
         if !matches_name && !matches_alias {
-            return Err(Error::InvalidInput("mention does not match selected person or alias"));
+            return Err(Error::InvalidInput(
+                "mention does not match selected person or alias",
+            ));
         }
         let revision = append_revision(
             &tx,
@@ -1960,7 +1971,6 @@ fn validate_text(value: &str, field: &'static str) -> Result<(), Error> {
     Ok(())
 }
 
-
 fn active_alias_versions(conn: &Connection, view: ViewContext) -> Result<Vec<PersonAlias>, Error> {
     const MAX_ALIASES: i64 = 2_000;
     let aliases = {
@@ -1975,23 +1985,25 @@ fn active_alias_versions(conn: &Connection, view: ViewContext) -> Result<Vec<Per
              )
              ORDER BY a.id LIMIT ?3",
         )?;
-        statement.query_map(
-            params![view.world.0.as_bytes(), view.revision.0, MAX_ALIASES + 1],
-            |row| {
-                Ok(PersonAlias {
-                    id: Uuid::from_bytes(row.get(0)?),
-                    person: ObjectRef {
-                        world: view.world,
-                        id: ObjectId(Uuid::from_bytes(row.get(1)?)),
-                    },
-                    label: row.get(2)?,
-                    starts_at: row.get::<_, Option<i64>>(3)?.map(WorldDay),
-                    ends_before: row.get::<_, Option<i64>>(4)?.map(WorldDay),
-                    active: row.get(5)?,
-                    recorded_at: AuthorRevision(row.get(6)?),
-                })
-            },
-        )?.collect::<Result<Vec<_>, _>>()?
+        statement
+            .query_map(
+                params![view.world.0.as_bytes(), view.revision.0, MAX_ALIASES + 1],
+                |row| {
+                    Ok(PersonAlias {
+                        id: Uuid::from_bytes(row.get(0)?),
+                        person: ObjectRef {
+                            world: view.world,
+                            id: ObjectId(Uuid::from_bytes(row.get(1)?)),
+                        },
+                        label: row.get(2)?,
+                        starts_at: row.get::<_, Option<i64>>(3)?.map(WorldDay),
+                        ends_before: row.get::<_, Option<i64>>(4)?.map(WorldDay),
+                        active: row.get(5)?,
+                        recorded_at: AuthorRevision(row.get(6)?),
+                    })
+                },
+            )?
+            .collect::<Result<Vec<_>, _>>()?
     };
     if aliases.len() > MAX_ALIASES as usize {
         return Err(Error::QueryBudgetExceeded);

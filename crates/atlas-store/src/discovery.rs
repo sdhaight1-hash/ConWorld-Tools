@@ -5,7 +5,10 @@
 
 use uuid::Uuid;
 
-use crate::{AuthorRevision, Error, ObjectData, ObjectRef, Scope, Store, VersionRef, ViewContext, WorldDay, WorldId};
+use crate::{
+    AuthorRevision, Error, ObjectData, ObjectRef, Scope, Store, VersionRef, ViewContext, WorldDay,
+    WorldId,
+};
 
 /// Explicitly authored historical name metadata for a stable person identity,
 /// not a claim or evidence that a relationship exists.
@@ -124,7 +127,9 @@ impl Store {
             names.push((person.object, person.record.label.as_str()));
         }
         for alias in &aliases {
-            if alias.matches_day(view.day) && people.iter().any(|person| person.object == alias.person) {
+            if alias.matches_day(view.day)
+                && people.iter().any(|person| person.object == alias.person)
+            {
                 names.push((alias.person, alias.label.as_str()));
             }
         }
