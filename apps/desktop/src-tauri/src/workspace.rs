@@ -103,6 +103,8 @@ pub struct SearchRow {
     id: String,
     label: String,
     kind: &'static str,
+    statement: Option<String>,
+    source_citation: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -436,6 +438,7 @@ impl AuthorWorkspace {
                     QueryFilter::LabelContains(term) => ("contains", term),
                     QueryFilter::ExactLabel(term) => ("exact", term),
                     QueryFilter::FullTextPhrase(term) => ("fulltext", term),
+                    QueryFilter::ClaimFullTextPhrase(term) => ("claimtext", term),
                     _ => unreachable!("only supported label filters are persisted"),
                 };
                 SavedQuerySummary {
@@ -455,7 +458,8 @@ impl AuthorWorkspace {
             "contains" => QueryFilter::LabelContains(request.term),
             "exact" => QueryFilter::ExactLabel(request.term),
             "fulltext" => QueryFilter::FullTextPhrase(request.term),
-            _ => return Err("Only name and indexed phrase searches can be saved".into()),
+            "claimtext" => QueryFilter::ClaimFullTextPhrase(request.term),
+            _ => return Err("Only label and claim-text searches can be saved".into()),
         };
         let spec = QuerySpec {
             schema_version: QUERY_SCHEMA_VERSION,
@@ -576,6 +580,7 @@ impl AuthorWorkspace {
             "contains" => QueryFilter::LabelContains(term.into()),
             "exact" => QueryFilter::ExactLabel(term.into()),
             "fulltext" => QueryFilter::FullTextPhrase(term.into()),
+            "claimtext" => QueryFilter::ClaimFullTextPhrase(term.into()),
             "backlinks" => QueryFilter::Backlinks(ObjectRef {
                 world: WorldId(id(world_id)?),
                 id: ObjectId(id(term.trim())?),
@@ -643,10 +648,25 @@ impl AuthorWorkspace {
             rows: result
                 .rows
                 .into_iter()
-                .map(|version| SearchRow {
-                    id: version.object.id.0.to_string(),
-                    label: version.record.label,
-                    kind: match version.record.data {
+                .map(|version| {
+                    let statement = match &version.record.data {
+                        ObjectData::Claim { statement, .. } => Some(statement.clone()),
+                        _ => None,
+                    };
+                    let source_citation = if statement.is_some() {
+                        version.record.source
+                            .map(|source| store.get_object(source, view))
+                            .transpose()
+                            .map_err(|error| error.to_string())?
+                            .flatten()
+                            .and_then(|source| match source.record.data {
+                                ObjectData::Source { citation } => Some(citation),
+                                _ => None,
+                            })
+                    } else {
+                        None
+                    };
+                    let kind = match version.record.data {
                         ObjectData::Person => "person",
                         ObjectData::Definition { .. } => "definition",
                         ObjectData::Relationship { .. } => "relationship",
@@ -655,9 +675,16 @@ impl AuthorWorkspace {
                         ObjectData::HistoricalEvent { .. } => "historical_event",
                         ObjectData::Source { .. } => "source",
                         ObjectData::Claim { .. } => "claim",
-                    },
+                    };
+                    Ok(SearchRow {
+                        id: version.object.id.0.to_string(),
+                        label: version.record.label,
+                        kind,
+                        statement,
+                        source_citation,
+                    })
                 })
-                .collect(),
+                .collect::<Result<Vec<_>, String>>()?,
         })
     }
 

@@ -59,6 +59,10 @@ The native desktop now includes a **persistent author workspace** beneath the No
 
 This workspace uses the existing Rust `atlas-store` engine and stores `worlds.sqlite` in the operating system's Tauri application-data directory, **not** the source checkout. Its history is reopened on subsequent launches. The **Historical day** field currently accepts a normalized fictional day number, not a calendar year. The optional **Author revision** field lets you inspect earlier recorded versions of history; a pinned revision is read-only, and leaving the field blank returns to the latest editable version. Empty or non-integer historical days are rejected instead of silently converted to day 0. Northbridge remains a separate in-memory example. There is no end-user backup/export, multi-actor editor, branch editor, or public/character publishing view yet.
 
+### Phase Three author search
+
+The native Node author workspace supports historical label and relationship queries, versioned saved searches, discovered name mentions and explicit review of approved source-to-person links. It also offers **indexed full-text searching of sourced claim statements**, with author-visible statement text and source citations. Searches use the selected world, fictional day and author revision; saved definitions never cache results. These are **author-only** tools, not published search or proof that a reported claim is true. Broader query AST, aliases, pagination, Canvas/Display bindings and safe public/character search remain on [Phase 3 issue #4](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/4).
+
 ### Development screenshots and video evidence
 
 The [**Development-Screenshots**](Development-Screenshots/) directory is the project's chronological archive of **real screenshots and screen recordings** captured during development, debugging, testing, and visual reviews. Its [Dev-Screenshots.md guide](Development-Screenshots/Dev-Screenshots.md) defines the filename convention, documentation requirements, and media index.

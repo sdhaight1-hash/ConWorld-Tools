@@ -194,7 +194,11 @@ fn schema_eight_upgrade_preserves_world_data_and_initializes_saved_query_tables(
     drop(store);
     let connection = rusqlite::Connection::open(&path)?;
     connection.execute_batch(
-        "DROP TABLE mention_reviews;
+        "DROP TRIGGER claim_versions_search_ai;
+         DROP TRIGGER claim_versions_search_au;
+         DROP TABLE claim_search_fts;
+         DROP TABLE claim_search_documents;
+         DROP TABLE mention_reviews;
          DROP TABLE saved_query_versions;
          DROP TABLE saved_queries;
          PRAGMA user_version = 8;",

@@ -332,7 +332,14 @@ fn invalid_reviews_and_old_schema_upgrade_are_safe() -> Result<(), Error> {
     drop(store);
     // Simulate a complete schema-nine archive prior to mention review support.
     let conn = rusqlite::Connection::open(&path)?;
-    conn.execute_batch("DROP TABLE mention_reviews; PRAGMA user_version = 9;")?;
+    conn.execute_batch(
+        "DROP TRIGGER claim_versions_search_ai;
+         DROP TRIGGER claim_versions_search_au;
+         DROP TABLE claim_search_fts;
+         DROP TABLE claim_search_documents;
+         DROP TABLE mention_reviews;
+         PRAGMA user_version = 9;",
+    )?;
     drop(conn);
     let mut upgraded = Store::open(&path)?;
     assert_eq!(upgraded.review_mention(valid)?, AuthorRevision(3));

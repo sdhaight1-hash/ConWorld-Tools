@@ -22,8 +22,11 @@ type Event = {
 type Definition = { id: string; label: string; category: "relationship" | "tag" | "role";
   description: string; reverse_label: string | null; symmetric: boolean };
 type EvidenceStatement = { statement: string; source: string | null; audience: string | null; reader_id: string | null };
-type SearchResult = { revision: number; truncated: boolean; rows: { id: string; label: string; kind: string }[] };
-type SavedQuery = { id: string; name: string; mode: "contains" | "exact" | "fulltext"; term: string; limit: number; recorded_at: number };
+type SearchResult = { revision: number; truncated: boolean; rows: {
+  id: string; label: string; kind: string;
+  statement?: string | null; source_citation?: string | null;
+}[] };
+type SavedQuery = { id: string; name: string; mode: "contains" | "exact" | "fulltext" | "claimtext"; term: string; limit: number; recorded_at: number };
 type MentionDiscovery = { revision: number; truncated: boolean; rows: {
   source_id: string; source_branch: string; source_state_revision: number; source_revision: number;
   source_label: string; statement: string; target_id: string; target_label: string;
@@ -577,6 +580,15 @@ export async function showAuthorWorkspace(
           references.setAttribute("aria-label", "Find references to " + row.label + " " + row.id);
           references.addEventListener("click", () => runSearch("backlinks", row.id));
           item.append(references);
+          if (row.kind === "claim" && row.statement !== undefined && row.statement !== null) {
+            const statement = document.createElement("blockquote");
+            statement.textContent = row.statement;
+            item.append(statement);
+            const citation = document.createElement("p");
+            citation.className = "hint";
+            citation.textContent = "Source citation: " + (row.source_citation || "Unavailable at selected view");
+            item.append(citation);
+          }
           queryResults.append(item);
         }
         queryStatus.textContent = result.rows.length + " match(es) at author revision " + result.revision +

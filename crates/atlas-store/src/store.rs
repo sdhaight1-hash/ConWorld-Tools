@@ -13,7 +13,7 @@ use crate::query::{
 use crate::*;
 
 pub(crate) const APPLICATION_ID: i64 = 0x4357_4c44; // CWLD
-pub(crate) const SCHEMA_VERSION: i64 = 10;
+pub(crate) const SCHEMA_VERSION: i64 = 11;
 
 pub struct Store {
     conn: Connection,
@@ -73,6 +73,9 @@ impl Store {
         }
         if version < 10 {
             tx.execute_batch(include_str!("../migrations/0010.sql"))?;
+        }
+        if version < 11 {
+            tx.execute_batch(include_str!("../migrations/0011.sql"))?;
             verify_foreign_keys(&tx)?;
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
@@ -81,7 +84,7 @@ impl Store {
         Ok(Self { conn })
     }
 
-    /// Reconstruct the disposable label index from canonical historical versions.
+    /// Reconstruct disposable label and claim statement indexes from canonical versions.
     /// No author revision or object identity is changed.
     pub fn rebuild_search_index(&mut self, scope: Scope) -> Result<(), Error> {
         require_author(scope)?;
@@ -97,6 +100,15 @@ impl Store {
              ORDER BY world_id, object_id, branch_id, state_revision, revision",
             [],
         )?;
+        tx.execute("DELETE FROM claim_search_documents", [])?;
+        tx.execute(
+            "INSERT INTO claim_search_documents
+                (world_id, claim_id, branch_id, state_revision, revision, statement)
+             SELECT world_id, claim_id, branch_id, state_revision, revision, statement
+             FROM claim_versions
+             ORDER BY world_id, claim_id, branch_id, state_revision, revision",
+            [],
+        )?;
         tx.commit()?;
         Ok(())
     }
@@ -109,6 +121,25 @@ impl Store {
         phrase: &str,
         view: ViewContext,
         limit: usize,
+    ) -> Result<crate::query::QueryResult, Error> {
+        self.indexed_text_at(phrase, view, limit, false)
+    }
+
+    pub(crate) fn indexed_claim_phrase_at(
+        &self,
+        phrase: &str,
+        view: ViewContext,
+        limit: usize,
+    ) -> Result<crate::query::QueryResult, Error> {
+        self.indexed_text_at(phrase, view, limit, true)
+    }
+
+    fn indexed_text_at(
+        &self,
+        phrase: &str,
+        view: ViewContext,
+        limit: usize,
+        claims_only: bool,
     ) -> Result<crate::query::QueryResult, Error> {
         require_author(view.scope)?;
         let phrase = phrase.trim();
@@ -125,14 +156,24 @@ impl Store {
         }
         const CANDIDATE_BUDGET: i64 = 10_000;
         let matches = {
-            let mut statement = tx.prepare(
+            // Static, allowlisted SQL plans only. User input is always a bound
+            // literal FTS phrase; never a table name or MATCH expression.
+            let sql = if claims_only {
+                "SELECT d.claim_id, d.branch_id, d.state_revision, d.revision
+                 FROM claim_search_fts
+                 JOIN claim_search_documents d ON d.doc_id = claim_search_fts.rowid
+                 WHERE d.world_id = ?1 AND claim_search_fts MATCH ?2
+                 ORDER BY d.claim_id, d.branch_id, d.state_revision, d.revision
+                 LIMIT ?3"
+            } else {
                 "SELECT d.object_id, d.branch_id, d.state_revision, d.revision
                  FROM object_search_fts
                  JOIN object_search_documents d ON d.doc_id = object_search_fts.rowid
                  WHERE d.world_id = ?1 AND object_search_fts MATCH ?2
                  ORDER BY d.object_id, d.branch_id, d.state_revision, d.revision
-                 LIMIT ?3",
-            )?;
+                 LIMIT ?3"
+            };
+            let mut statement = tx.prepare(sql)?;
             statement
                 .query_map(
                     params![
@@ -174,6 +215,7 @@ impl Store {
                     version.state_revision.0,
                     version.recorded_at.0,
                 ))
+                && (!claims_only || matches!(version.record.data, ObjectData::Claim { .. }))
             {
                 rows.push(version);
             }
@@ -221,6 +263,7 @@ impl Store {
             QueryFilter::LabelContains(text) => ("contains", text.as_str()),
             QueryFilter::ExactLabel(text) => ("exact", text.as_str()),
             QueryFilter::FullTextPhrase(text) => ("fulltext", text.as_str()),
+            QueryFilter::ClaimFullTextPhrase(text) => ("claimtext", text.as_str()),
             _ => return Err(Error::InvalidInput("unsupported saved query filter")),
         };
         let term = term.trim();
@@ -282,7 +325,8 @@ impl Store {
                 filter: match kind {
                     "contains" => QueryFilter::LabelContains(term.into()),
                     "exact" => QueryFilter::ExactLabel(term.into()),
-                    _ => QueryFilter::FullTextPhrase(term.into()),
+                    "fulltext" => QueryFilter::FullTextPhrase(term.into()),
+                    _ => QueryFilter::ClaimFullTextPhrase(term.into()),
                 },
                 ..spec.clone()
             },
@@ -339,6 +383,7 @@ impl Store {
                 "contains" => QueryFilter::LabelContains(term),
                 "exact" => QueryFilter::ExactLabel(term),
                 "fulltext" => QueryFilter::FullTextPhrase(term),
+                "claimtext" => QueryFilter::ClaimFullTextPhrase(term),
                 _ => return Err(Error::InvalidInput("saved query filter kind")),
             };
             result.push(SavedLabelQuery {
