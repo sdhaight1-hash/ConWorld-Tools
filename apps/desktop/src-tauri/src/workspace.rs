@@ -374,7 +374,9 @@ impl AuthorWorkspace {
 }
 
 #[tauri::command]
-pub fn workspace_worlds(workspace: State<'_, AuthorWorkspace>) -> Result<Vec<WorldSummary>, String> {
+pub fn workspace_worlds(
+    workspace: State<'_, AuthorWorkspace>,
+) -> Result<Vec<WorldSummary>, String> {
     workspace.worlds()
 }
 
@@ -440,8 +442,18 @@ mod tests {
             workspace.create_person(&world_id, "Alice")?;
             workspace.create_person(&world_id, "Beatrice")?;
             let people = workspace.snapshot(&world_id, 0)?.people;
-            alice = people.iter().find(|p| p.label == "Alice").unwrap().id.clone();
-            beatrice = people.iter().find(|p| p.label == "Beatrice").unwrap().id.clone();
+            alice = people
+                .iter()
+                .find(|p| p.label == "Alice")
+                .unwrap()
+                .id
+                .clone();
+            beatrice = people
+                .iter()
+                .find(|p| p.label == "Beatrice")
+                .unwrap()
+                .id
+                .clone();
             workspace.create_relationship(RelationshipInput {
                 world_id: world_id.clone(),
                 subject_id: alice.clone(),
@@ -451,7 +463,9 @@ mod tests {
                 tags: "friends".into(),
                 day: 0,
             })?;
-            relationship = workspace.snapshot(&world_id, 0)?.relationships[0].id.clone();
+            relationship = workspace.snapshot(&world_id, 0)?.relationships[0]
+                .id
+                .clone();
             workspace.record_event(EventInput {
                 world_id: world_id.clone(),
                 relationship_id: relationship.clone(),
@@ -466,20 +480,27 @@ mod tests {
                 tags: "estranged".into(),
             })?;
             // A second event cannot rewrite the state on the same fictional day.
-            assert!(workspace.record_event(EventInput {
-                world_id: world_id.clone(),
-                relationship_id: relationship.clone(),
-                actor_id: beatrice.clone(),
-                day: 10,
-                event_label: "Duplicate".into(),
-                action: "disclosure".into(),
-                intent: "repeat".into(),
-                outcome: "failed".into(),
-                source_citation: "Northbridge folio 15".into(),
-                trust: Some(20),
-                tags: "estranged".into(),
-            }).is_err());
-            assert_eq!(workspace.snapshot(&world_id, 9)?.relationships[0].trust, Some(90));
+            assert!(
+                workspace
+                    .record_event(EventInput {
+                        world_id: world_id.clone(),
+                        relationship_id: relationship.clone(),
+                        actor_id: beatrice.clone(),
+                        day: 10,
+                        event_label: "Duplicate".into(),
+                        action: "disclosure".into(),
+                        intent: "repeat".into(),
+                        outcome: "failed".into(),
+                        source_citation: "Northbridge folio 15".into(),
+                        trust: Some(20),
+                        tags: "estranged".into(),
+                    })
+                    .is_err()
+            );
+            assert_eq!(
+                workspace.snapshot(&world_id, 9)?.relationships[0].trust,
+                Some(90)
+            );
         }
         let reopened = AuthorWorkspace::open(&database)?;
         assert_eq!(reopened.worlds()?.len(), 1);
@@ -488,7 +509,10 @@ mod tests {
         assert_eq!(after.relationships[0].id, relationship);
         assert_eq!(after.relationships[0].trust, Some(12));
         assert_eq!(after.relationships[0].tags, vec!["estranged"]);
-        assert_eq!(reopened.snapshot(&world_id, 9)?.relationships[0].trust, Some(90));
+        assert_eq!(
+            reopened.snapshot(&world_id, 9)?.relationships[0].trust,
+            Some(90)
+        );
         assert_eq!(after.world.revision, 4);
         Ok(())
     }

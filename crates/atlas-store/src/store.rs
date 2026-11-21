@@ -97,7 +97,9 @@ impl Store {
     pub fn worlds(&self, scope: Scope) -> Result<Vec<World>, Error> {
         require_author(scope)?;
         let ids: Vec<[u8; 16]> = {
-            let mut statement = self.conn.prepare("SELECT id FROM worlds ORDER BY name, id")?;
+            let mut statement = self
+                .conn
+                .prepare("SELECT id FROM worlds ORDER BY name, id")?;
             statement
                 .query_map([], |row| row.get(0))?
                 .collect::<Result<_, _>>()?
@@ -124,10 +126,9 @@ impl Store {
             let mut statement =
                 tx.prepare("SELECT id FROM objects WHERE world_id = ?1 ORDER BY id LIMIT ?2")?;
             statement
-                .query_map(
-                    params![view.world.0.as_bytes(), limit as i64],
-                    |row| row.get(0),
-                )?
+                .query_map(params![view.world.0.as_bytes(), limit as i64], |row| {
+                    row.get(0)
+                })?
                 .collect::<Result<_, _>>()?
         };
         let mut visible = Vec::new();

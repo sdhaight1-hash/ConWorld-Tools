@@ -617,7 +617,12 @@ fn phase_two_author_world_listing_is_persistent_and_historically_scoped() -> Res
             Change::Create(bob, person("Bob")),
             Change::Create(
                 bond_id,
-                dated(10, bond(alice, bob, 80, &["friends"]), None, "Their friendship"),
+                dated(
+                    10,
+                    bond(alice, bob, 80, &["friends"]),
+                    None,
+                    "Their friendship",
+                ),
             ),
         ],
     ))?;
@@ -643,9 +648,18 @@ fn phase_two_author_world_listing_is_persistent_and_historically_scoped() -> Res
         store.objects_at(view(&world, first, 10), 2_001),
         Err(Error::InvalidInput(_))
     ));
-    assert!(matches!(store.worlds(Scope::Public), Err(Error::CapabilityDenied)));
     assert!(matches!(
-        store.objects_at(ViewContext { scope: Scope::Public, ..view(&world, first, 10) }, 20),
+        store.worlds(Scope::Public),
+        Err(Error::CapabilityDenied)
+    ));
+    assert!(matches!(
+        store.objects_at(
+            ViewContext {
+                scope: Scope::Public,
+                ..view(&world, first, 10)
+            },
+            20
+        ),
         Err(Error::CapabilityDenied)
     ));
     drop(store);
@@ -654,9 +668,6 @@ fn phase_two_author_world_listing_is_persistent_and_historically_scoped() -> Res
     assert_eq!(worlds.len(), 2);
     assert_eq!(worlds[0].id, world.id);
     assert_eq!(worlds[1].id, other.id);
-    assert_eq!(
-        reopened.objects_at(view(&world, first, 10), 20)?.len(),
-        3
-    );
+    assert_eq!(reopened.objects_at(view(&world, first, 10), 20)?.len(), 3);
     Ok(())
 }
