@@ -353,28 +353,49 @@ fn review_decisions_do_not_escape_into_alternate_history_branches() -> Result<()
         world.revision,
         vec![
             Change::Create(person, record("Morgan Vale", ObjectData::Person)),
-            Change::Create(event, record("Meeting", ObjectData::HistoricalEvent {
-                occurrence: EventDate::Exact(WorldDay(10)),
-            })),
-            Change::Create(source, record("Ledger", ObjectData::Source {
-                citation: "Folio 4".into(),
-            })),
+            Change::Create(
+                event,
+                record(
+                    "Meeting",
+                    ObjectData::HistoricalEvent {
+                        occurrence: EventDate::Exact(WorldDay(10)),
+                    },
+                ),
+            ),
+            Change::Create(
+                source,
+                record(
+                    "Ledger",
+                    ObjectData::Source {
+                        citation: "Folio 4".into(),
+                    },
+                ),
+            ),
         ],
     ))?;
     let second = store.apply(&command(
         &world,
         first,
-        vec![Change::Create(claim, Record {
-            source: Some(source),
-            ..record("Statement", ObjectData::Claim {
-                subject: event,
-                predicate: "presence".into(),
-                statement: "Morgan Vale was present.".into(),
-                audience: ClaimAudience::Author,
-            })
-        })],
+        vec![Change::Create(
+            claim,
+            Record {
+                source: Some(source),
+                ..record(
+                    "Statement",
+                    ObjectData::Claim {
+                        subject: event,
+                        predicate: "presence".into(),
+                        statement: "Morgan Vale was present.".into(),
+                        audience: ClaimAudience::Author,
+                    },
+                )
+            },
+        )],
     ))?;
-    let candidate = store.discover_mentions(view(&world, second), 100)?.rows.remove(0);
+    let candidate = store
+        .discover_mentions(view(&world, second), 100)?
+        .rows
+        .remove(0);
     let approved = store.review_mention(ReviewMention {
         view: view(&world, second),
         expected: second,
@@ -403,15 +424,24 @@ fn review_decisions_do_not_escape_into_alternate_history_branches() -> Result<()
     let child_candidates = store.discover_mentions(child, 100)?;
     assert_eq!(child_candidates.rows.len(), 1);
     assert_eq!(child_candidates.rows[0].disposition, None);
-    assert_eq!(store.execute_query(
-        &QuerySpec {
-            schema_version: QUERY_SCHEMA_VERSION,
-            filter: QueryFilter::Backlinks(person),
-            limit: 100,
-        },
-        child,
-    )?.rows.len(), 0);
-    assert_eq!(references(&store, &world, fork.created_revision, person)?, vec![claim]);
+    assert_eq!(
+        store
+            .execute_query(
+                &QuerySpec {
+                    schema_version: QUERY_SCHEMA_VERSION,
+                    filter: QueryFilter::Backlinks(person),
+                    limit: 100,
+                },
+                child,
+            )?
+            .rows
+            .len(),
+        0
+    );
+    assert_eq!(
+        references(&store, &world, fork.created_revision, person)?,
+        vec![claim]
+    );
     assert!(matches!(
         store.review_mention(ReviewMention {
             view: child,
