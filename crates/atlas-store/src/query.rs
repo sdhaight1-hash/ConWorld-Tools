@@ -1,5 +1,6 @@
 //! Phase 3 typed reads over a single authorized historical snapshot.
 use std::collections::{HashMap, HashSet};
+use uuid::Uuid;
 
 use crate::graph::walk;
 use crate::{AuthorRevision, Error, EventRole, ObjectData, ObjectRef, Store, Version, ViewContext};
@@ -38,6 +39,16 @@ pub enum Direction {
     Outgoing,
     Incoming,
     Both,
+}
+
+/// Author-owned, versioned definition. Running it always reevaluates the
+/// QuerySpec with the caller's current ViewContext; no results are persisted.
+#[derive(Clone, Debug)]
+pub struct SavedLabelQuery {
+    pub id: Uuid,
+    pub name: String,
+    pub spec: QuerySpec,
+    pub recorded_at: AuthorRevision,
 }
 
 #[derive(Clone, Debug)]
