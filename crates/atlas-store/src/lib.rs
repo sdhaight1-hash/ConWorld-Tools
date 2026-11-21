@@ -279,7 +279,7 @@ pub enum Scope {
     Character(ObjectRef),
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ViewContext {
     pub world: WorldId,
     pub branch: BranchId,

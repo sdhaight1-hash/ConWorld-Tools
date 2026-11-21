@@ -22,7 +22,7 @@ type Event = {
 type Definition = { id: string; label: string; category: "relationship" | "tag" | "role";
   description: string; reverse_label: string | null; symmetric: boolean };
 type EvidenceStatement = { statement: string; source: string | null; audience: string | null; reader_id: string | null };
-type SearchResult = { revision: number; truncated: boolean; rows: {
+type SearchResult = { revision: number; truncated: boolean; next_cursor?: string | null; rows: {
   id: string; label: string; kind: string;
   statement?: string | null; source_citation?: string | null;
 }[] };
@@ -142,6 +142,7 @@ export async function showAuthorWorkspace(
   const participantEventsForm = document.querySelector<HTMLFormElement>("#author-participant-events-form")!;
   const compositeForm = document.querySelector<HTMLFormElement>("#author-composite-form")!;
   const queryResults = document.querySelector<HTMLUListElement>("#author-query-results")!;
+  const nextSearchPage = document.querySelector<HTMLButtonElement>("#author-next-search-page")!;
   const discoverButton = document.querySelector<HTMLButtonElement>("#author-discover-mentions")!;
   const discoveryStatus = document.querySelector<HTMLElement>("#author-discovery-status")!;
   const discoveryResults = document.querySelector<HTMLUListElement>("#author-discovery-results")!;
@@ -185,6 +186,8 @@ export async function showAuthorWorkspace(
   let snapshot: Snapshot | undefined;
   let requestSequence = 0;
   let querySequence = 0;
+  let pageCursor: string | undefined;
+  let pageNumber = 1;
   let discoverySequence = 0;
   let saving = false;
   let selectedEvent: Event | undefined;
@@ -222,6 +225,7 @@ export async function showAuthorWorkspace(
       ? "Exploring " + focusedPerson.label + " · " + focusedPerson.id
       : "Choose a person from search results to explore their connections and recorded events.";
     refreshView.disabled = saving || !worldSelect.value;
+    nextSearchPage.disabled = !snapshot || saving || !pageCursor;
     const day = snapshot?.day;
     const availability = [
       true,
@@ -472,6 +476,9 @@ export async function showAuthorWorkspace(
   async function refresh() {
     const sequence = ++requestSequence;
     ++querySequence;
+    pageCursor = undefined;
+    pageNumber = 1;
+    nextSearchPage.hidden = true;
     ++discoverySequence;
     discoveryResults.replaceChildren();
     discoveryStatus.textContent = "Choose Find possible mentions to scan this historical view.";
@@ -603,9 +610,12 @@ export async function showAuthorWorkspace(
         : "World loaded. Edits are saved locally.";
   }
 
-  function runQuery(message: string, execute: () => Promise<SearchResult>) {
+  function runQuery(message: string, execute: () => Promise<SearchResult>, page = 1) {
     if (!snapshot || saving) return;
     const sequence = ++querySequence;
+    pageCursor = undefined;
+    nextSearchPage.hidden = true;
+    nextSearchPage.disabled = true;
     queryResults.replaceChildren();
     queryStatus.textContent = message;
     void (async () => {
@@ -665,8 +675,13 @@ export async function showAuthorWorkspace(
           }
           queryResults.append(item);
         }
+        pageNumber = page;
+        pageCursor = result.next_cursor || undefined;
+        nextSearchPage.hidden = !pageCursor;
+        nextSearchPage.disabled = !pageCursor || saving;
         queryStatus.textContent = result.rows.length + " match(es) at author revision " + result.revision +
-          (result.truncated ? " · more results exist; narrow the search." : "");
+          (page > 1 || pageCursor ? " · page " + page : "") +
+          (pageCursor ? " · more results available." : result.truncated ? " · more results exist; narrow the search." : "");
       } catch (error) {
         if (sequence === querySequence) queryStatus.textContent = "Search failed: " + String(error);
       }
@@ -771,6 +786,16 @@ export async function showAuthorWorkspace(
         }
       }
     })();
+  });
+
+  nextSearchPage.addEventListener("click", () => {
+    if (!snapshot || saving || !pageCursor) return;
+    const worldId = snapshot.world.id;
+    const day = snapshot.day;
+    const revision = snapshot.view_revision;
+    const token = pageCursor;
+    runQuery("Loading the next historical results…",
+      () => invoke<SearchResult>("workspace_next_search_page", { worldId, day, revision, token }), pageNumber + 1);
   });
 
   function runSearch(mode: string, term: string, limit = 100) {
