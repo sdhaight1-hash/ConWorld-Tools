@@ -28,12 +28,18 @@ struct Edge {
     label: String,
 }
 
-struct PlatformSmoke(bool);
+#[derive(Clone, Copy)]
+enum PlatformSmoke {
+    None,
+    Scene,
+    Renderer { require_gpu: bool },
+}
 
 #[derive(Serialize)]
 struct PlatformScene {
     target: &'static str,
     smoke: bool,
+    renderer_smoke: bool,
     scene: Scene,
 }
 
@@ -43,6 +49,47 @@ struct SmokeObservation {
     canvas2d_verified: bool,
     history_verified: bool,
     webgpu: WebGpuStatus,
+    benchmark: Option<BenchmarkObservation>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct BenchmarkObservation {
+    adapter_fallback: Option<bool>,
+    adapter_vendor: Option<String>,
+    adapter_architecture: Option<String>,
+    nodes: usize,
+    edges: usize,
+    view_preserved: bool,
+    fallback_verified: bool,
+    gpu_pixels_verified: bool,
+    device_loss_verified: bool,
+    recovery_verified: bool,
+    frame_intervals_ms: Vec<f64>,
+}
+
+impl BenchmarkObservation {
+    fn passed(&self, require_gpu: bool, webgpu: &WebGpuStatus) -> bool {
+        let gpu_verified = self.gpu_pixels_verified
+            && self.device_loss_verified
+            && self.recovery_verified
+            && self.frame_intervals_ms.len() == 24
+            && self
+                .frame_intervals_ms
+                .iter()
+                .all(|sample| sample.is_finite() && *sample > 0.0);
+        let unsupported = matches!(
+            webgpu,
+            WebGpuStatus::ApiUnavailable | WebGpuStatus::AdapterUnavailable
+        );
+        self.nodes == 2_000
+            && self.edges == 3_910
+            && self.view_preserved
+            && self.fallback_verified
+            && (gpu_verified
+                && matches!(webgpu, WebGpuStatus::Available)
+                && (!require_gpu || self.adapter_fallback == Some(false))
+                || !require_gpu && unsupported)
+    }
 }
 
 #[derive(Deserialize, Serialize)]
@@ -55,19 +102,20 @@ enum WebGpuStatus {
     TimedOut,
 }
 
-fn load_scene(smoke: bool) -> Result<PlatformScene, &'static str> {
+fn load_scene(mode: PlatformSmoke) -> Result<PlatformScene, &'static str> {
     let scene = serde_json::from_str(include_str!("../../src/northbridge.json"))
         .map_err(|_| "The bundled Northbridge scene is invalid.")?;
     Ok(PlatformScene {
         target: std::env::consts::OS,
-        smoke,
+        smoke: !matches!(mode, PlatformSmoke::None),
+        renderer_smoke: matches!(mode, PlatformSmoke::Renderer { .. }),
         scene,
     })
 }
 
 #[tauri::command]
 fn platform_scene(smoke: State<'_, PlatformSmoke>) -> Result<PlatformScene, &'static str> {
-    load_scene(smoke.0)
+    load_scene(*smoke)
 }
 
 #[tauri::command]
@@ -76,9 +124,18 @@ fn complete_platform_smoke(
     smoke: State<'_, PlatformSmoke>,
     observation: SmokeObservation,
 ) -> Result<(), &'static str> {
-    if !smoke.0 {
-        return Err("Platform smoke mode is disabled.");
-    }
+    let passed = match *smoke {
+        PlatformSmoke::None => return Err("Platform smoke mode is disabled."),
+        PlatformSmoke::Scene => {
+            observation.scene_verified
+                && observation.canvas2d_verified
+                && observation.history_verified
+        }
+        PlatformSmoke::Renderer { require_gpu } => observation
+            .benchmark
+            .as_ref()
+            .is_some_and(|benchmark| benchmark.passed(require_gpu, &observation.webgpu)),
+    };
     let webview_version =
         tauri::webview_version().map_err(|_| "Cannot identify the native webview.")?;
     let report = serde_json::json!({
@@ -87,20 +144,25 @@ fn complete_platform_smoke(
         "observation": observation,
     });
     println!("ATLAS_PLATFORM_SMOKE {report}");
-    app.exit(i32::from(
-        !observation.scene_verified
-            || !observation.canvas2d_verified
-            || !observation.history_verified,
-    ));
+    app.exit(i32::from(!passed));
     Ok(())
 }
 
 fn main() {
-    let smoke = std::env::args_os().any(|arg| arg == "--platform-smoke");
+    let has_flag = |name| std::env::args_os().any(|arg| arg == name);
+    let smoke = if has_flag("--renderer-smoke") {
+        PlatformSmoke::Renderer {
+            require_gpu: has_flag("--require-gpu"),
+        }
+    } else if has_flag("--platform-smoke") {
+        PlatformSmoke::Scene
+    } else {
+        PlatformSmoke::None
+    };
     let history = history::NorthbridgeHistory::seed()
         .expect("failed to initialize the Phase 2 Northbridge history fixture");
     tauri::Builder::default()
-        .manage(PlatformSmoke(smoke))
+        .manage(smoke)
         .manage(history)
         .setup(|app| {
             let directory = app.path().app_data_dir()?;
@@ -134,8 +196,41 @@ mod tests {
     use std::collections::HashSet;
 
     #[test]
+    fn renderer_smoke_requires_pixels_loss_recovery_and_timings_on_gpu() {
+        use super::{BenchmarkObservation, WebGpuStatus};
+        let mut benchmark = BenchmarkObservation {
+            adapter_fallback: None,
+            adapter_vendor: None,
+            adapter_architecture: None,
+            nodes: 2_000,
+            edges: 3_910,
+            view_preserved: true,
+            fallback_verified: true,
+            gpu_pixels_verified: false,
+            device_loss_verified: false,
+            recovery_verified: false,
+            frame_intervals_ms: vec![],
+        };
+        assert!(benchmark.passed(false, &WebGpuStatus::AdapterUnavailable));
+        assert!(!benchmark.passed(true, &WebGpuStatus::AdapterUnavailable));
+        assert!(!benchmark.passed(false, &WebGpuStatus::Available));
+        assert!(!benchmark.passed(false, &WebGpuStatus::TimedOut));
+        benchmark.gpu_pixels_verified = true;
+        benchmark.device_loss_verified = true;
+        benchmark.recovery_verified = true;
+        benchmark.frame_intervals_ms = vec![16.0; 24];
+        assert!(!benchmark.passed(true, &WebGpuStatus::Available));
+        benchmark.adapter_fallback = Some(true);
+        assert!(!benchmark.passed(true, &WebGpuStatus::Available));
+        benchmark.adapter_fallback = Some(false);
+        assert!(benchmark.passed(true, &WebGpuStatus::Available));
+        benchmark.view_preserved = false;
+        assert!(!benchmark.passed(true, &WebGpuStatus::Available));
+    }
+
+    #[test]
     fn bundled_scene_has_unique_nodes_and_resolvable_edges() {
-        let scene = super::load_scene(false).unwrap().scene;
+        let scene = super::load_scene(super::PlatformSmoke::None).unwrap().scene;
         let ids: HashSet<_> = scene.nodes.iter().map(|node| &node.id).collect();
         assert!(!ids.is_empty());
         assert_eq!(ids.len(), scene.nodes.len());

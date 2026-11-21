@@ -64,7 +64,9 @@ jobs:
       - name: Native Windows WebView2 smoke test
         if: runner.os == 'Windows'
         shell: pwsh
-        run: ./apps/desktop/scripts/windows-platform-smoke.ps1 -Binary ./target/debug/atlas-desktop.exe
+        run: |
+          ./apps/desktop/scripts/windows-platform-smoke.ps1 -Binary ./target/debug/atlas-desktop.exe
+          ./apps/desktop/scripts/windows-platform-smoke.ps1 -Binary ./target/debug/atlas-desktop.exe -RendererBenchmark
       - name: Browser fallback smoke tests
         if: runner.os == 'Linux'
         working-directory: apps/desktop

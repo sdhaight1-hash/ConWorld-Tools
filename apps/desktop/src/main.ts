@@ -2,13 +2,15 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import northbridge from "./northbridge.json";
 import "./style.css";
 import { showAuthorWorkspace } from "./author-workspace";
-import { benchmarkHeight, benchmarkTriangles, benchmarkWidth, createGpuGraph, makeBenchmark, type GpuGraph } from "./graph-benchmark";
+import { benchmarkHeight, benchmarkNodeCount, benchmarkTriangles, benchmarkWidth, createGpuGraph, makeBenchmark, type GpuGraph } from "./graph-benchmark";
 
 export type Scene = typeof northbridge;
-type PlatformScene = { target: string; smoke: boolean; scene: Scene };
+type PlatformScene = { target: string; smoke: boolean; renderer_smoke?: boolean; scene: Scene };
 type BondSnapshot = { subject: string; target: string; kind: string; trust: number | null; tags: string[] };
 type EventSnapshot = { event: string; actor: string; witness: string; action: string; intent: string; outcome: string; source: string };
 type HistorySnapshot = { day: number; relationships: BondSnapshot[]; cause: EventSnapshot | null };
+type AdapterInfo = { vendor?: string; architecture?: string; isFallbackAdapter?: boolean };
+type WebGpuProbe = { status: WebGpuStatus; info?: AdapterInfo };
 type WebGpuStatus = "available" | "api_unavailable" | "adapter_unavailable" | "probe_failed" | "timed_out";
 
 const webGpuLabels: Record<WebGpuStatus, string> = {
@@ -23,12 +25,12 @@ const host = document.querySelector<HTMLElement>("#host")!;
 const renderer = document.querySelector<HTMLElement>("#renderer")!;
 
 async function start() {
-  const response = isTauri()
+  const response: PlatformScene = isTauri()
     ? await invoke<PlatformScene>("platform_scene")
     : { target: "browser preview", smoke: false, scene: northbridge };
   host.textContent = `Local scene · ${response.target}`;
   document.querySelector<HTMLElement>("#workspace")!.hidden = false;
-  const benchmark = !response.smoke && new URLSearchParams(location.search).has("benchmark");
+  const benchmark = response.renderer_smoke || (!response.smoke && new URLSearchParams(location.search).has("benchmark"));
   if (benchmark) {
     document.body.classList.add("benchmark");
     document.querySelector("h1")!.textContent = "Renderer benchmark";
@@ -37,13 +39,23 @@ async function start() {
     link.textContent = "Back to Northbridge";
     link.href = location.pathname;
   }
-  const graph = showScene(benchmark ? makeBenchmark() : response.scene, benchmark);
-  const historyVerified = await showHistory(response.smoke);
+  const scene = benchmark ? makeBenchmark() : response.scene;
+  const graph = showScene(scene, benchmark);
+  const historyVerified = !response.renderer_smoke && await showHistory(response.smoke);
   if (!response.smoke && !benchmark && isTauri() && graph) {
     await showAuthorWorkspace(response.scene, graph.setScene, graph.select);
   }
-  const webgpu = await probeWebGpu();
+  const probe = await probeWebGpu();
+  const webgpu = probe.status;
   if (graph?.hasCanvas) renderer.textContent = `Canvas2D · ${webGpuLabels[webgpu]}`;
+  if (response.renderer_smoke) {
+    const result = await verifyBenchmark(graph, scene, probe);
+    await invoke("complete_platform_smoke", { observation: {
+      scene_verified: false, canvas2d_verified: result.fallback_verified, history_verified: false,
+      webgpu, benchmark: result,
+    } });
+    return;
+  }
   if (benchmark && graph && webgpu === "available") void graph.tryGpu();
   if (response.smoke) {
     const inspector = document.querySelector<HTMLButtonElement>("#nodes button[data-node='beatrice']");
@@ -58,6 +70,66 @@ async function start() {
     const observation = { scene_verified: sceneVerified, canvas2d_verified: canvas2dVerified, history_verified: historyVerified, webgpu };
     await invoke("complete_platform_smoke", { observation });
   }
+}
+
+async function verifyBenchmark(graph: ReturnType<typeof showScene>, scene: Scene, probe: WebGpuProbe) {
+  const plot = document.querySelector<HTMLElement>("#plot")!;
+  const selection = document.querySelector<HTMLElement>("#selection")!;
+  const canvas = document.querySelector<HTMLCanvasElement>("#graph")!;
+  const selectedNode = "0764";
+  const presented = () => graph.hasGpu() || renderer.textContent?.includes("starting wgpu") === false;
+  const frame = () => new Promise<number>((resolve) => requestAnimationFrame(resolve));
+  async function waitFor(check: () => boolean) {
+    const until = performance.now() + 5_000;
+    while (!check() && performance.now() < until) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    }
+    return check();
+  }
+
+  graph.select(selectedNode);
+  const fallback = graph.visibleNode(selectedNode);
+  document.querySelector<HTMLButtonElement>("#zoom-in")!.click();
+  plot.scrollTo(760, 310);
+  const viewPreserved = () => selection.textContent === "Node 0764"
+    && canvas.width === benchmarkWidth * 1.25 && plot.scrollLeft === 760 && plot.scrollTop === 310;
+  const result = {
+    adapter_fallback: probe.info?.isFallbackAdapter ?? null,
+    adapter_vendor: probe.info?.vendor || null,
+    adapter_architecture: probe.info?.architecture || null,
+    nodes: document.querySelectorAll("#nodes button").length,
+    edges: scene.edges.length,
+    view_preserved: viewPreserved(),
+    fallback_verified: fallback,
+    gpu_pixels_verified: false,
+    device_loss_verified: false,
+    recovery_verified: false,
+    frame_intervals_ms: [] as number[],
+  };
+  if (probe.status !== "available" || result.nodes !== benchmarkNodeCount) return result;
+
+  document.querySelector<HTMLElement>("#gpu-controls")!.hidden = false;
+  void graph.tryGpu();
+  if (!await waitFor(presented) || !graph.hasGpu()) return result;
+  result.gpu_pixels_verified = graph.visibleGpuNode(selectedNode);
+  let previous = await frame();
+  for (let i = 0; i < 24 && graph.hasGpu(); i += 1) {
+    graph.redraw();
+    const now = await frame();
+    result.frame_intervals_ms.push(now - previous);
+    previous = now;
+  }
+
+  document.querySelector<HTMLButtonElement>("#lose-gpu")!.click();
+  result.device_loss_verified = await waitFor(() => !graph.hasGpu()
+    && renderer.textContent?.includes("WebGPU device lost") === true);
+  result.view_preserved &&= viewPreserved();
+  result.fallback_verified &&= !graph.hasGpu() && graph.visibleNode(selectedNode);
+
+  document.querySelector<HTMLButtonElement>("#retry-gpu")!.click();
+  result.recovery_verified = await waitFor(presented) && graph.hasGpu() && graph.visibleGpuNode(selectedNode);
+  result.view_preserved &&= viewPreserved();
+  return result;
 }
 
 async function showHistory(smoke: boolean): Promise<boolean> {
@@ -128,6 +200,7 @@ function showScene(scene: Scene, benchmark: boolean) {
   const layers = document.querySelector<HTMLElement>("#graph-layers")!;
   const retry = document.querySelector<HTMLButtonElement>("#retry-gpu")!;
   const lose = document.querySelector<HTMLButtonElement>("#lose-gpu")!;
+  let gpuStarting = false;
   let gpu: { canvas: HTMLCanvasElement; graph: GpuGraph } | undefined;
 
   function fallback(message: string) {
@@ -142,7 +215,8 @@ function showScene(scene: Scene, benchmark: boolean) {
   }
 
   async function tryGpu() {
-    if (gpu) return;
+    if (gpu || gpuStarting || !context) return;
+    gpuStarting = true;
     document.querySelector<HTMLElement>("#gpu-controls")!.hidden = false;
     retry.disabled = true;
     const gpuCanvas = document.createElement("canvas");
@@ -170,6 +244,8 @@ function showScene(scene: Scene, benchmark: boolean) {
     } catch (error) {
       console.warn("wgpu initialization failed", error);
       fallback("WebGPU renderer could not start");
+    } finally {
+      gpuStarting = false;
     }
   }
   retry.addEventListener("click", () => void tryGpu());
@@ -364,6 +440,23 @@ function showScene(scene: Scene, benchmark: boolean) {
     setScene,
     select,
     tryGpu,
+    redraw: draw,
+    hasGpu: () => gpu !== undefined,
+    visibleGpuNode(id: string) {
+      if (!gpu) return false;
+      draw();
+      const node = nodes.get(id);
+      if (!gpu || !node) return false;
+      const reader = document.createElement("canvas");
+      reader.width = reader.height = 1;
+      const buffer = reader.getContext("2d");
+      if (!buffer) return false;
+      const x = Math.round((node.x * gpu.canvas.width) / width);
+      const y = Math.round((node.y * gpu.canvas.height) / height);
+      buffer.drawImage(gpu.canvas, x, y, 1, 1, 0, 0, 1, 1);
+      const [red, green, blue, alpha] = buffer.getImageData(0, 0, 1, 1).data;
+      return alpha === 255 && red >= 235 && green >= 200 && green < red && blue >= 140 && blue < green;
+    },
     visibleNode(id: string) {
       const node = nodes.get(id);
       if (!node || !context) return false;
@@ -375,19 +468,20 @@ function showScene(scene: Scene, benchmark: boolean) {
   };
 }
 
-async function probeWebGpu(): Promise<WebGpuStatus> {
-  const { gpu } = navigator as Navigator & { gpu?: { requestAdapter(): Promise<object | null> } };
-  if (!gpu) return "api_unavailable";
+async function probeWebGpu(): Promise<WebGpuProbe> {
+  const { gpu } = navigator as Navigator & { gpu?: { requestAdapter(): Promise<{ info?: AdapterInfo } | null> } };
+  if (!gpu) return { status: "api_unavailable" };
 
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const timeout = new Promise<"timed_out">((resolve) => {
-      timer = setTimeout(() => resolve("timed_out"), 5_000);
+    const timeout = new Promise<WebGpuProbe>((resolve) => {
+      timer = setTimeout(() => resolve({ status: "timed_out" }), 5_000);
     });
-    const adapter = gpu.requestAdapter().then((value) => value ? "available" : "adapter_unavailable");
+    const adapter = gpu.requestAdapter().then((value): WebGpuProbe =>
+      value ? { status: "available", info: value.info } : { status: "adapter_unavailable" });
     return await Promise.race([adapter, timeout]);
   } catch {
-    return "probe_failed";
+    return { status: "probe_failed" };
   } finally {
     clearTimeout(timer);
   }
