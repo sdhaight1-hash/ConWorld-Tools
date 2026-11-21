@@ -25,6 +25,11 @@ pub enum QueryFilter {
     FullTextPhrase(String),
     /// Literal token phrase in versioned, source-backed claim statements.
     ClaimFullTextPhrase(String),
+    Kind(ObjectKindFilter),
+    HasSource(ObjectRef),
+    And(Vec<QueryFilter>),
+    Or(Vec<QueryFilter>),
+    Not(Box<QueryFilter>),
     Backlinks(ObjectRef),
     EventRole {
         event: ObjectRef,
@@ -43,6 +48,19 @@ pub enum QueryFilter {
         max_depth: u8,
         max_visited: usize,
     },
+}
+
+/// Allowlisted record kinds for author-only historical predicates.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ObjectKindFilter {
+    Person,
+    Definition,
+    Relationship,
+    EventInvolvement,
+    ActorAction,
+    HistoricalEvent,
+    Source,
+    Claim,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -89,6 +107,36 @@ impl Store {
         if spec.schema_version != QUERY_SCHEMA_VERSION || !(1..=500).contains(&spec.limit) {
             return Err(Error::InvalidInput("query schema or result limit"));
         }
+        if matches!(
+            &spec.filter,
+            QueryFilter::Kind(_)
+                | QueryFilter::HasSource(_)
+                | QueryFilter::And(_)
+                | QueryFilter::Or(_)
+                | QueryFilter::Not(_)
+        ) {
+            let mut nodes = 0;
+            validate_predicate(&spec.filter, view, 0, &mut nodes)?;
+            let objects = self.objects_at(view, 2_000)?;
+            let visible: HashSet<_> = objects.iter().map(|item| item.object).collect();
+            let mut rows: Vec<_> = objects
+                .into_iter()
+                .filter(|item| predicate_matches(&spec.filter, item, &visible))
+                .collect();
+            rows.sort_by(|a, b| {
+                a.record
+                    .label
+                    .cmp(&b.record.label)
+                    .then(a.object.id.0.cmp(&b.object.id.0))
+            });
+            let truncated = rows.len() > spec.limit;
+            rows.truncate(spec.limit);
+            return Ok(QueryResult {
+                rows,
+                truncated,
+                revision: view.revision,
+            });
+        }
         match &spec.filter {
             QueryFilter::FullTextPhrase(phrase) => {
                 return self.indexed_phrase_at(phrase, view, spec.limit);
@@ -105,6 +153,11 @@ impl Store {
             QueryFilter::FullTextPhrase(_) | QueryFilter::ClaimFullTextPhrase(_) => {
                 unreachable!("handled by the indexed FTS5 query path")
             }
+            QueryFilter::Kind(_)
+            | QueryFilter::HasSource(_)
+            | QueryFilter::And(_)
+            | QueryFilter::Or(_)
+            | QueryFilter::Not(_) => unreachable!("handled by the snapshot predicate path"),
             QueryFilter::LabelContains(text) | QueryFilter::ExactLabel(text) => {
                 let needle = search_label(text)?;
                 let exact = matches!(spec.filter, QueryFilter::ExactLabel(_));
@@ -241,6 +294,71 @@ impl Store {
             truncated,
             revision: view.revision,
         })
+    }
+}
+
+const MAX_PREDICATE_NODES: usize = 32;
+const MAX_PREDICATE_DEPTH: usize = 4;
+const MAX_BOOLEAN_CHILDREN: usize = 8;
+
+/// Validate all children before short-circuiting, including those under NOT.
+fn validate_predicate(
+    filter: &QueryFilter,
+    view: ViewContext,
+    depth: usize,
+    nodes: &mut usize,
+) -> Result<(), Error> {
+    *nodes += 1;
+    if depth > MAX_PREDICATE_DEPTH || *nodes > MAX_PREDICATE_NODES {
+        return Err(Error::QueryBudgetExceeded);
+    }
+    match filter {
+        QueryFilter::LabelContains(label) | QueryFilter::ExactLabel(label) => {
+            search_label(label)?;
+        }
+        QueryFilter::Kind(_) => {}
+        QueryFilter::HasSource(source) => same_world(*source, view)?,
+        QueryFilter::And(children) | QueryFilter::Or(children) => {
+            if children.len() > MAX_BOOLEAN_CHILDREN {
+                return Err(Error::QueryBudgetExceeded);
+            }
+            if children.len() < 2 {
+                return Err(Error::InvalidInput("boolean predicate children"));
+            }
+            for child in children {
+                validate_predicate(child, view, depth + 1, nodes)?;
+            }
+        }
+        QueryFilter::Not(inner) => validate_predicate(inner, view, depth + 1, nodes)?,
+        _ => return Err(Error::InvalidInput("unsupported nested query predicate")),
+    }
+    Ok(())
+}
+
+fn predicate_matches(
+    filter: &QueryFilter,
+    version: &Version,
+    visible: &HashSet<ObjectRef>,
+) -> bool {
+    match filter {
+        QueryFilter::LabelContains(text) => version.record.label.to_lowercase().contains(&text.trim().to_lowercase()),
+        QueryFilter::ExactLabel(text) => version.record.label.to_lowercase() == text.trim().to_lowercase(),
+        QueryFilter::Kind(kind) => matches!(
+            (&version.record.data, kind),
+            (ObjectData::Person, ObjectKindFilter::Person)
+                | (ObjectData::Definition { .. }, ObjectKindFilter::Definition)
+                | (ObjectData::Relationship { .. }, ObjectKindFilter::Relationship)
+                | (ObjectData::EventInvolvement { .. }, ObjectKindFilter::EventInvolvement)
+                | (ObjectData::ActorAction { .. }, ObjectKindFilter::ActorAction)
+                | (ObjectData::HistoricalEvent { .. }, ObjectKindFilter::HistoricalEvent)
+                | (ObjectData::Source { .. }, ObjectKindFilter::Source)
+                | (ObjectData::Claim { .. }, ObjectKindFilter::Claim)
+        ),
+        QueryFilter::HasSource(source) => visible.contains(source) && version.record.source == Some(*source),
+        QueryFilter::And(children) => children.iter().all(|child| predicate_matches(child, version, visible)),
+        QueryFilter::Or(children) => children.iter().any(|child| predicate_matches(child, version, visible)),
+        QueryFilter::Not(inner) => !predicate_matches(inner, version, visible),
+        _ => unreachable!("the predicate validator rejects unsupported leaf filters"),
     }
 }
 

@@ -18,6 +18,7 @@
     "allow-workspace-save-query",
     "allow-workspace-query-path",
     "allow-workspace-query-participant-events",
+    "allow-workspace-composite-query",
     "allow-workspace-create-person",
     "allow-workspace-create-relationship",
     "allow-workspace-record-relationship-state",

@@ -107,10 +107,7 @@ fn compound_predicates_obey_kind_source_boolean_and_historical_scope() -> Result
         store.execute_query(&query(sourced.clone(), 100), view(&world, second, 10))?.rows.len(),
         2
     );
-    assert_eq!(
-        store.execute_query(&query(sourced.clone(), 1), view(&world, second, 10))?.truncated,
-        true
-    );
+    assert!(store.execute_query(&query(sourced.clone(), 1), view(&world, second, 10))?.truncated);
     assert!(store.execute_query(&query(sourced.clone(), 100), view(&world, first, 10))?.rows.is_empty());
     assert!(store.execute_query(&query(sourced.clone(), 100), view(&world, second, 9))?.rows.is_empty());
 
