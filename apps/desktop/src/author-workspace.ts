@@ -23,6 +23,7 @@ type Definition = { id: string; label: string; category: "relationship" | "tag" 
   description: string; reverse_label: string | null; symmetric: boolean };
 type EvidenceStatement = { statement: string; source: string | null; audience: string | null; reader_id: string | null };
 type SearchResult = { revision: number; truncated: boolean; rows: { id: string; label: string; kind: string }[] };
+type SavedQuery = { id: string; name: string; mode: "contains" | "exact" | "fulltext"; term: string; limit: number; recorded_at: number };
 type Snapshot = {
   world: World; day: number; view_revision: number;
   people: Person[]; relationships: Relationship[]; events: Event[]; definitions: Definition[];
@@ -109,6 +110,9 @@ export async function showAuthorWorkspace(
   const info = document.querySelector<HTMLElement>("#author-world-info")!;
   const status = document.querySelector<HTMLElement>("#author-status")!;
   const queryForm = document.querySelector<HTMLFormElement>("#author-query-form")!;
+  const saveQueryForm = document.querySelector<HTMLFormElement>("#author-save-query-form")!;
+  const runSavedQuery = document.querySelector<HTMLButtonElement>("#author-run-saved-query")!;
+  const savedSelect = saveQueryForm.elements.namedItem("query_id") as HTMLSelectElement;
   const pathForm = document.querySelector<HTMLFormElement>("#author-path-form")!;
   const queryResults = document.querySelector<HTMLUListElement>("#author-query-results")!;
   const queryStatus = document.querySelector<HTMLElement>("#author-query-status")!;
@@ -153,6 +157,7 @@ export async function showAuthorWorkspace(
   let saving = false;
   let selectedEvent: Event | undefined;
   let people: Option[] = [];
+  let savedQueries: SavedQuery[] = [];
   let personNames = new Map<string, string>();
   const name = (id: string) => personNames.get(id) ?? "Unavailable person";
   section.hidden = false;
@@ -190,6 +195,8 @@ export async function showAuthorWorkspace(
     for (const control of [worldSelect, dayInput, revisionInput]) control.disabled = saving;
     worldForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = saving;
     queryForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = !snapshot || saving;
+    saveQueryForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = blocked;
+    runSavedQuery.disabled = !snapshot || !savedSelect.value || saving;
     pathForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = !snapshot || !people.length || saving;
   }
 
@@ -432,17 +439,24 @@ export async function showAuthorWorkspace(
     const day = currentDay();
     const revision = selectedRevision();
     let next: Snapshot;
+    let saved: SavedQuery[];
     try {
       next = await invoke<Snapshot>("workspace_snapshot", { worldId, day, revision });
+      saved = await invoke<SavedQuery[]>("workspace_saved_queries", { worldId, revision });
     } catch (error) {
       if (sequence === requestSequence) throw error;
       return;
     }
     if (sequence !== requestSequence) return;
     snapshot = next;
+    savedQueries = saved;
+    options(savedSelect, [{ id: "", label: "New saved search" },
+      ...savedQueries.map((query) => ({ id: query.id, label: query.name + " · " + query.id.slice(0, 8) }))],
+      worldChanged ? "" : savedSelect.value);
     people = next.people;
     personNames = new Map(people.map((person) => [person.id, person.label]));
     if (worldChanged) {
+      field<HTMLInputElement>(saveQueryForm, "name").value = "";
       evidenceForm.reset();
       definitionForm.reset();
       syncDefinition();
@@ -560,19 +574,75 @@ export async function showAuthorWorkspace(
     })();
   }
 
-  function runSearch(mode: string, term: string) {
+  function runSearch(mode: string, term: string, limit = 100) {
     if (!snapshot || saving) return;
     const worldId = snapshot.world.id;
     const day = snapshot.day;
     const revision = selectedRevision();
     runQuery(mode === "backlinks" ? "Finding incoming references…" : "Searching historical records…",
-      () => invoke<SearchResult>("workspace_search", { worldId, day, revision, mode, term, limit: 100 }));
+      () => invoke<SearchResult>("workspace_search", { worldId, day, revision, mode, term, limit }));
   }
 
   queryForm.addEventListener("submit", (event) => {
     event.preventDefault();
     runSearch(field<HTMLSelectElement>(queryForm, "mode").value,
       field<HTMLInputElement>(queryForm, "term").value.trim());
+  });
+
+  savedSelect.addEventListener("change", () => {
+    const query = savedQueries.find((item) => item.id === savedSelect.value);
+    if (query) {
+      field<HTMLInputElement>(saveQueryForm, "name").value = query.name;
+      field<HTMLInputElement>(queryForm, "term").value = query.term;
+      field<HTMLSelectElement>(queryForm, "mode").value = query.mode;
+    }
+    syncButtons();
+  });
+
+  runSavedQuery.addEventListener("click", () => {
+    const query = savedQueries.find((item) => item.id === savedSelect.value);
+    if (!query) return;
+    field<HTMLInputElement>(queryForm, "term").value = query.term;
+    field<HTMLSelectElement>(queryForm, "mode").value = query.mode;
+    runSearch(query.mode, query.term, query.limit);
+  });
+
+  saveQueryForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (!snapshot || saving) return;
+    if (selectedRevision() !== null) {
+      queryStatus.textContent = "Historical author revisions are read-only.";
+      return;
+    }
+    const term = field<HTMLInputElement>(queryForm, "term").value.trim();
+    if (!term) {
+      queryStatus.textContent = "Enter a search phrase before saving.";
+      return;
+    }
+    const request = {
+      world_id: snapshot.world.id,
+      expected_revision: snapshot.world.revision,
+      query_id: savedSelect.value || null,
+      name: value(saveQueryForm, "name"),
+      mode: value(queryForm, "mode"),
+      term,
+      limit: 100,
+    };
+    void (async () => {
+      try {
+        saving = true;
+        syncButtons();
+        const savedId = await invoke<string>("workspace_save_query", { request });
+        await refresh();
+        savedSelect.value = savedId;
+        queryStatus.textContent = "Saved search definition to world history.";
+      } catch (error) {
+        queryStatus.textContent = "Unable to save search: " + String(error);
+      } finally {
+        saving = false;
+        syncButtons();
+      }
+    })();
   });
 
   pathForm.addEventListener("submit", (event) => {
