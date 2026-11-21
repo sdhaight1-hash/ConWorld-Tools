@@ -1182,3 +1182,81 @@ test("historical result pages use opaque native tokens and reset on refresh", as
     { command: "workspace_search", args: { worldId: "archive", revision: 7 } },
   ]);
 });
+
+test("cancels exact pending search and ignores cancelled or superseded replies", async ({ page }) => {
+  await page.addInitScript(() => {
+    const pending = new Map<string, (value: unknown) => void>();
+    const requests: string[] = [];
+    const cancellations: string[] = [];
+    Object.assign(window, {
+      isTauri: true,
+      __queryRequests: requests,
+      __queryCancellations: cancellations,
+      __resolveQuery: (request: string, label: string) => {
+        pending.get(request)?.({
+          revision: 7, truncated: true, next_cursor: "stale-token",
+          rows: [{ id: request, label, kind: "person" }],
+        });
+      },
+      __TAURI_INTERNALS__: {
+        invoke: async (command: string, args: Record<string, unknown>) => {
+          if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+          if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+          const world = { id: "archive", name: "Archive", revision: 7 };
+          if (command === "workspace_worlds") return [world];
+          if (command === "workspace_snapshot") return {
+            world, day: args.day, view_revision: args.revision ?? 7, scene_limited: true,
+            people: [], relationships: [], events: [], definitions: [], aliases: [],
+          };
+          if (command === "workspace_saved_queries") return [];
+          if (command === "workspace_search") {
+            const requestId = String(args.requestId);
+            requests.push(requestId);
+            return new Promise((resolve) => pending.set(requestId, resolve));
+          }
+          if (command === "workspace_cancel_query") {
+            cancellations.push(String(args.requestId));
+            return null;
+          }
+          throw new Error("Unexpected native command: " + command);
+        },
+      },
+    });
+  });
+  await page.goto("/");
+  await expect(page.locator("#author-status")).toContainText("Search-only mode");
+  const form = page.locator("#author-query-form");
+  await form.getByLabel("Find name").fill("First search");
+  const search = form.getByRole("button", { name: "Search history" });
+  const cancel = page.getByRole("button", { name: "Cancel search" });
+  const queryStatus = page.locator("#author-query-status");
+  const requests = () => page.evaluate(() => (window as unknown as { __queryRequests: string[] }).__queryRequests);
+  const cancelled = () => page.evaluate(() => (window as unknown as { __queryCancellations: string[] }).__queryCancellations);
+  const resolve = (request: string, label: string) => page.evaluate(({ request, label }) =>
+    (window as unknown as { __resolveQuery: (request: string, label: string) => void }).__resolveQuery(request, label),
+    { request, label });
+  await search.click();
+  await expect.poll(requests).toHaveLength(1);
+  await expect(cancel).toBeVisible();
+  await search.click();
+  await expect.poll(requests).toHaveLength(2);
+  const [first, second] = await requests();
+  expect(first).not.toBe(second);
+  await expect.poll(cancelled).toEqual([first]);
+  await resolve(first, "Superseded result");
+  await expect(page.locator("#author-query-results li")).toHaveCount(0);
+  await cancel.click();
+  await expect.poll(cancelled).toEqual([first, second]);
+  await expect(queryStatus).toContainText("Search cancellation requested.");
+  await resolve(second, "Cancelled result");
+  await expect(page.locator("#author-query-results li")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Next results page" })).toBeHidden();
+  await search.click();
+  await expect.poll(requests).toHaveLength(3);
+  const third = (await requests())[2];
+  await page.getByRole("button", { name: "Refresh historical view" }).click();
+  await expect.poll(cancelled).toEqual([first, second, third]);
+  await resolve(third, "Refreshed result");
+  await expect(page.locator("#author-query-results li")).toHaveCount(0);
+  await expect(cancel).toBeHidden();
+});

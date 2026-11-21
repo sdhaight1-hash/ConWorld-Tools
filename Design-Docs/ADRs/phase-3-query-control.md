@@ -1,0 +1,11 @@
+# Phase 3 — Cooperative query cancellation and execution deadlines
+
+**Status:** Draft, stacked on #37, tracks [Phase 3 #4](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/4). No schema change.
+
+A read-only QueryControl combines a monotonic deadline with an atomic cancellation flag shared across threads. The controlled query and page APIs check permissions before installing a temporary connection-local SQLite progress handler (rusqlite 0.37 hooks). The callback interrupts SQLite VM work; candidate resolution, traversal, review lookup and compound planning/evaluation check the same token. A scoped guard clears the handler and token on error or unwinding, so ensuing edits and reads do not inherit cancellation. No interrupted read returns partial results or a continuation.
+
+These are cooperative deadlines, not hard realtime guarantees: waiting on SQLite's existing busy timeout, OS scheduling, and bounded final sorting can overrun the requested duration. No writes are interrupted. Explicit cancellation and expiry return distinct typed errors. Tests cover pre-cancellation, zero duration, capability denial, invalid query cleanup, successful controlled replay and subsequent canonical write/read. Native worker dispatch and cancel controls are the next integration step. Exact-head CI required.
+
+## Native command and UI integration
+
+The desktop registers a bounded set of active UUID-keyed query jobs before dispatch to Tauri's blocking worker pool. A separate cancel command never acquires the storage lock, signals only the matching request, and retains a bounded tombstone window for cancel-before-register ordering. The ten-second deadline begins on admission, including queue time. Each worker rechecks the token after acquiring storage and before returning; source-citation projection checks per bounded row. New searches, explicit cancellation and historical refresh invalidate the client generation and request cancellation; late replies cannot resurrect results or cursors. Native tests cover independent cancellation while storage is locked, early cancellation and bounded result cleanup; browser tests use deferred synthetic IPC replies to verify exact request IDs and suppression. Discovery scanning and snapshot loading have independent limits and are not yet dispatched through this query job path.
