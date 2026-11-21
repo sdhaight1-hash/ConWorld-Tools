@@ -9,7 +9,7 @@ use atlas_store::{
     EventRole, ObjectData, ObjectId, ObjectRef, Record, Scope, Store, ValidInterval, VersionRef,
     ViewContext, World, WorldDay, WorldId,
     discovery::{MentionDisposition, ReviewMention},
-    query::{Direction, QUERY_SCHEMA_VERSION, QueryFilter, QuerySpec, SaveNamedLabelQuery},
+    query::{Direction, PredicateInput, QUERY_SCHEMA_VERSION, QueryFilter, QuerySpec, SaveNamedLabelQuery},
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -49,70 +49,6 @@ pub struct ParticipantEventsInput {
     limit: usize,
 }
 
-/// Strict typed predicate input; the authoritative validator lives in atlas-store.
-#[derive(Deserialize)]
-#[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
-enum PredicateInput {
-    Contains { text: String },
-    Exact { text: String },
-    ObjectKind { kind: String },
-    HasSource { source_id: String },
-    And { filters: Vec<PredicateInput> },
-    Or { filters: Vec<PredicateInput> },
-    Not { filter: Box<PredicateInput> },
-}
-
-impl PredicateInput {
-    fn into_filter(
-        self,
-        world: WorldId,
-        depth: usize,
-        nodes: &mut usize,
-    ) -> Result<QueryFilter, String> {
-        *nodes += 1;
-        if depth > 4 || *nodes > 32 {
-            return Err("Composite query exceeds the predicate budget".into());
-        }
-        Ok(match self {
-            Self::Contains { text } => QueryFilter::LabelContains(text),
-            Self::Exact { text } => QueryFilter::ExactLabel(text),
-            Self::HasSource { source_id } => QueryFilter::HasSource(ObjectRef {
-                world,
-                id: ObjectId(id(&source_id)?),
-            }),
-            Self::ObjectKind { kind } => QueryFilter::Kind(match kind.as_str() {
-                "person" => atlas_store::query::ObjectKindFilter::Person,
-                "definition" => atlas_store::query::ObjectKindFilter::Definition,
-                "relationship" => atlas_store::query::ObjectKindFilter::Relationship,
-                "event_involvement" => atlas_store::query::ObjectKindFilter::EventInvolvement,
-                "actor_action" => atlas_store::query::ObjectKindFilter::ActorAction,
-                "historical_event" => atlas_store::query::ObjectKindFilter::HistoricalEvent,
-                "source" => atlas_store::query::ObjectKindFilter::Source,
-                "claim" => atlas_store::query::ObjectKindFilter::Claim,
-                _ => return Err("Unknown composite object kind".into()),
-            }),
-            Self::And { filters } | Self::Or { filters } if !(2..=8).contains(&filters.len()) => {
-                return Err("AND/OR needs 2 to 8 children".into());
-            }
-            Self::And { filters } => QueryFilter::And(
-                filters
-                    .into_iter()
-                    .map(|item| item.into_filter(world, depth + 1, nodes))
-                    .collect::<Result<Vec<_>, _>>()?,
-            ),
-            Self::Or { filters } => QueryFilter::Or(
-                filters
-                    .into_iter()
-                    .map(|item| item.into_filter(world, depth + 1, nodes))
-                    .collect::<Result<Vec<_>, _>>()?,
-            ),
-            Self::Not { filter } => {
-                QueryFilter::Not(Box::new(filter.into_filter(world, depth + 1, nodes)?))
-            }
-        })
-    }
-}
-
 #[derive(Deserialize)]
 pub struct CompositeQueryInput {
     world_id: String,
@@ -130,6 +66,7 @@ pub struct SavedQueryInput {
     name: String,
     mode: String,
     term: String,
+    predicate: Option<PredicateInput>,
     limit: usize,
 }
 
@@ -139,6 +76,7 @@ pub struct SavedQuerySummary {
     name: String,
     mode: &'static str,
     term: String,
+    predicate: Option<PredicateInput>,
     limit: usize,
     recorded_at: i64,
 }
@@ -514,26 +452,31 @@ impl AuthorWorkspace {
                 Scope::Author,
             )
             .map_err(|error| error.to_string())?;
-        Ok(queries
+        queries
             .into_iter()
             .map(|query| {
-                let (mode, term) = match query.spec.filter {
-                    QueryFilter::LabelContains(term) => ("contains", term),
-                    QueryFilter::ExactLabel(term) => ("exact", term),
-                    QueryFilter::FullTextPhrase(term) => ("fulltext", term),
-                    QueryFilter::ClaimFullTextPhrase(term) => ("claimtext", term),
-                    _ => unreachable!("only supported label filters are persisted"),
+                let (mode, term, predicate) = match &query.spec.filter {
+                    QueryFilter::LabelContains(term) => ("contains", term.clone(), None),
+                    QueryFilter::ExactLabel(term) => ("exact", term.clone(), None),
+                    QueryFilter::FullTextPhrase(term) => ("fulltext", term.clone(), None),
+                    QueryFilter::ClaimFullTextPhrase(term) => ("claimtext", term.clone(), None),
+                    filter => (
+                        "composite",
+                        String::new(),
+                        Some(PredicateInput::from_filter(filter).map_err(|error| error.to_string())?),
+                    ),
                 };
-                SavedQuerySummary {
+                Ok(SavedQuerySummary {
                     id: query.id.to_string(),
                     name: query.name,
                     mode,
                     term,
+                    predicate,
                     limit: query.spec.limit,
                     recorded_at: query.recorded_at.0,
-                }
+                })
             })
-            .collect())
+            .collect::<Result<Vec<_>, String>>()
     }
 
     fn save_query(&self, request: SavedQueryInput) -> Result<String, String> {
@@ -542,7 +485,14 @@ impl AuthorWorkspace {
             "exact" => QueryFilter::ExactLabel(request.term),
             "fulltext" => QueryFilter::FullTextPhrase(request.term),
             "claimtext" => QueryFilter::ClaimFullTextPhrase(request.term),
-            _ => return Err("Only label and claim-text searches can be saved".into()),
+            "composite" => {
+                let mut nodes = 0;
+                request.predicate
+                    .ok_or("Missing typed composite search predicate")?
+                    .into_filter(WorldId(id(&request.world_id)?), 0, &mut nodes)
+                    .map_err(|error| error.to_string())?
+            }
+            _ => return Err("Unsupported saved query type".into()),
         };
         let spec = QuerySpec {
             schema_version: QUERY_SCHEMA_VERSION,
