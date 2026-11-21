@@ -9,7 +9,7 @@ use uuid::Uuid;
 use crate::*;
 
 const APPLICATION_ID: i64 = 0x4357_4c44; // CWLD
-const SCHEMA_VERSION: i64 = 6;
+const SCHEMA_VERSION: i64 = 7;
 
 pub struct Store {
     conn: Connection,
@@ -57,6 +57,9 @@ impl Store {
         }
         if version < 6 {
             tx.execute_batch(include_str!("../migrations/0006.sql"))?;
+        }
+        if version < 7 {
+            tx.execute_batch(include_str!("../migrations/0007.sql"))?;
             verify_foreign_keys(&tx)?;
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
@@ -489,6 +492,104 @@ impl Store {
         let version = resolve_object(&tx, object, view.branch, view.revision, view.day)?;
         tx.commit()?;
         Ok(version)
+    }
+
+    /// Only the explicitly released statement is projected to non-authors.
+    /// Event identity, subject links, citations and unreleased counts stay in author reads.
+    pub fn evidence_at(
+        &self,
+        event: ObjectRef,
+        view: ViewContext,
+    ) -> Result<Vec<EvidenceStatement>, Error> {
+        if event.world != view.world {
+            return Err(Error::WrongWorld);
+        }
+        let tx = self.conn.unchecked_transaction()?;
+        let world = load_world(&tx, event.world)?;
+        if view.revision < AuthorRevision(0) || view.revision > world.revision {
+            return Err(Error::InvalidRevision);
+        }
+        if view.scope != Scope::Author {
+            if view.branch != world.main {
+                return Err(Error::CapabilityDenied);
+            }
+            if view.revision != world.revision {
+                return Err(Error::InvalidRevision);
+            }
+        }
+        if !resolve_object(&tx, event, view.branch, view.revision, view.day)?.is_some_and(
+            |version| matches!(version.record.data, ObjectData::HistoricalEvent { .. }),
+        ) {
+            return Ok(Vec::new());
+        }
+        if let Scope::Character(reader) = view.scope {
+            require_person(
+                &tx,
+                world.id,
+                reader,
+                view.branch,
+                view.revision.0,
+                view.day,
+            )?;
+        }
+        let mut query = tx.prepare(
+            "SELECT DISTINCT claim_id FROM claim_versions WHERE world_id = ?1 AND subject_id = ?2 ORDER BY claim_id"
+        )?;
+        let ids = query.query_map(
+            params![event.world.0.as_bytes(), event.id.0.as_bytes()],
+            |row| row.get::<_, [u8; 16]>(0),
+        )?;
+        let mut results = Vec::new();
+        for id in ids {
+            let claim = ObjectRef {
+                world: event.world,
+                id: ObjectId(Uuid::from_bytes(id?)),
+            };
+            let Some(version) = resolve_object(&tx, claim, view.branch, view.revision, view.day)?
+            else {
+                continue;
+            };
+            let ObjectData::Claim {
+                subject,
+                statement,
+                audience,
+                ..
+            } = version.record.data
+            else {
+                continue;
+            };
+            let visible = match (view.scope, audience) {
+                (Scope::Author, _) | (_, ClaimAudience::Public) => true,
+                (Scope::Character(viewer), ClaimAudience::Character(reader)) => viewer == reader,
+                _ => false,
+            };
+            if subject != event || !visible {
+                continue;
+            }
+            let source = if view.scope == Scope::Author {
+                version
+                    .record
+                    .source
+                    .map(|object| resolve_object(&tx, object, view.branch, view.revision, view.day))
+                    .transpose()?
+                    .flatten()
+                    .and_then(|source| match source.record.data {
+                        ObjectData::Source { citation } => Some(citation),
+                        _ => None,
+                    })
+            } else {
+                None
+            };
+            results.push(EvidenceStatement {
+                statement,
+                source,
+                audience: (view.scope == Scope::Author).then_some(audience),
+            });
+            if results.len() == 200 {
+                break;
+            }
+        }
+        Ok(results)
     }
 
     pub fn effect_on(
@@ -1074,6 +1175,15 @@ fn latest_state(
 fn validate_stable_links(old: &ObjectData, new: &ObjectData) -> Result<(), Error> {
     let changed = match (old, new) {
         (
+            ObjectData::Definition {
+                definition: previous,
+                ..
+            },
+            ObjectData::Definition {
+                definition: next, ..
+            },
+        ) => std::mem::discriminant(previous) != std::mem::discriminant(next),
+        (
             ObjectData::Relationship {
                 subject: a,
                 target: b,
@@ -1189,6 +1299,28 @@ fn write_version(
     }
     let (kind, occurrence, citation) = match &record.data {
         ObjectData::Person => ("person", &EventDate::Unknown, None),
+        ObjectData::Definition {
+            definition,
+            description,
+        } => {
+            if record.valid != ValidInterval::default() {
+                return Err(Error::InvalidInterval);
+            }
+            validate_text(description, "definition description")?;
+            if let Definition::Relationship {
+                reverse_label: Some(reverse),
+                symmetric,
+            } = definition
+            {
+                validate_text(reverse, "inverse label")?;
+                if *symmetric {
+                    return Err(Error::InvalidInput(
+                        "a symmetric definition uses the same label in both directions",
+                    ));
+                }
+            }
+            ("definition", &EventDate::Unknown, None)
+        }
         ObjectData::Relationship {
             subject,
             target,
@@ -1216,11 +1348,30 @@ fn write_version(
             ("relationship", &EventDate::Unknown, None)
         }
         ObjectData::EventInvolvement {
-            event, participant, ..
+            event,
+            participant,
+            role,
         } => {
             let day = record.valid.start.ok_or(Error::InvalidInterval)?;
             require_event(tx, object.world, *event, branch, revision, day)?;
             require_person(tx, object.world, *participant, branch, revision, day)?;
+            if let EventRole::Custom(definition) = role {
+                if definition.world != object.world {
+                    return Err(Error::WrongWorld);
+                }
+                let definition =
+                    resolve_object(tx, *definition, branch, AuthorRevision(revision), day)?
+                        .ok_or(Error::NotFound)?;
+                if !matches!(
+                    definition.record.data,
+                    ObjectData::Definition {
+                        definition: Definition::Role,
+                        ..
+                    }
+                ) {
+                    return Err(Error::WrongKind);
+                }
+            }
             ("event_involvement", &EventDate::Unknown, None)
         }
         ObjectData::ActorAction {
@@ -1245,7 +1396,18 @@ fn write_version(
             subject,
             predicate,
             statement,
+            audience,
         } => {
+            if let ClaimAudience::Character(reader) = audience {
+                require_person(
+                    tx,
+                    object.world,
+                    *reader,
+                    branch,
+                    revision,
+                    record.valid.start.ok_or(Error::InvalidInterval)?,
+                )?;
+            }
             validate_text(predicate, "claim predicate")?;
             validate_text(statement, "claim statement")?;
             if subject.world != object.world {
@@ -1401,19 +1563,20 @@ fn write_version(
         role,
     } = &record.data
     {
-        let role = match role {
-            EventRole::Actor => "actor",
-            EventRole::Witness => "witness",
-            EventRole::Victim => "victim",
-            EventRole::Stakeholder => "stakeholder",
-            EventRole::Sponsor => "sponsor",
+        let (role, definition) = match role {
+            EventRole::Actor => ("actor", None),
+            EventRole::Witness => ("witness", None),
+            EventRole::Victim => ("victim", None),
+            EventRole::Stakeholder => ("stakeholder", None),
+            EventRole::Sponsor => ("sponsor", None),
+            EventRole::Custom(item) => ("stakeholder", Some(*item.id.0.as_bytes())),
         };
         tx.execute(
             "INSERT INTO event_involvement_versions
-             (world_id, involvement_id, branch_id, state_revision, revision, event_id, participant_id, role)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+             (world_id, involvement_id, branch_id, state_revision, revision, event_id, participant_id, role, role_definition_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![object.world.0.as_bytes(), object.id.0.as_bytes(), branch.0.as_bytes(),
-                state_revision, revision, event.id.0.as_bytes(), participant.id.0.as_bytes(), role],
+                state_revision, revision, event.id.0.as_bytes(), participant.id.0.as_bytes(), role, definition],
         )?;
     }
     if let ObjectData::ActorAction {
@@ -1443,13 +1606,39 @@ fn write_version(
         subject,
         predicate,
         statement,
+        audience,
     } = &record.data
     {
+        let (audience, reader) = match audience {
+            ClaimAudience::Author => ("author", None),
+            ClaimAudience::Public => ("public", None),
+            ClaimAudience::Character(reader) => ("character", Some(*reader.id.0.as_bytes())),
+        };
         tx.execute(
-            "INSERT INTO claim_versions (world_id, claim_id, branch_id, revision, state_revision, subject_id, predicate, statement)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            "INSERT INTO claim_versions (world_id, claim_id, branch_id, revision, state_revision, subject_id, predicate, statement, audience, reader_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![object.world.0.as_bytes(), object.id.0.as_bytes(), branch.0.as_bytes(),
-                revision, state_revision, subject.id.0.as_bytes(), predicate, statement],
+                revision, state_revision, subject.id.0.as_bytes(), predicate, statement, audience, reader],
+        )?;
+    }
+    if let ObjectData::Definition {
+        definition,
+        description,
+    } = &record.data
+    {
+        let (category, reverse, symmetric) = match definition {
+            Definition::Relationship {
+                reverse_label,
+                symmetric,
+            } => ("relationship", reverse_label.as_deref(), *symmetric),
+            Definition::Tag => ("tag", None, false),
+            Definition::Role => ("role", None, false),
+        };
+        tx.execute(
+            "INSERT INTO definition_versions (world_id, definition_id, branch_id, state_revision, revision, category, description, reverse_label, symmetric)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![object.world.0.as_bytes(), object.id.0.as_bytes(), branch.0.as_bytes(), state_revision, revision,
+                category, description, reverse, symmetric],
         )?;
     }
     if let EventDate::CalendarExact {
@@ -1501,7 +1690,7 @@ fn read_version(
             }
         }
         "event_involvement" => conn.query_row(
-            "SELECT event_id, participant_id, role FROM event_involvement_versions
+            "SELECT event_id, participant_id, role, role_definition_id FROM event_involvement_versions
              WHERE world_id = ?1 AND involvement_id = ?2 AND branch_id = ?3 AND revision = ?4 AND state_revision = ?5",
             params![object.world.0.as_bytes(), object.id.0.as_bytes(), branch.0.as_bytes(),
                 row.get::<_, i64>(0)?, row.get::<_, i64>(11)?],
@@ -1517,7 +1706,9 @@ fn read_version(
                 Ok(ObjectData::EventInvolvement {
                     event: ObjectRef { world: object.world, id: ObjectId(Uuid::from_bytes(entry.get(0)?)) },
                     participant: ObjectRef { world: object.world, id: ObjectId(Uuid::from_bytes(entry.get(1)?)) },
-                    role,
+                    role: entry.get::<_, Option<[u8; 16]>>(3)?.map(|id| EventRole::Custom(ObjectRef {
+                        world: object.world, id: ObjectId(Uuid::from_bytes(id)),
+                    })).unwrap_or(role),
                 })
             },
         )?,
@@ -1544,13 +1735,35 @@ fn read_version(
             },
         )?,
         "claim" => conn.query_row(
-            "SELECT subject_id, predicate, statement FROM claim_versions
+            "SELECT subject_id, predicate, statement, audience, reader_id FROM claim_versions
              WHERE world_id = ?1 AND claim_id = ?2 AND branch_id = ?3 AND revision = ?4 AND state_revision = ?5",
             params![object.world.0.as_bytes(), object.id.0.as_bytes(), branch.0.as_bytes(), row.get::<_, i64>(0)?, row.get::<_, i64>(11)?],
             |claim| Ok(ObjectData::Claim {
                 subject: ObjectRef { world: object.world, id: ObjectId(Uuid::from_bytes(claim.get(0)?)) },
                 predicate: claim.get(1)?,
                 statement: claim.get(2)?,
+                audience: match claim.get::<_, String>(3)?.as_str() {
+                    "author" => ClaimAudience::Author,
+                    "public" => ClaimAudience::Public,
+                    "character" => ClaimAudience::Character(ObjectRef {
+                        world: object.world, id: ObjectId(Uuid::from_bytes(claim.get(4)?)),
+                    }),
+                    _ => return Err(rusqlite::Error::InvalidQuery),
+                },
+            }),
+        )?,
+        "definition" => conn.query_row(
+            "SELECT category, description, reverse_label, symmetric FROM definition_versions
+             WHERE world_id = ?1 AND definition_id = ?2 AND branch_id = ?3 AND revision = ?4 AND state_revision = ?5",
+            params![object.world.0.as_bytes(), object.id.0.as_bytes(), branch.0.as_bytes(), row.get::<_, i64>(0)?, row.get::<_, i64>(11)?],
+            |item| Ok(ObjectData::Definition {
+                definition: match item.get::<_, String>(0)?.as_str() {
+                    "relationship" => Definition::Relationship { reverse_label: item.get(2)?, symmetric: item.get(3)? },
+                    "tag" => Definition::Tag,
+                    "role" => Definition::Role,
+                    _ => return Err(rusqlite::Error::InvalidQuery),
+                },
+                description: item.get(1)?,
             }),
         )?,
         "historical_event" => {

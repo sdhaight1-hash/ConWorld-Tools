@@ -154,10 +154,19 @@ test("saved world graph follows the author view and submits a specific causing a
       isTauri: true,
       __eventRequests: requests,
       __TAURI_INTERNALS__: {
-        invoke: async (command: string, payload: { day: number; revision: number | null; request?: unknown }) => {
+        invoke: async (command: string, payload: { day: number; revision: number | null; request?: unknown; audience?: string }) => {
           if (command === "platform_scene") return { target: "native bridge test", smoke: false, scene: { nodes: [], edges: [] } };
           if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
           if (command === "workspace_worlds") return [world];
+          if (command === "workspace_evidence") {
+            const rumor = { statement: "The rumor says the objection succeeded." };
+            const privateAccount = { statement: "Alice knows the clerk was absent." };
+            if (payload.audience === "author") return [
+              { ...rumor, source: "Private diary", audience: "Public" },
+              { ...privateAccount, source: "Clerk's letter", audience: "Character", reader_id: "alice" },
+            ];
+            return payload.audience === "alice" ? [rumor, privateAccount] : [rumor];
+          }
           if (command === "workspace_record_event") {
             requests.push(payload.request);
             return null;
@@ -166,6 +175,10 @@ test("saved world graph follows the author view and submits a specific causing a
             const later = payload.day >= 10 && payload.revision !== 3;
             return {
               world, day: payload.day, view_revision: payload.revision ?? 4, people,
+              definitions: [{
+                id: "mediator", label: "Mediator", category: "role", description: "Negotiates between parties",
+                reverse_label: null, symmetric: false,
+              }],
               relationships: [{
                 id: "bond", subject_id: "alice", target_id: "beatrice", kind: "friendship",
                 trust: later ? 12 : 90, tags: [later ? "estranged" : "friends"], starts_at: later ? 10 : 0,
@@ -209,6 +222,10 @@ test("saved world graph follows the author view and submits a specific causing a
     await row.getByLabel("Action", { exact: true }).fill(i === 0 ? "Object" : "Disclose");
     await row.getByLabel("Intent").fill("Settle the dispute");
   }
+  await editor.getByRole("button", { name: "Add participant" }).click();
+  const mediation = editor.locator("#event-participants fieldset").nth(2);
+  await mediation.getByLabel("Role").selectOption({ label: "Mediator" });
+  await expect(mediation.getByLabel("Action", { exact: true })).toBeHidden();
   await editor.getByLabel("Record a relationship effect").check();
   await editor.getByLabel("Causing action").selectOption({ label: "Beatrice · Disclose" });
   await editor.getByLabel("Explanation").fill("Disclosure broke confidence");
@@ -216,7 +233,7 @@ test("saved world graph follows the author view and submits a specific causing a
   await expect(page.locator("#author-status")).toHaveText("Saved to local world history.");
   expect(await page.evaluate(() => (window as unknown as { __eventRequests: unknown[] }).__eventRequests)).toMatchObject([{
     expected_revision: 4, day: 8,
-    participants: [{ person_id: "alice" }, { person_id: "beatrice" }],
+    participants: [{ person_id: "alice" }, { person_id: "beatrice" }, { role: "definition:mediator", action: null }],
     effect: { relationship_id: "bond", actor_row: 1 },
   }]);
 
@@ -229,6 +246,14 @@ test("saved world graph follows the author view and submits a specific causing a
   await inspector.getByRole("button", { name: "Inspect source event" }).click();
   await expect(inspector).toContainText("Alice · Prevent (failed)");
   await expect(inspector).toContainText("Beatrice · Disclose (succeeded)");
+  await expect(inspector).toContainText("Private diary");
+  await inspector.getByLabel("Accounts visible to").selectOption("public");
+  await expect(inspector).toContainText("The rumor says the objection succeeded.");
+  await expect(inspector).not.toContainText("Private diary");
+  await expect(inspector).not.toContainText("Alice knows the clerk was absent.");
+  await inspector.getByLabel("Accounts visible to").selectOption("alice");
+  await expect(inspector).toContainText("Alice knows the clerk was absent.");
+  await expect(inspector).toContainText("Alice · Prevent (failed)");
   await inspector.getByRole("button", { name: "Edit this event" }).click();
   await expect(editor.getByLabel("Event name")).toHaveValue("Disclosed letter");
   await editor.getByRole("button", { name: "Correct action: Prevent" }).click();

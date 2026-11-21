@@ -19,9 +19,12 @@ type Event = {
   participants: { person_id: string; role: string }[];
   actions: { id: string; person_id: string; target_id: string | null; action: string; intent: string; outcome: string; citation: string | null }[];
 };
+type Definition = { id: string; label: string; category: "relationship" | "tag" | "role";
+  description: string; reverse_label: string | null; symmetric: boolean };
+type EvidenceStatement = { statement: string; source: string | null; audience: string | null; reader_id: string | null };
 type Snapshot = {
   world: World; day: number; view_revision: number;
-  people: Person[]; relationships: Relationship[]; events: Event[];
+  people: Person[]; relationships: Relationship[]; events: Event[]; definitions: Definition[];
 };
 type Option = { id: string; label: string };
 
@@ -120,9 +123,18 @@ export async function showAuthorWorkspace(
   const rows = document.querySelector<HTMLElement>("#event-participants")!;
   const effectFields = document.querySelector<HTMLFieldSetElement>("#event-effect")!;
   const addParticipant = document.querySelector<HTMLButtonElement>("#add-participant")!;
-  const forms = [personForm, relationshipForm, stateForm, eventForm];
+  const definitionForm = document.querySelector<HTMLFormElement>("#author-definition")!;
+  const definitionDetails = document.querySelector<HTMLFieldSetElement>("#relationship-definition")!;
+  const definitionsList = document.querySelector<HTMLUListElement>("#world-definitions")!;
+  const evidenceForm = document.querySelector<HTMLFormElement>("#author-record-evidence")!;
+  const forms = [personForm, relationshipForm, stateForm, eventForm, definitionForm, evidenceForm];
   const field = <T extends HTMLInputElement | HTMLSelectElement>(form: HTMLFormElement, name: string) =>
     form.elements.namedItem(name) as T;
+  const evidenceEvent = field<HTMLSelectElement>(evidenceForm, "event");
+  const evidenceAudience = field<HTMLSelectElement>(evidenceForm, "audience");
+  const definitionCategory = field<HTMLSelectElement>(definitionForm, "category");
+  const symmetric = field<HTMLInputElement>(definitionForm, "symmetric");
+  const inverse = field<HTMLInputElement>(definitionForm, "reverse_label");
   const checkbox = field<HTMLInputElement>(eventForm, "add_effect");
   const existing = field<HTMLSelectElement>(eventForm, "existing");
   const stateSelect = field<HTMLSelectElement>(stateForm, "relationship");
@@ -163,6 +175,8 @@ export async function showAuthorWorkspace(
       Boolean(day !== undefined && stateSelect.value && snapshot?.relationships.some((bond) => bond.id === stateSelect.value &&
         (bond.starts_at === null || bond.starts_at < day))),
       !selectedEvent || selectedEvent.day !== null,
+      true,
+      Boolean(evidenceEvent.value),
     ];
     for (const [index, form] of forms.entries()) {
       form.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = blocked || !availability[index];
@@ -171,7 +185,22 @@ export async function showAuthorWorkspace(
     worldForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = saving;
   }
 
-  const bondLabel = (bond: Relationship) => `${name(bond.subject_id)} → ${name(bond.target_id)} · ${bond.kind}`;
+  const definitionFor = (category: Definition["category"], label: string) =>
+    snapshot?.definitions?.find((item) => item.category === category && item.label.toLowerCase() === label.toLowerCase());
+  const bondLabel = (bond: Relationship) => {
+    const arrow = definitionFor("relationship", bond.kind)?.symmetric ? "↔" : "→";
+    return `${name(bond.subject_id)} ${arrow} ${name(bond.target_id)} · ${bond.kind}`;
+  };
+  const audienceOptions = () => [
+    { id: "author", label: "Author only" },
+    { id: "public", label: "Public" },
+    ...people.map((person) => ({ id: person.id, label: `Character · ${person.label}` })),
+  ];
+  const roleOptions = () => [
+    ...["Actor", "Witness", "Victim", "Stakeholder", "Sponsor"].map((label) => ({ id: label.toLowerCase(), label })),
+    ...(snapshot?.definitions ?? []).filter((item) => item.category === "role")
+      .map((item) => ({ id: "definition:" + item.id, label: item.label })),
+  ];
   const rowField = (row: Element, key: string) => row.querySelector<HTMLInputElement | HTMLSelectElement>(`[data-field="${key}"]`)!;
   const participantRows = () => Array.from(rows.querySelectorAll<HTMLFieldSetElement>(":scope > fieldset"));
 
@@ -195,11 +224,7 @@ export async function showAuthorWorkspace(
       <legend>Participant</legend>
       <div class="participant-fields">
         <label>Person <select data-field="person" required></select></label>
-        <label>Role <select data-field="role">
-          <option value="actor">Actor</option><option value="witness">Witness</option>
-          <option value="victim">Victim</option><option value="stakeholder">Stakeholder</option>
-          <option value="sponsor">Sponsor</option>
-        </select></label>
+        <label>Role <select data-field="role"></select></label>
       </div>
       <div class="participant-fields" data-action>
         <label>Action <input data-field="action" required maxlength="200" /></label>
@@ -211,6 +236,7 @@ export async function showAuthorWorkspace(
       </div>
       <button type="button">Remove participant</button>`;
     options(rowField(row, "person") as HTMLSelectElement, people, action?.person_id);
+    options(rowField(row, "role") as HTMLSelectElement, roleOptions());
     options(rowField(row, "target") as HTMLSelectElement, [{ id: "", label: "None" }, ...people], action?.target_id ?? "");
     if (action) {
       row.dataset.actionId = action.id;
@@ -283,6 +309,40 @@ export async function showAuthorWorkspace(
     syncButtons();
   }
 
+  function evidencePanel(panel: HTMLElement, event: Event, view: Snapshot) {
+    const label = document.createElement("label");
+    label.textContent = "Accounts visible to";
+    const select = document.createElement("select");
+    options(select, revisionInput.value.trim() ? audienceOptions().slice(0, 1) : audienceOptions());
+    label.append(select);
+    const results = document.createElement("div");
+    results.setAttribute("aria-live", "polite");
+    panel.append(label, results);
+    let latest = 0;
+    async function refreshAccounts() {
+      const sequence = ++latest;
+      results.textContent = "Loading accounts…";
+      try {
+        const accounts = await invoke<EvidenceStatement[]>("workspace_evidence", {
+          worldId: view.world.id, eventId: event.id, day: view.day,
+          revision: revisionInput.value.trim() ? view.view_revision : null, audience: select.value,
+        });
+        if (latest !== sequence || !results.isConnected) return;
+        results.replaceChildren();
+        if (!accounts.length) results.textContent = "No visible accounts.";
+        for (const account of accounts) {
+          line(results, "Reported", account.statement);
+          if (account.source) line(results, "Citation", account.source);
+          if (account.audience) line(results, "Audience", account.reader_id ? name(account.reader_id) : account.audience);
+        }
+      } catch (error) {
+        if (latest === sequence && results.isConnected) results.textContent = "Accounts unavailable: " + String(error);
+      }
+    }
+    select.addEventListener("change", () => void refreshAccounts());
+    void refreshAccounts();
+  }
+
   function inspector(id: string, panel: HTMLElement) {
     const bond = snapshot?.relationships.find((record) => record.id === id);
     const event = snapshot?.events.find((record) => record.id === id);
@@ -295,14 +355,27 @@ export async function showAuthorWorkspace(
     }
     if (event) {
       eventDetails(panel, event, name);
+      if (snapshot) evidencePanel(panel, event, snapshot);
       if (!revisionInput.value.trim() && event.day !== null) button("Edit this event", () => {
         editEvent(id);
         field(eventForm, "event").focus();
+      });
+      if (!revisionInput.value.trim()) button("Add sourced account", () => {
+        evidenceEvent.value = id;
+        field(evidenceForm, "statement").focus();
       });
     }
     if (bond) {
       line(panel, "Current state", state(bond.trust, bond.tags));
       line(panel, "Effective", bond.starts_at === null ? "Start unknown" : "Day " + bond.starts_at);
+      const definition = definitionFor("relationship", bond.kind);
+      if (definition) line(panel, "Definition", definition.description);
+      if (definition?.reverse_label) line(panel, "Inverse label", definition.reverse_label);
+      if (definition?.symmetric) line(panel, "Trust direction", `${name(bond.subject_id)} → ${name(bond.target_id)}`);
+      for (const tag of bond.tags) {
+        const definition = definitionFor("tag", tag);
+        if (definition) line(panel, tag, definition.description);
+      }
       if (bond.cause) {
         const cause = bond.cause;
         line(panel, "Why it changed", cause.explanation);
@@ -359,6 +432,9 @@ export async function showAuthorWorkspace(
     people = next.people;
     personNames = new Map(people.map((person) => [person.id, person.label]));
     if (worldChanged) {
+      evidenceForm.reset();
+      definitionForm.reset();
+      syncDefinition();
       rows.replaceChildren();
       stateSelect.value = "";
       existing.value = "";
@@ -376,14 +452,39 @@ export async function showAuthorWorkspace(
     const nextBond = next.relationships.find((bond) => bond.id === stateSelect.value);
     if (worldChanged || previousBond?.id !== nextBond?.id || previousBond?.starts_at !== nextBond?.starts_at ||
       previous?.view_revision !== next.view_revision) fillState(nextBond);
+    const eventOptions = next.events.map((event) => ({ id: event.id, label: event.label }));
     const previousEvent = existing.value;
-    options(existing, [{ id: "", label: "New event" }, ...next.events.map((event) => ({ id: event.id, label: event.label }))]);
+    options(existing, [{ id: "", label: "New event" }, ...eventOptions]);
+    options(evidenceEvent, eventOptions);
+    options(evidenceAudience, audienceOptions());
+    const definitions = next.definitions ?? [];
+    document.querySelector("#relationship-kinds")!.replaceChildren(...definitions
+      .filter((item) => item.category === "relationship").map((item) => new Option(item.label)));
+    definitionsList.replaceChildren(...definitions.map((item) => {
+      const entry = document.createElement("li");
+      const control = document.createElement("button");
+      control.type = "button";
+      control.textContent = item.label;
+      control.disabled = revision !== null;
+      control.addEventListener("click", () => {
+        definitionCategory.value = item.category;
+        field(definitionForm, "label").value = item.label;
+        field(definitionForm, "description").value = item.description;
+        inverse.value = item.reverse_label ?? "";
+        symmetric.checked = item.symmetric;
+        syncDefinition();
+        field(definitionForm, "description").focus();
+      });
+      entry.append(control, " " + item.description);
+      return entry;
+    }));
     const eventRevisionChanged = existing.value && previous?.view_revision !== next.view_revision;
     if (worldChanged || previousEvent !== existing.value || eventRevisionChanged || revision !== null) {
       editEvent(existing.value);
     }
     for (const row of participantRows()) {
       options(rowField(row, "person") as HTMLSelectElement, people);
+      options(rowField(row, "role") as HTMLSelectElement, roleOptions());
       options(rowField(row, "target") as HTMLSelectElement, [{ id: "", label: "None" }, ...people]);
     }
     addParticipant.disabled = !people.length || selectedEvent?.day === null;
@@ -427,6 +528,11 @@ export async function showAuthorWorkspace(
           const savedNode = await action({ world_id: worldSelect.value, expected_revision: snapshot?.world.revision ?? 0 });
           if (form !== worldForm) await refresh();
           if (form === worldForm || form === personForm) field(form, "name").value = "";
+          if (form === evidenceForm) {
+            field(form, "statement").value = "";
+            field(form, "citation").value = "";
+            selectNode(evidenceEvent.value);
+          }
           if (form === eventForm) {
             editEvent(savedNode || existing.value);
             if (savedNode) selectNode(savedNode);
@@ -484,6 +590,29 @@ export async function showAuthorWorkspace(
         explanation: value(eventForm, "explanation"),
         trust: score(eventForm), tags: value(eventForm, "tags"),
       },
+    } });
+  });
+  function syncDefinition() {
+    const directional = definitionCategory.value === "relationship";
+    definitionDetails.hidden = !directional;
+    definitionDetails.disabled = !directional;
+    inverse.disabled = symmetric.checked;
+  }
+  symmetric.addEventListener("change", syncDefinition);
+  definitionCategory.addEventListener("change", syncDefinition);
+  bind(definitionForm, async (context) => {
+    await invoke("workspace_save_definition", { request: {
+      ...context, category: definitionCategory.value, label: value(definitionForm, "label"),
+      description: value(definitionForm, "description"),
+      reverse_label: definitionDetails.disabled || inverse.disabled ? null : inverse.value.trim() || null,
+      symmetric: !definitionDetails.disabled && symmetric.checked,
+    } });
+  });
+  bind(evidenceForm, async (context) => {
+    await invoke("workspace_record_evidence", { request: {
+      ...context, event_id: evidenceEvent.value, day: currentDay(),
+      statement: value(evidenceForm, "statement"), citation: value(evidenceForm, "citation"),
+      audience: evidenceAudience.value,
     } });
   });
   const subjectValue = () => value(relationshipForm, "subject");

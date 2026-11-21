@@ -5,8 +5,9 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 use atlas_store::{
-    ActionOutcome, AuthorRevision, Change, Command, EventDate, EventRole, ObjectData, ObjectId,
-    ObjectRef, Record, Scope, Store, ValidInterval, ViewContext, World, WorldDay, WorldId,
+    ActionOutcome, AuthorRevision, Change, ClaimAudience, Command, Definition, EventDate,
+    EventRole, ObjectData, ObjectId, ObjectRef, Record, Scope, Store, ValidInterval, ViewContext,
+    World, WorldDay, WorldId,
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -66,6 +67,55 @@ pub struct WorkspaceSnapshot {
     people: Vec<PersonSummary>,
     relationships: Vec<RelationshipSummary>,
     events: Vec<EventSummary>,
+    definitions: Vec<DefinitionSummary>,
+}
+
+#[derive(Serialize)]
+struct DefinitionSummary {
+    id: String,
+    label: String,
+    category: &'static str,
+    description: String,
+    reverse_label: Option<String>,
+    symmetric: bool,
+}
+
+#[derive(Serialize)]
+pub struct EvidenceSummary {
+    statement: String,
+    source: Option<String>,
+    audience: Option<String>,
+    reader_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct DefinitionInput {
+    world_id: String,
+    expected_revision: i64,
+    category: String,
+    label: String,
+    description: String,
+    reverse_label: Option<String>,
+    symmetric: bool,
+}
+
+#[derive(Deserialize)]
+pub struct EvidenceInput {
+    world_id: String,
+    expected_revision: i64,
+    event_id: String,
+    day: i64,
+    statement: String,
+    citation: String,
+    audience: String,
+}
+
+fn definition_category(definition: &Definition) -> &'static str {
+    match definition {
+        Definition::Relationship { .. } => "relationship",
+        Definition::Tag => "tag",
+        Definition::Role => "role",
+    }
 }
 
 #[derive(Serialize)]
@@ -81,7 +131,7 @@ struct EventSummary {
 #[derive(Serialize)]
 struct ParticipantSummary {
     person_id: String,
-    role: &'static str,
+    role: String,
 }
 
 #[derive(Serialize)]
@@ -296,6 +346,7 @@ impl AuthorWorkspace {
         let mut relationships = Vec::new();
         let mut events = HashMap::new();
         let mut participants = Vec::new();
+        let mut definitions = Vec::new();
         let mut actions = Vec::new();
         for version in versions {
             let object_id = version.object.id.0.to_string();
@@ -304,6 +355,27 @@ impl AuthorWorkspace {
                     id: object_id,
                     label: version.record.label,
                 }),
+                ObjectData::Definition {
+                    definition,
+                    description,
+                } => {
+                    let category = definition_category(&definition);
+                    let (reverse_label, symmetric) = match definition {
+                        Definition::Relationship {
+                            reverse_label,
+                            symmetric,
+                        } => (reverse_label, symmetric),
+                        _ => (None, false),
+                    };
+                    definitions.push(DefinitionSummary {
+                        id: object_id,
+                        label: version.record.label,
+                        description,
+                        category,
+                        reverse_label,
+                        symmetric,
+                    });
+                }
                 ObjectData::Relationship {
                     subject,
                     target,
@@ -342,7 +414,17 @@ impl AuthorWorkspace {
                         event,
                         ParticipantSummary {
                             person_id: participant.id.0.to_string(),
-                            role: enum_label(&roles(), role),
+                            role: match role {
+                                EventRole::Custom(object) => {
+                                    store
+                                        .get_object(object, context)
+                                        .map_err(|error| error.to_string())?
+                                        .ok_or("Event role definition is unavailable")?
+                                        .record
+                                        .label
+                                }
+                                _ => enum_label(&roles(), role).into(),
+                            },
                         },
                     ));
                 }
@@ -389,6 +471,7 @@ impl AuthorWorkspace {
         });
         people.sort_by(|a, b| a.label.cmp(&b.label).then(a.id.cmp(&b.id)));
         relationships.sort_by(|a, b| a.kind.cmp(&b.kind).then(a.id.cmp(&b.id)));
+        definitions.sort_by(|a, b| a.category.cmp(b.category).then(a.label.cmp(&b.label)));
         Ok(WorkspaceSnapshot {
             world: summary(world),
             view_revision: context.revision.0,
@@ -396,6 +479,7 @@ impl AuthorWorkspace {
             people,
             relationships,
             events,
+            definitions,
         })
     }
 
@@ -655,6 +739,162 @@ impl AuthorWorkspace {
         )
     }
 
+    fn save_definition(&self, input: DefinitionInput) -> Result<(), String> {
+        let label = nonempty(&input.label, "Definition name")?;
+        let description = nonempty(&input.description, "Definition description")?;
+        let definition = match input.category.as_str() {
+            "relationship" => Definition::Relationship {
+                reverse_label: input
+                    .reverse_label
+                    .as_deref()
+                    .map(|raw| nonempty(raw, "Inverse label"))
+                    .transpose()?,
+                symmetric: input.symmetric,
+            },
+            "tag" if !label.contains(',') => Definition::Tag,
+            "role"
+                if !roles()
+                    .iter()
+                    .any(|(name, _)| name.eq_ignore_ascii_case(&label)) =>
+            {
+                Definition::Role
+            }
+            _ => return Err("Invalid definition category or reserved name".into()),
+        };
+        let mut store = self.lock()?;
+        let world = Self::edit_world(&store, &input.world_id, input.expected_revision)?;
+        let catalog = store
+            .objects_at(view(&world, 0), 2_000)
+            .map_err(|error| error.to_string())?;
+        let existing = catalog.into_iter().find(|item| {
+            matches!(&item.record.data, ObjectData::Definition { definition, .. }
+                if definition_category(definition) == input.category)
+                && item.record.label.to_lowercase() == label.to_lowercase()
+        });
+        let record = Record {
+            label: existing
+                .as_ref()
+                .map(|item| item.record.label.clone())
+                .unwrap_or(label),
+            valid: ValidInterval::default(),
+            data: ObjectData::Definition {
+                definition,
+                description,
+            },
+            source: None,
+        };
+        let change = match existing {
+            Some(item) if item.record == record => {
+                return Err("Definition is already up to date".into());
+            }
+            Some(item) => Change::Correct(item.object, record),
+            None => Change::Create(ObjectRef::new(world.id), record),
+        };
+        commit(&mut store, &world, vec![change])
+    }
+
+    fn record_evidence(&self, input: EvidenceInput) -> Result<(), String> {
+        let statement = nonempty(&input.statement, "Statement")?;
+        let citation = nonempty(&input.citation, "Citation")?;
+        let mut store = self.lock()?;
+        let world = Self::edit_world(&store, &input.world_id, input.expected_revision)?;
+        let event = reference(world.id, &input.event_id)?;
+        if !store
+            .get_object(event, view(&world, input.day))
+            .map_err(|error| error.to_string())?
+            .is_some_and(|item| matches!(item.record.data, ObjectData::HistoricalEvent { .. }))
+        {
+            return Err("Select an event visible on this day".into());
+        }
+        let audience = match input.audience.as_str() {
+            "author" => ClaimAudience::Author,
+            "public" => ClaimAudience::Public,
+            raw => ClaimAudience::Character(reference(world.id, raw)?),
+        };
+        let source = ObjectRef::new(world.id);
+        let claim = ObjectRef::new(world.id);
+        commit(
+            &mut store,
+            &world,
+            vec![
+                Change::Create(
+                    source,
+                    Record {
+                        label: "Statement source".into(),
+                        valid: ValidInterval::default(),
+                        data: ObjectData::Source { citation },
+                        source: None,
+                    },
+                ),
+                Change::Create(
+                    claim,
+                    Record {
+                        label: "Reported account".into(),
+                        valid: ValidInterval {
+                            start: Some(WorldDay(input.day)),
+                            end_exclusive: None,
+                        },
+                        data: ObjectData::Claim {
+                            subject: event,
+                            predicate: "reported_account".into(),
+                            statement,
+                            audience,
+                        },
+                        source: Some(source),
+                    },
+                ),
+            ],
+        )
+    }
+
+    fn evidence(
+        &self,
+        world_id: &str,
+        event_id: &str,
+        day: i64,
+        revision: Option<i64>,
+        audience: &str,
+    ) -> Result<Vec<EvidenceSummary>, String> {
+        let store = self.lock()?;
+        let world = store
+            .world(WorldId(id(world_id)?), Scope::Author)
+            .map_err(|error| error.to_string())?;
+        let scope = match audience {
+            "author" => Scope::Author,
+            "public" => Scope::Public,
+            raw => Scope::Character(reference(world.id, raw)?),
+        };
+        let context = ViewContext {
+            revision: AuthorRevision(revision.unwrap_or(world.revision.0)),
+            scope,
+            ..view(&world, day)
+        };
+        store
+            .evidence_at(reference(world.id, event_id)?, context)
+            .map(|items| {
+                items
+                    .into_iter()
+                    .map(|item| {
+                        let (audience, reader_id) = match item.audience {
+                            Some(ClaimAudience::Author) => (Some("Author only".into()), None),
+                            Some(ClaimAudience::Public) => (Some("Public".into()), None),
+                            Some(ClaimAudience::Character(reader)) => {
+                                (Some("Character".into()), Some(reader.id.0.to_string()))
+                            }
+                            None => (None, None),
+                        };
+                        EvidenceSummary {
+                            statement: item.statement,
+                            source: item.source,
+                            audience,
+                            reader_id,
+                        }
+                    })
+                    .collect()
+            })
+            .map_err(|error| error.to_string())
+    }
+
     fn record_event(&self, request: EventInput) -> Result<String, String> {
         let event_label = nonempty(&request.event_label, "Event name")?;
         let citation = nonempty(&request.source_citation, "Source citation")?;
@@ -749,21 +989,30 @@ impl AuthorWorkspace {
                 } = version.record.data
                     && own_event == event
                 {
-                    roles_seen.insert((participant, enum_label(&roles(), role)));
+                    roles_seen.insert((participant, role));
                 }
             }
         }
         let mut action_ids = Vec::new();
         for row in request.participants {
             let person = reference(world.id, &row.person_id)?;
-            let role = enum_value(&roles(), &row.role).ok_or("Invalid event role")?;
-            let role_label = enum_label(&roles(), role);
-            let new_role = roles_seen.insert((person, role_label));
+            let (role, role_label) = if let Some(raw) = row.role.strip_prefix("definition:") {
+                let object = reference(world.id, raw)?;
+                let version = store
+                    .get_object(object, context)
+                    .map_err(|error| error.to_string())?
+                    .ok_or("Unknown event role definition")?;
+                (EventRole::Custom(object), version.record.label)
+            } else {
+                let role = enum_value(&roles(), &row.role).ok_or("Invalid event role")?;
+                (role, enum_label(&roles(), role).into())
+            };
+            let new_role = roles_seen.insert((person, role));
             if new_role {
                 changes.push(Change::Create(
                     ObjectRef::new(world.id),
                     sourced(
-                        role_label.into(),
+                        role_label,
                         ObjectData::EventInvolvement {
                             event,
                             participant: person,
@@ -929,9 +1178,211 @@ pub fn workspace_record_event(
     workspace.record_event(request)
 }
 
+#[tauri::command]
+pub fn workspace_save_definition(
+    workspace: State<'_, AuthorWorkspace>,
+    request: DefinitionInput,
+) -> Result<(), String> {
+    workspace.save_definition(request)
+}
+
+#[tauri::command]
+pub fn workspace_record_evidence(
+    workspace: State<'_, AuthorWorkspace>,
+    request: EvidenceInput,
+) -> Result<(), String> {
+    workspace.record_evidence(request)
+}
+
+#[tauri::command]
+pub fn workspace_evidence(
+    workspace: State<'_, AuthorWorkspace>,
+    world_id: String,
+    event_id: String,
+    day: i64,
+    revision: Option<i64>,
+    audience: String,
+) -> Result<Vec<EvidenceSummary>, String> {
+    workspace.evidence(&world_id, &event_id, day, revision, &audience)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn at_08_09_13_configured_roles_and_reports_preserve_outcomes_and_visibility()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("knowledge.sqlite");
+        let workspace = AuthorWorkspace::open(&path)?;
+        let world = workspace.create_world("Northbridge")?;
+        let id = world.id;
+        workspace.create_person(&id, "Alice")?;
+        workspace.create_person(&id, "Beatrice")?;
+        workspace.create_person(&id, "Morgan")?;
+        let seed = workspace.snapshot(&id, 0, None)?;
+        let alice = seed.people[0].id.clone();
+        let morgan = seed.people[2].id.clone();
+        let definition =
+            |expected_revision, category: &str, label: &str, description: &str| DefinitionInput {
+                world_id: id.clone(),
+                expected_revision,
+                category: category.into(),
+                label: label.into(),
+                description: description.into(),
+                reverse_label: (category == "relationship").then(|| "sponsored by".into()),
+                symmetric: false,
+            };
+        workspace.save_definition(definition(3, "role", "Mediator", "Facilitates negotiation"))?;
+        workspace.save_definition(definition(4, "role", "Financier", "Funds the initiative"))?;
+        workspace.save_definition(definition(5, "tag", "allied", "Shares policy goals"))?;
+        workspace.save_definition(definition(
+            6,
+            "relationship",
+            "sponsors",
+            "Provides material support",
+        ))?;
+        let catalog = workspace.snapshot(&id, 0, None)?.definitions;
+        let role = |label: &str| {
+            format!(
+                "definition:{}",
+                catalog.iter().find(|item| item.label == label).unwrap().id
+            )
+        };
+        let mut request = EventInput {
+            world_id: id.clone(),
+            expected_revision: 7,
+            event_id: None,
+            day: 10,
+            event_label: "Council vote".into(),
+            source_citation: "Official minutes".into(),
+            participants: vec![
+                actor(&alice, "Prevent disclosure", "failed"),
+                ParticipantInput {
+                    person_id: alice.clone(),
+                    role: "victim".into(),
+                    action: None,
+                },
+                ParticipantInput {
+                    person_id: morgan.clone(),
+                    role: role("Mediator"),
+                    action: None,
+                },
+                ParticipantInput {
+                    person_id: morgan.clone(),
+                    role: role("Financier"),
+                    action: None,
+                },
+            ],
+            effect: None,
+        };
+        let label = request.participants[2].role.clone();
+        request.participants[2].role = role("allied");
+        assert!(workspace.record_event(request.clone()).is_err());
+        assert!(workspace.snapshot(&id, 10, None)?.events.is_empty());
+        request.participants[2].role = label;
+        let event_id = workspace.record_event(request)?;
+        workspace.save_definition(definition(8, "role", "Mediator", "Negotiates a settlement"))?;
+        let revised = workspace.snapshot(&id, 10, None)?;
+        let before = workspace.snapshot(&id, 10, Some(8))?;
+        let mediator = |catalog: &[DefinitionSummary]| {
+            let entry = catalog
+                .iter()
+                .find(|item| item.label == "Mediator")
+                .unwrap();
+            (entry.id.clone(), entry.description.clone())
+        };
+        assert_eq!(
+            mediator(&before.definitions).0,
+            mediator(&revised.definitions).0
+        );
+        assert_ne!(
+            mediator(&before.definitions).1,
+            mediator(&revised.definitions).1
+        );
+        for (index, (audience, statement)) in [
+            ("author", "The sealed ledger identifies the sponsor."),
+            (&alice, "Alice privately heard a claim of bribery."),
+            (
+                "public",
+                "Rumor says the effort to prevent disclosure succeeded.",
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            workspace.record_evidence(EvidenceInput {
+                world_id: id.clone(),
+                expected_revision: 9 + index as i64,
+                event_id: event_id.clone(),
+                day: 11,
+                statement: statement.into(),
+                citation: "PRIVATE source notes".into(),
+                audience: audience.into(),
+            })?;
+        }
+        drop(workspace);
+        let workspace = AuthorWorkspace::open(&path)?;
+        let author = workspace.evidence(&id, &event_id, 11, None, "author")?;
+        assert_eq!(author.len(), 3);
+        assert!(
+            author
+                .iter()
+                .all(|item| item.source.as_deref() == Some("PRIVATE source notes"))
+        );
+        let public = workspace.evidence(&id, &event_id, 11, None, "public")?;
+        assert_eq!(public.len(), 1);
+        assert!(public[0].statement.contains("Rumor"));
+        assert!(
+            public[0].source.is_none()
+                && public[0].audience.is_none()
+                && public[0].reader_id.is_none()
+        );
+        let alice_view = workspace.evidence(&id, &event_id, 11, None, &alice)?;
+        assert_eq!(alice_view.len(), 2);
+        assert!(
+            alice_view
+                .iter()
+                .any(|item| item.statement.starts_with("Alice privately"))
+        );
+        assert_eq!(
+            workspace.evidence(&id, &event_id, 11, None, &morgan)?.len(),
+            1
+        );
+        assert!(
+            workspace
+                .evidence(&id, &event_id, 10, None, "public")?
+                .is_empty()
+        );
+        assert!(
+            workspace
+                .evidence(&id, &event_id, 11, Some(11), "public")
+                .is_err()
+        );
+        let event = workspace.snapshot(&id, 11, None)?.events.pop().unwrap();
+        assert_eq!(event.actions[0].outcome, "failed");
+        let roles: HashSet<_> = event
+            .participants
+            .iter()
+            .map(|item| item.role.as_str())
+            .collect();
+        assert_eq!(
+            roles,
+            HashSet::from(["actor", "victim", "Mediator", "Financier"])
+        );
+        let foreign = workspace.create_world("Other world")?;
+        workspace.create_person(&foreign.id, "Unrelated")?;
+        let foreign_id = workspace.snapshot(&foreign.id, 11, None)?.people[0]
+            .id
+            .clone();
+        assert!(
+            workspace
+                .evidence(&id, &event_id, 11, None, &foreign_id)
+                .is_err()
+        );
+        Ok(())
+    }
 
     fn actor(person_id: &str, action: &str, outcome: &str) -> ParticipantInput {
         ParticipantInput {

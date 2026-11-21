@@ -44,6 +44,7 @@ fn sourced_claim_is_versioned_without_changing_its_subject() -> Result<(), Error
     let claim = ObjectRef::new(world.id);
     let mut statement = Record {
         data: ObjectData::Claim {
+            audience: atlas_store::ClaimAudience::Author,
             subject: alice,
             predicate: "holds_title".into(),
             statement: "The letter calls Alice the heir".into(),
@@ -286,4 +287,81 @@ fn event_anchored_fork_retains_calendared_provenance_after_correction() -> Resul
         }
     );
     store.verify_foreign_keys(Scope::Author)
+}
+
+#[test]
+fn restricted_evidence_cannot_replay_a_revoked_public_statement() -> Result<(), Error> {
+    let mut store = Store::open(":memory:")?;
+    let world = store.create_world("Northbridge", Scope::Author)?;
+    let event = ObjectRef::new(world.id);
+    let source = ObjectRef::new(world.id);
+    let claim = ObjectRef::new(world.id);
+    let mut record = Record {
+        data: ObjectData::Claim {
+            subject: event,
+            predicate: "report".into(),
+            statement: "The clerk reported a disturbance".into(),
+            audience: ClaimAudience::Public,
+        },
+        source: Some(source),
+        ..person("Report")
+    };
+    let first = store.apply(&change_set(
+        &world,
+        world.revision,
+        vec![
+            Change::Create(
+                event,
+                Record {
+                    data: ObjectData::HistoricalEvent {
+                        occurrence: EventDate::Exact(WorldDay(0)),
+                    },
+                    ..person("Meeting")
+                },
+            ),
+            Change::Create(
+                source,
+                Record {
+                    data: ObjectData::Source {
+                        citation: "Private note".into(),
+                    },
+                    ..person("Source")
+                },
+            ),
+            Change::Create(claim, record.clone()),
+        ],
+    ))?;
+    let published = ViewContext {
+        scope: Scope::Public,
+        ..view(&world, first, 0)
+    };
+    let items = store.evidence_at(event, published)?;
+    assert_eq!(items.len(), 1);
+    assert!(items[0].source.is_none());
+    if let ObjectData::Claim { audience, .. } = &mut record.data {
+        *audience = ClaimAudience::Author;
+    }
+    let second = store.apply(&change_set(
+        &world,
+        first,
+        vec![Change::Correct(claim, record)],
+    ))?;
+    assert!(matches!(
+        store.evidence_at(event, published),
+        Err(Error::InvalidRevision)
+    ));
+    assert!(
+        store
+            .evidence_at(
+                event,
+                ViewContext {
+                    revision: second,
+                    ..published
+                }
+            )?
+            .is_empty()
+    );
+    assert_eq!(store.evidence_at(event, view(&world, first, 0))?.len(), 1);
+    assert!(store.get_object(claim, published).is_err());
+    Ok(())
 }
