@@ -3,7 +3,29 @@
 //! Proposals have no write authority: text similarity is not a relationship,
 //! membership, parentage, or proven historical fact.
 
+use uuid::Uuid;
+
 use crate::{AuthorRevision, Error, ObjectData, ObjectRef, Scope, Store, VersionRef, ViewContext};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MentionDisposition {
+    Approved,
+    Dismissed,
+}
+
+/// An author-reviewed stable-ID reference to one exact source version and
+/// UTF-8 text span. Neither decision creates a canonical world relationship.
+#[derive(Clone, Copy, Debug)]
+pub struct ReviewMention {
+    pub view: ViewContext,
+    pub expected: AuthorRevision,
+    pub source: VersionRef,
+    pub target: ObjectRef,
+    pub start_byte: usize,
+    pub end_byte: usize,
+    pub decision: MentionDisposition,
+    pub command_id: Uuid,
+}
 
 /// One possible link to a *visible person*, anchored to a precise claim version
 /// and a UTF-8 byte span in its original authored statement.
@@ -18,6 +40,7 @@ pub struct MentionCandidate {
     pub end_byte: usize,
     /// Number of distinct possible identities for this exact source span.
     pub collisions: usize,
+    pub disposition: Option<MentionDisposition>,
 }
 
 #[derive(Clone, Debug)]
@@ -79,6 +102,7 @@ impl Store {
                         start_byte,
                         end_byte,
                         collisions: 1,
+                        disposition: None,
                     });
                     if rows.len() > MAX_CANDIDATES {
                         return Err(Error::QueryBudgetExceeded);
@@ -114,6 +138,9 @@ impl Store {
         }
         let truncated = rows.len() > limit;
         rows.truncate(limit);
+        for candidate in &mut rows {
+            candidate.disposition = self.mention_disposition_at(view, candidate)?;
+        }
         Ok(MentionDiscovery {
             revision: view.revision,
             rows,
@@ -125,7 +152,7 @@ impl Store {
 /// Byte-stable source spans. ASCII case differences are matched without
 /// changing offsets; non-ASCII names currently require exact casing rather
 /// than unreliable Unicode lowercasing that would corrupt source positions.
-fn matching_spans(text: &str, label: &str) -> Vec<(usize, usize)> {
+pub(crate) fn matching_spans(text: &str, label: &str) -> Vec<(usize, usize)> {
     if label.is_empty() {
         return Vec::new();
     }
