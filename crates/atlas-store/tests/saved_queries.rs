@@ -69,18 +69,31 @@ fn saved_queries_keep_stable_ids_and_prior_author_revisions() -> Result<(), Erro
         Scope::Author,
     )?;
     assert_eq!(saved.recorded_at, AuthorRevision(2));
-    assert_eq!(store.saved_label_queries(world.id, first, Scope::Author)?.len(), 0);
+    assert_eq!(
+        store
+            .saved_label_queries(world.id, first, Scope::Author)?
+            .len(),
+        0
+    );
     let original = store.saved_label_queries(world.id, saved.recorded_at, Scope::Author)?;
     assert_eq!(original.len(), 1);
     assert_eq!(original[0].id, saved.id);
     assert_eq!(
-        store.execute_query(&original[0].spec, view(&world, saved.recorded_at))?.rows[0].object,
+        store
+            .execute_query(&original[0].spec, view(&world, saved.recorded_at))?
+            .rows[0]
+            .object,
         alice
     );
     assert!(matches!(
         store.save_named_label_query(
-            world.id, saved.recorded_at, None, "Duplicate", &search("Alice Vale"),
-            save_id, Scope::Author,
+            world.id,
+            saved.recorded_at,
+            None,
+            "Duplicate",
+            &search("Alice Vale"),
+            save_id,
+            Scope::Author,
         ),
         Err(Error::DuplicateCommand(_))
     ));
@@ -105,8 +118,13 @@ fn saved_queries_keep_stable_ids_and_prior_author_revisions() -> Result<(), Erro
     assert_eq!(current[0].spec, search("Beatrice Thorne"));
     assert!(matches!(
         store.save_named_label_query(
-            other.id, other.revision, Some(saved.id), "Cross-world", &search("Alice"),
-            Uuid::new_v4(), Scope::Author,
+            other.id,
+            other.revision,
+            Some(saved.id),
+            "Cross-world",
+            &search("Alice"),
+            Uuid::new_v4(),
+            Scope::Author,
         ),
         Err(Error::NotFound)
     ));
@@ -116,15 +134,25 @@ fn saved_queries_keep_stable_ids_and_prior_author_revisions() -> Result<(), Erro
     ));
     assert!(matches!(
         store.save_named_label_query(
-            world.id, revised.recorded_at, None, "Public", &search("Alice"),
-            Uuid::new_v4(), Scope::Public,
+            world.id,
+            revised.recorded_at,
+            None,
+            "Public",
+            &search("Alice"),
+            Uuid::new_v4(),
+            Scope::Public,
         ),
         Err(Error::CapabilityDenied)
     ));
     assert!(matches!(
         store.save_named_label_query(
-            world.id, revised.recorded_at, None, "Empty search", &search(" "),
-            Uuid::new_v4(), Scope::Author,
+            world.id,
+            revised.recorded_at,
+            None,
+            "Empty search",
+            &search(" "),
+            Uuid::new_v4(),
+            Scope::Author,
         ),
         Err(Error::InvalidInput(_))
     ));
@@ -143,7 +171,8 @@ fn saved_queries_keep_stable_ids_and_prior_author_revisions() -> Result<(), Erro
 }
 
 #[test]
-fn schema_eight_upgrade_preserves_world_data_and_initializes_saved_query_tables() -> Result<(), Error> {
+fn schema_eight_upgrade_preserves_world_data_and_initializes_saved_query_tables()
+-> Result<(), Error> {
     let dir = tempdir()?;
     let path = dir.path().join("old.sqlite");
     let mut store = Store::open(&path)?;
@@ -171,9 +200,16 @@ fn schema_eight_upgrade_preserves_world_data_and_initializes_saved_query_tables(
     )?;
     drop(connection);
     let store = Store::open(&path)?;
-    assert!(store.saved_label_queries(world.id, first, Scope::Author)?.is_empty());
+    assert!(
+        store
+            .saved_label_queries(world.id, first, Scope::Author)?
+            .is_empty()
+    );
     assert_eq!(
-        store.execute_query(&search("Legacy Writer"), view(&world, first))?.rows[0].object,
+        store
+            .execute_query(&search("Legacy Writer"), view(&world, first))?
+            .rows[0]
+            .object,
         object
     );
     store.verify_foreign_keys(Scope::Author)?;
