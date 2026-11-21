@@ -7,6 +7,7 @@
     "dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
     "build:renderer": "node scripts/build-renderer.mjs",
     "check:launch": "node --test scripts/launch-config.test.mjs",
+    "smoke:dev": "node scripts/dev-server-smoke.mjs",
     "build": "npm run check:launch && tsc --noEmit && vite build",
     "test": "playwright test",
     "tauri": "tauri"
