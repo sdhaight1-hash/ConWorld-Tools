@@ -75,7 +75,9 @@ impl Store {
     /// No author revision or object identity is changed.
     pub fn rebuild_search_index(&mut self, scope: Scope) -> Result<(), Error> {
         require_author(scope)?;
-        let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute("DELETE FROM object_search_documents", [])?;
         tx.execute(
             "INSERT INTO object_search_documents
