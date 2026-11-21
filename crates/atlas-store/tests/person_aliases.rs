@@ -452,7 +452,9 @@ fn repeated_aliases_do_not_exhaust_distinct_candidate_budget() -> Result<(), Err
     assert_eq!(result.rows.len(), 21);
     assert!(!result.truncated);
     assert!(result.rows.iter().all(|candidate| {
-        candidate.target == person && candidate.collisions == 1 && candidate.matched_label == "Magpie"
+        candidate.target == person
+            && candidate.collisions == 1
+            && candidate.matched_label == "Magpie"
     }));
     Ok(())
 }
