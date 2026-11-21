@@ -388,3 +388,71 @@ fn alias_input_rejects_invalid_intervals_labels_and_stale_writes() -> Result<(),
     assert_eq!(store.world(world.id, Scope::Author)?.revision, created);
     Ok(())
 }
+
+#[test]
+fn repeated_aliases_do_not_exhaust_distinct_candidate_budget() -> Result<(), Error> {
+    let mut store = Store::open(":memory:")?;
+    let world = store.create_world("Duplicate aliases", Scope::Author)?;
+    let person = ObjectRef::new(world.id);
+    let event = ObjectRef::new(world.id);
+    let source = ObjectRef::new(world.id);
+    let claim = ObjectRef::new(world.id);
+    let mut revision = store.apply(&command(
+        &world,
+        world.revision,
+        vec![
+            Change::Create(person, record("Magpie", ObjectData::Person, None)),
+            Change::Create(
+                event,
+                record(
+                    "Council",
+                    ObjectData::HistoricalEvent {
+                        occurrence: EventDate::Exact(WorldDay(10)),
+                    },
+                    None,
+                ),
+            ),
+            Change::Create(
+                source,
+                record(
+                    "Notes",
+                    ObjectData::Source {
+                        citation: "Folio 1".into(),
+                    },
+                    None,
+                ),
+            ),
+            Change::Create(
+                claim,
+                record(
+                    "Witness",
+                    ObjectData::Claim {
+                        subject: event,
+                        predicate: "reported".into(),
+                        statement: "Magpie ".repeat(21),
+                        audience: ClaimAudience::Author,
+                    },
+                    Some(source),
+                ),
+            ),
+        ],
+    ))?;
+    for _ in 0..100 {
+        revision = save(
+            &mut store,
+            &world,
+            revision,
+            person,
+            None,
+            ("MAGPIE", true, 0, None),
+        )?
+        .recorded_at;
+    }
+    let result = store.discover_mentions(view(&world, revision, 20), 100)?;
+    assert_eq!(result.rows.len(), 21);
+    assert!(!result.truncated);
+    assert!(result.rows.iter().all(|candidate| {
+        candidate.target == person && candidate.collisions == 1 && candidate.matched_label == "Magpie"
+    }));
+    Ok(())
+}
