@@ -122,6 +122,7 @@ export async function showAuthorWorkspace(
   const runSavedQuery = document.querySelector<HTMLButtonElement>("#author-run-saved-query")!;
   const savedSelect = saveQueryForm.elements.namedItem("query_id") as HTMLSelectElement;
   const pathForm = document.querySelector<HTMLFormElement>("#author-path-form")!;
+  const participantEventsForm = document.querySelector<HTMLFormElement>("#author-participant-events-form")!;
   const queryResults = document.querySelector<HTMLUListElement>("#author-query-results")!;
   const discoverButton = document.querySelector<HTMLButtonElement>("#author-discover-mentions")!;
   const discoveryStatus = document.querySelector<HTMLElement>("#author-discovery-status")!;
@@ -211,6 +212,8 @@ export async function showAuthorWorkspace(
     saveQueryForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = blocked;
     runSavedQuery.disabled = !snapshot || !savedSelect.value || saving;
     pathForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = !snapshot || !people.length || saving;
+    participantEventsForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled =
+      !snapshot || !people.length || saving;
   }
 
   const definitionFor = (category: Definition["category"], label: string) =>
@@ -486,6 +489,9 @@ export async function showAuthorWorkspace(
     options(subject, people);
     options(target, people);
     options(field<HTMLSelectElement>(pathForm, "start"), people);
+    options(field<HTMLSelectElement>(participantEventsForm, "participant"), people);
+    options(field<HTMLSelectElement>(participantEventsForm, "role"),
+      [{ id: "any", label: "Any recorded role" }, ...roleOptions()]);
     if (people.length > 1 && subject.value === target.value) {
       target.value = people.find((person) => person.id !== subject.value)!.id;
     }
@@ -764,6 +770,21 @@ export async function showAuthorWorkspace(
         syncButtons();
       }
     })();
+  });
+
+  participantEventsForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (!snapshot || saving) return;
+    const request = {
+      world_id: snapshot.world.id,
+      day: snapshot.day,
+      revision: selectedRevision(),
+      participant_id: value(participantEventsForm, "participant"),
+      role: value(participantEventsForm, "role"),
+      limit: 100,
+    };
+    runQuery("Finding explicitly recorded historical event participation…",
+      () => invoke<SearchResult>("workspace_query_participant_events", { request }));
   });
 
   pathForm.addEventListener("submit", (event) => {
