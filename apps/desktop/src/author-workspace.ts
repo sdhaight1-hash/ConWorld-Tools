@@ -35,12 +35,17 @@ type SavedQuery = { id: string; name: string; mode: "contains" | "exact" | "full
   term: string; predicate?: Predicate | null; limit: number; recorded_at: number };
 type MentionDiscovery = { revision: number; truncated: boolean; rows: {
   source_id: string; source_branch: string; source_state_revision: number; source_revision: number;
-  source_label: string; statement: string; target_id: string; target_label: string;
+  source_label: string; statement: string; target_id: string; target_label: string; matched_label?: string;
   start_byte: number; end_byte: number; collisions: number; disposition: "approved" | "dismissed" | null;
 }[] };
+type PersonAlias = {
+  id: string; person_id: string; label: string; starts_at: number | null; ends_before: number | null;
+  active: boolean; recorded_at: number;
+};
 type Snapshot = {
   world: World; day: number; view_revision: number;
   people: Person[]; relationships: Relationship[]; events: Event[]; definitions: Definition[];
+  aliases?: PersonAlias[];
 };
 type Option = { id: string; label: string };
 
@@ -144,6 +149,7 @@ export async function showAuthorWorkspace(
   const authorLink = document.querySelector<HTMLElement>("#author-link")!;
   const worldForm = document.querySelector<HTMLFormElement>("#author-create-world")!;
   const personForm = document.querySelector<HTMLFormElement>("#author-create-person")!;
+  const aliasForm = document.querySelector<HTMLFormElement>("#author-person-alias")!;
   const relationshipForm = document.querySelector<HTMLFormElement>("#author-create-relationship")!;
   const stateForm = document.querySelector<HTMLFormElement>("#author-relationship-state")!;
   const eventForm = document.querySelector<HTMLFormElement>("#author-record-event")!;
@@ -156,7 +162,7 @@ export async function showAuthorWorkspace(
   const definitionDetails = document.querySelector<HTMLFieldSetElement>("#relationship-definition")!;
   const definitionsList = document.querySelector<HTMLUListElement>("#world-definitions")!;
   const evidenceForm = document.querySelector<HTMLFormElement>("#author-record-evidence")!;
-  const forms = [personForm, relationshipForm, stateForm, eventForm, definitionForm, evidenceForm];
+  const forms = [personForm, relationshipForm, stateForm, eventForm, definitionForm, evidenceForm, aliasForm];
   const field = <T extends HTMLInputElement | HTMLSelectElement>(form: HTMLFormElement, name: string) =>
     form.elements.namedItem(name) as T;
   const evidenceEvent = field<HTMLSelectElement>(evidenceForm, "event");
@@ -209,6 +215,7 @@ export async function showAuthorWorkspace(
       !selectedEvent || selectedEvent.day !== null,
       true,
       Boolean(evidenceEvent.value),
+      people.length > 0,
     ];
     for (const [index, form] of forms.entries()) {
       form.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = blocked || !availability[index];
@@ -492,6 +499,8 @@ export async function showAuthorWorkspace(
       rows.replaceChildren();
       stateSelect.value = "";
       existing.value = "";
+      aliasForm.reset();
+      field<HTMLSelectElement>(aliasForm, "alias_id").value = "";
     }
     info.textContent = `Author revision ${next.view_revision} / ${next.world.revision} · historical day ${next.day}`;
     const subject = field<HTMLSelectElement>(relationshipForm, "subject");
@@ -499,6 +508,15 @@ export async function showAuthorWorkspace(
     options(subject, people);
     options(target, people);
     options(field<HTMLSelectElement>(pathForm, "start"), people);
+    options(field<HTMLSelectElement>(aliasForm, "person_id"), people);
+    options(field<HTMLSelectElement>(aliasForm, "alias_id"), [
+      { id: "", label: "New alias" },
+      ...(next.aliases ?? []).map((alias) => ({
+        id: alias.id,
+        label: alias.label + " · " + (personNames.get(alias.person_id) ?? alias.person_id) +
+          (alias.active ? "" : " (disabled)"),
+      })),
+    ], worldChanged ? "" : value(aliasForm, "alias_id"));
     options(field<HTMLSelectElement>(participantEventsForm, "participant"), people);
     options(field<HTMLSelectElement>(participantEventsForm, "role"),
       [{ id: "any", label: "Any recorded role" }, ...roleOptions()]);
@@ -665,7 +683,10 @@ export async function showAuthorWorkspace(
         for (const candidate of result.rows) {
           const item = document.createElement("li");
           const name = document.createElement("p");
-          name.textContent = "Candidate: " + candidate.target_label + " · " + candidate.target_id +
+          name.textContent = "Candidate: " + candidate.target_label +
+            (candidate.matched_label && candidate.matched_label !== candidate.target_label
+              ? " (matched alias: " + candidate.matched_label + ")" : "") +
+            " · " + candidate.target_id +
             " · " + candidate.collisions + " possible identity/identities for this occurrence";
           const provenance = document.createElement("p");
           provenance.className = "hint";
@@ -961,6 +982,49 @@ export async function showAuthorWorkspace(
   });
   bind(personForm, async ({ world_id }) => {
     await invoke("workspace_create_person", { worldId: world_id, name: value(personForm, "name") });
+  });
+  field<HTMLSelectElement>(aliasForm, "alias_id").addEventListener("change", () => {
+    const alias = snapshot?.aliases?.find((entry) => entry.id === value(aliasForm, "alias_id"));
+    if (alias) {
+      field<HTMLSelectElement>(aliasForm, "person_id").value = alias.person_id;
+      field<HTMLInputElement>(aliasForm, "label").value = alias.label;
+      field<HTMLInputElement>(aliasForm, "starts_at").value = alias.starts_at?.toString() ?? "";
+      field<HTMLInputElement>(aliasForm, "ends_before").value = alias.ends_before?.toString() ?? "";
+      field<HTMLInputElement>(aliasForm, "active").checked = alias.active;
+    } else {
+      field<HTMLInputElement>(aliasForm, "label").value = "";
+      field<HTMLInputElement>(aliasForm, "starts_at").value = "";
+      field<HTMLInputElement>(aliasForm, "ends_before").value = "";
+      field<HTMLInputElement>(aliasForm, "active").checked = true;
+    }
+  });
+  bind(aliasForm, async ({ world_id, expected_revision }) => {
+    const optionalDay = (name: string): number | null => {
+      const raw = value(aliasForm, name).trim();
+      if (!raw) return null;
+      const parsed = Number(raw);
+      if (!/^-?\d+$/.test(raw) || !Number.isSafeInteger(parsed)) {
+        throw new Error("Alias dates must be whole-number historical days.");
+      }
+      return parsed;
+    };
+    await invoke("workspace_save_person_alias", {
+      request: {
+        world_id,
+        expected_revision,
+        day: currentDay(),
+        person_id: value(aliasForm, "person_id"),
+        alias_id: value(aliasForm, "alias_id") || null,
+        label: value(aliasForm, "label"),
+        starts_at: optionalDay("starts_at"),
+        ends_before: optionalDay("ends_before"),
+        active: field<HTMLInputElement>(aliasForm, "active").checked,
+      },
+    });
+    const personId = value(aliasForm, "person_id");
+    aliasForm.reset();
+    field<HTMLSelectElement>(aliasForm, "person_id").value = personId;
+    field<HTMLSelectElement>(aliasForm, "alias_id").value = "";
   });
   bind(relationshipForm, async (context) => {
     await invoke("workspace_create_relationship", { request: {

@@ -927,3 +927,87 @@ test("native author saves and replays the exact versioned composite AST", async 
   await saved.getByRole("button", { name: "Run saved search" }).click();
   await expect(matches).toHaveCount(1);
 });
+
+
+test("native author creates and disables a historical alias without inferring a relationship", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "world", name: "Alias world", revision: 2 };
+    const aliases: { id: string; person_id: string; label: string; starts_at: number | null;
+      ends_before: number | null; active: boolean; recorded_at: number }[] = [];
+    const calls: unknown[] = [];
+    Object.assign(window, {
+      isTauri: true,
+      __aliasCalls: calls,
+      __TAURI_INTERNALS__: {
+        invoke: async (command: string, args: Record<string, unknown>) => {
+          if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+          if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+          if (command === "workspace_worlds") return [world];
+          if (command === "workspace_saved_queries") return [];
+          if (command === "workspace_snapshot") return {
+            world: { ...world }, day: args.day, view_revision: args.revision ?? world.revision,
+            people: [{ id: "alice", label: "Alice Rowan" }, { id: "bob", label: "Bob Vale" }],
+            aliases: aliases.filter((item) => item.recorded_at <= (args.revision ?? world.revision)),
+            relationships: [], events: [], definitions: [],
+          };
+          if (command === "workspace_save_person_alias") {
+            const request = args.request as { expected_revision: number; alias_id: string | null;
+              person_id: string; label: string; starts_at: number | null; ends_before: number | null; active: boolean };
+            if (request.expected_revision !== world.revision) throw new Error("stale author revision");
+            calls.push({ operation: "save", ...request });
+            world.revision++;
+            const id = request.alias_id ?? "alias-one";
+            const row = { id, person_id: request.person_id, label: request.label, starts_at: request.starts_at,
+              ends_before: request.ends_before, active: request.active, recorded_at: world.revision };
+            aliases.splice(0, aliases.length, row);
+            return id;
+          }
+          if (command === "workspace_discover_mentions") {
+            const matching = aliases.filter((item) => item.active && (args.day as number) >= (item.starts_at ?? -9999));
+            return { revision: args.revision ?? world.revision, truncated: false,
+              rows: matching.map((item) => ({
+                source_id: "claim", source_branch: "main", source_state_revision: 2, source_revision: 2,
+                source_label: "Court notes", statement: "The Magpie arrived.",
+                target_id: item.person_id, target_label: "Alice Rowan", matched_label: "Magpie",
+                start_byte: 4, end_byte: 10, collisions: 1, disposition: null,
+              })) };
+          }
+          throw new Error("Unexpected native command: " + command);
+        },
+      },
+    });
+  });
+  await page.goto("/");
+  const form = page.locator("#author-person-alias");
+  await page.locator("#author-day").fill("20");
+  await page.locator("#author-day").blur();
+  await form.getByLabel("Person", { exact: true }).selectOption("alice");
+  await form.getByLabel("Alternative name").fill("Magpie");
+  await form.getByLabel("Valid from day (optional)").fill("10");
+  await form.getByRole("button", { name: "Save person alias" }).click();
+  await expect(page.locator("#author-status")).toContainText("Saved to local world history");
+  await form.getByLabel("Saved alias").selectOption("alias-one");
+  await expect(form.getByLabel("Alternative name")).toHaveValue("Magpie");
+  await page.getByRole("button", { name: "Find possible mentions" }).click();
+  await expect(page.locator("#author-discovery-results")).toContainText("matched alias: Magpie");
+  await expect(page.locator("#author-discovery-results")).toContainText("Candidate only");
+  await form.getByLabel("Enable this alias").uncheck();
+  await form.getByRole("button", { name: "Save person alias" }).click();
+  await page.getByRole("button", { name: "Find possible mentions" }).click();
+  await expect(page.locator("#author-discovery-results li")).toHaveCount(0);
+  await expect(form.locator('select[name="alias_id"]')).toHaveValue("");
+  await expect(form.getByLabel("Alternative name")).toHaveValue("");
+  await expect(form.getByLabel("Valid from day (optional)")).toHaveValue("");
+  await expect(form.getByLabel("Valid before day (optional)")).toHaveValue("");
+  await expect(form.getByLabel("Enable this alias")).toBeChecked();
+  const calls = await page.evaluate(() => (window as unknown as { __aliasCalls: unknown[] }).__aliasCalls);
+  expect(calls).toMatchObject([
+    { operation: "save", expected_revision: 2, alias_id: null, person_id: "alice",
+      label: "Magpie", starts_at: 10, ends_before: null, active: true },
+    { operation: "save", expected_revision: 3, alias_id: "alias-one", person_id: "alice",
+      label: "Magpie", starts_at: 10, ends_before: null, active: false },
+  ]);
+  await page.locator("#author-revision").fill("2");
+  await page.locator("#author-revision").blur();
+  await expect(form.getByRole("button", { name: "Save person alias" })).toBeDisabled();
+});
