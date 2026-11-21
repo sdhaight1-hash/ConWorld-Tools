@@ -718,6 +718,9 @@ fn apply_change(
 ) -> Result<(), Error> {
     let prior_revision = AuthorRevision(revision - 1);
     let existing = latest_state(tx, object, branch, None)?;
+    if let Some((_, prior)) = &existing {
+        validate_stable_links(&prior.record.data, &record.data)?;
+    }
     let mut new_override = None;
     let mut local_boundary = None;
     if let Some(fork) = fork {
@@ -740,6 +743,9 @@ fn apply_change(
         } else {
             None
         };
+        if let Some(prior) = &inherited {
+            validate_stable_links(&prior.record.data, &record.data)?;
+        }
         if let ObjectData::HistoricalEvent { occurrence } = &record.data {
             let previous = existing
                 .as_ref()
@@ -905,6 +911,26 @@ fn latest_state(
             |row| Ok((row.get(11)?, read_version(conn, row, object, branch)?)),
         )
         .optional()?)
+}
+
+fn validate_stable_links(old: &ObjectData, new: &ObjectData) -> Result<(), Error> {
+    let changed = match (old, new) {
+        (
+            ObjectData::Relationship { subject: a, target: b, kind: k, .. },
+            ObjectData::Relationship { subject: next_a, target: next_b, kind: next_k, .. },
+        ) => a != next_a || b != next_b || k != next_k,
+        (
+            ObjectData::EventInvolvement { event: a, participant: b, .. },
+            ObjectData::EventInvolvement { event: next_a, participant: next_b, .. },
+        ) => a != next_a || b != next_b,
+        (
+            ObjectData::ActorAction { event: a, actor: b, .. },
+            ObjectData::ActorAction { event: next_a, actor: next_b, .. },
+        ) => a != next_a || b != next_b,
+        _ => false,
+    };
+    if changed { Err(Error::InvalidInput("stable relationship or event actor identity")) }
+    else { Ok(()) }
 }
 
 fn require_visible(
