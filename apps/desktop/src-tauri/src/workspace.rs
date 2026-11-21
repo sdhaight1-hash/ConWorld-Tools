@@ -8,7 +8,7 @@ use atlas_store::{
     ActionOutcome, AuthorRevision, Change, ClaimAudience, Command, Definition, EventDate,
     EventRole, ObjectData, ObjectId, ObjectRef, Record, Scope, Store, ValidInterval, ViewContext,
     World, WorldDay, WorldId,
-    query::{QUERY_SCHEMA_VERSION, QueryFilter, QuerySpec},
+    query::{Direction, QUERY_SCHEMA_VERSION, QueryFilter, QuerySpec},
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -23,6 +23,19 @@ pub struct WorldSummary {
     id: String,
     name: String,
     revision: i64,
+}
+
+#[derive(Clone, Deserialize)]
+pub struct PathQueryInput {
+    world_id: String,
+    day: i64,
+    revision: Option<i64>,
+    start_id: String,
+    kind: String,
+    direction: String,
+    max_depth: u8,
+    max_visited: usize,
+    limit: usize,
 }
 
 #[derive(Serialize)]
@@ -349,6 +362,52 @@ impl AuthorWorkspace {
         term: &str,
         limit: usize,
     ) -> Result<SearchSummary, String> {
+        let filter = match mode {
+            "contains" => QueryFilter::LabelContains(term.into()),
+            "exact" => QueryFilter::ExactLabel(term.into()),
+            "backlinks" => QueryFilter::Backlinks(ObjectRef {
+                world: WorldId(id(world_id)?),
+                id: ObjectId(id(term.trim())?),
+            }),
+            _ => return Err("Unknown historical search mode".into()),
+        };
+        self.execute_filter(world_id, day, revision, filter, limit)
+    }
+
+    fn query_path(&self, request: PathQueryInput) -> Result<SearchSummary, String> {
+        let direction = match request.direction.as_str() {
+            "outgoing" => Direction::Outgoing,
+            "incoming" => Direction::Incoming,
+            "both" => Direction::Both,
+            _ => return Err("Unknown relationship direction".into()),
+        };
+        let filter = QueryFilter::RelationshipPath {
+            start: ObjectRef {
+                world: WorldId(id(&request.world_id)?),
+                id: ObjectId(id(&request.start_id)?),
+            },
+            kind: request.kind,
+            direction,
+            max_depth: request.max_depth,
+            max_visited: request.max_visited,
+        };
+        self.execute_filter(
+            &request.world_id,
+            request.day,
+            request.revision,
+            filter,
+            request.limit,
+        )
+    }
+
+    fn execute_filter(
+        &self,
+        world_id: &str,
+        day: i64,
+        revision: Option<i64>,
+        filter: QueryFilter,
+        limit: usize,
+    ) -> Result<SearchSummary, String> {
         let store = self.lock()?;
         let world = store
             .world(WorldId(id(world_id)?), Scope::Author)
@@ -356,15 +415,6 @@ impl AuthorWorkspace {
         let view = ViewContext {
             revision: AuthorRevision(revision.unwrap_or(world.revision.0)),
             ..view(&world, day)
-        };
-        let filter = match mode {
-            "contains" => QueryFilter::LabelContains(term.into()),
-            "exact" => QueryFilter::ExactLabel(term.into()),
-            "backlinks" => QueryFilter::Backlinks(ObjectRef {
-                world: world.id,
-                id: ObjectId(id(term.trim())?),
-            }),
-            _ => return Err("Unknown historical search mode".into()),
         };
         let result = store
             .execute_query(
@@ -1231,6 +1281,14 @@ pub fn workspace_search(
     limit: usize,
 ) -> Result<SearchSummary, String> {
     workspace.search(&world_id, day, revision, &mode, &term, limit)
+}
+
+#[tauri::command]
+pub fn workspace_query_path(
+    workspace: State<'_, AuthorWorkspace>,
+    request: PathQueryInput,
+) -> Result<SearchSummary, String> {
+    workspace.query_path(request)
 }
 
 #[tauri::command]

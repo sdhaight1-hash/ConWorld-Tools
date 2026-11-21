@@ -8,6 +8,7 @@ fn main() {
             "workspace_create_world",
             "workspace_snapshot",
             "workspace_search",
+            "workspace_query_path",
             "workspace_create_person",
             "workspace_create_relationship",
             "workspace_record_relationship_state",

@@ -12,6 +12,7 @@
     "allow-workspace-create-world",
     "allow-workspace-snapshot",
     "allow-workspace-search",
+    "allow-workspace-query-path",
     "allow-workspace-create-person",
     "allow-workspace-create-relationship",
     "allow-workspace-record-relationship-state",
