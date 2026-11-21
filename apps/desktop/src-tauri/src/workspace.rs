@@ -2283,6 +2283,34 @@ pub fn workspace_search_public_entry(
 }
 
 #[tauri::command]
+pub async fn workspace_search_public_pages(
+    app: AppHandle,
+    request_id: String,
+    world_id: String,
+    day: i64,
+    text: String,
+) -> Result<atlas_store::layout::PublicPageSearch, String> {
+    run_query_job(app, request_id, move |workspace, control| {
+        let store = workspace.lock()?;
+        let world = store
+            .world(WorldId(id(&world_id)?), Scope::Author)
+            .map_err(|e| e.to_string())?;
+        store
+            .search_public_pages(
+                ViewContext {
+                    scope: Scope::Public,
+                    ..view(&world, day)
+                },
+                &text,
+                50,
+                control,
+            )
+            .map_err(|e| e.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
 pub fn workspace_create_person(
     workspace: State<'_, AuthorWorkspace>,
     world_id: String,

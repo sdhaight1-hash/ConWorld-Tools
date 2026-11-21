@@ -1491,3 +1491,52 @@ test("public entry search uses reader IPC and discards obsolete responses", asyn
   await find.click();
   await expect(inspector.getByText("Unpublished at this date.", { exact: true })).toBeVisible();
 });
+
+test("world public search opens only the current reader projection", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "archive", name: "River Archive", revision: 4 };
+    Object.assign(window, {
+      isTauri: true,
+      __TAURI_INTERNALS__: {
+        invoke: async (command: string, payload: { day?: number; text?: string; entryId?: string }) => {
+          if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+          if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+          if (command === "workspace_worlds") return [world];
+          if (command === "workspace_saved_queries") return [];
+          if (command === "workspace_snapshot") return {
+            world, day: payload.day ?? 0, view_revision: 4, people: [],
+            relationships: [], events: [], definitions: [],
+          };
+          if (command === "workspace_search_public_pages") return {
+            matches: payload.text === "gazette" ? [
+              { entry: { world: "archive", id: "alice" }, element: "one", text: "Gazette biography" },
+            ] : [], truncated: false,
+          };
+          if (command === "workspace_public_entry" && payload.entryId === "alice") return {
+            content: { Stack: [{ content: { Text: "Gazette biography" } }, { content: { Text: "Released context" } }] },
+          };
+          if (command === "workspace_cancel_query") return null;
+          throw new Error("Unexpected mock command: " + command);
+        },
+      },
+    });
+  });
+  await page.goto("/");
+  const search = page.getByRole("region", { name: "Published page search" });
+  await search.getByLabel("Text in public pages").fill("gazette");
+  await search.getByRole("button", { name: "Search published pages" }).click();
+  await expect(search.getByText("1 matching public blocks.")).toBeVisible();
+  await search.getByRole("button", { name: "Read published page" }).click();
+  await expect(search.getByText("Released context")).toBeVisible();
+  if (process.env.ATLAS_CAPTURE_PHASE3 === "1") {
+    const timestamp = new Date().toISOString().slice(0, 19).replace("T", "_").replaceAll(":", "-") + "Z";
+    await search.screenshot({
+      path: "../../Development-Screenshots/" + timestamp + "_phase-03_query_mock-native-public-world-search_01.png",
+      animations: "disabled",
+    });
+  }
+  await search.getByLabel("Text in public pages").fill("private");
+  await search.getByRole("button", { name: "Search published pages" }).click();
+  await expect(search.getByText("0 matching public blocks.")).toBeVisible();
+  await expect(search.getByText("Released context")).toHaveCount(0);
+});

@@ -26,6 +26,8 @@ fn main() {
             "workspace_entry_layout",
             "workspace_save_layout",
             "workspace_public_entry",
+            "workspace_search_public_entry",
+            "workspace_search_public_pages",
             "workspace_create_person",
             "workspace_create_relationship",
             "workspace_record_relationship_state",

@@ -1,6 +1,9 @@
 //! Main-branch authored layouts and explicit, revocable publication.
 use super::*;
-use crate::layout::{DisplayContent, DisplayElement, EntryTextSearch, LayoutDocument};
+use crate::layout::{
+    DisplayContent, DisplayElement, EntryTextSearch, LayoutDocument, PublicPageMatch,
+    PublicPageSearch,
+};
 
 impl Store {
     pub fn save_entry_layout(
@@ -87,33 +90,85 @@ impl Store {
         text: &str,
         limit: usize,
     ) -> Result<Option<EntryTextSearch>, Error> {
-        let text = text.trim();
-        if text.is_empty() || text.len() > 256 || !(1..=50).contains(&limit) {
-            return Err(Error::InvalidInput("entry search text or limit"));
-        }
-        let needle = text.to_lowercase();
+        let needle = entry_search_term(text, limit)?;
         let Some(page) = self.display_entry(view, entry)? else {
             return Ok(None);
         };
-        let mut result = EntryTextSearch {
-            matches: Vec::new(),
-            truncated: false,
-        };
-        let mut pending = vec![page];
-        while let Some(element) = pending.pop() {
-            match element.content {
-                DisplayContent::Stack(children) => pending.extend(children.into_iter().rev()),
-                DisplayContent::Text(text) if text.to_lowercase().contains(&needle) => {
-                    if result.matches.len() == limit {
-                        result.truncated = true;
-                        break;
-                    }
-                    result.matches.push((element.id, text));
-                }
-                _ => {}
-            }
+        Ok(Some(find_text_blocks(page, &needle, limit)))
+    }
+
+    /// Search released public pages at the current revision and selected day.
+    /// The author registry, labels and private blocks are never search inputs.
+    pub fn search_public_pages(
+        &self,
+        view: ViewContext,
+        text: &str,
+        limit: usize,
+        control: &QueryControl,
+    ) -> Result<PublicPageSearch, Error> {
+        if view.scope != Scope::Public {
+            return Err(Error::CapabilityDenied);
         }
-        Ok(Some(result))
+        let needle = entry_search_term(text, limit)?;
+        self.with_query_control(control, |store| {
+            let tx = store.conn.unchecked_transaction()?;
+            let world = load_world(&tx, view.world)?;
+            if world.main != view.branch {
+                return Err(Error::CapabilityDenied);
+            }
+            if view.revision != world.revision {
+                return Err(Error::InvalidRevision);
+            }
+            // Apply latest-version and release filters before considering pages.
+            // Hidden roots and drafts cannot contribute to the visible page budget.
+            let mut stmt = tx.prepare(
+                "SELECT v.entry_id FROM entry_layout_versions v
+                 WHERE v.world_id=?1 AND v.revision<=?2
+                   AND v.published=1 AND json_extract(v.document,'$.root.audience')='Public'
+                   AND v.revision=(SELECT MAX(h.revision) FROM entry_layout_versions h
+                       WHERE h.world_id=v.world_id AND h.entry_id=v.entry_id AND h.revision<=?2)
+                 ORDER BY v.entry_id",
+            )?;
+            let ids = stmt.query_map(params![view.world.0.as_bytes(), view.revision.0], |row| {
+                row.get::<_, [u8; 16]>(0)
+            })?;
+            let mut result = PublicPageSearch {
+                matches: Vec::new(),
+                truncated: false,
+            };
+            let mut visible_pages = 0;
+            for id in ids {
+                store.check_query_control()?;
+                let entry = ObjectRef {
+                    world: view.world,
+                    id: ObjectId(Uuid::from_bytes(id?)),
+                };
+                let Some((document, _)) = read_layout_at(&tx, view, entry)? else {
+                    continue;
+                };
+                let Some(page) = document.compile(store, view)? else {
+                    continue;
+                };
+                visible_pages += 1;
+                if visible_pages > 512 {
+                    return Err(Error::QueryBudgetExceeded);
+                }
+                let remaining = limit - result.matches.len();
+                let found = find_text_blocks(page, &needle, remaining);
+                result.matches.extend(found.matches.into_iter().map(|(element, text)| {
+                    PublicPageMatch {
+                        entry,
+                        element,
+                        text,
+                    }
+                }));
+                if found.truncated {
+                    result.truncated = true;
+                    break;
+                }
+            }
+            Ok(result)
+        })
     }
 
     fn read_layout(
@@ -121,48 +176,86 @@ impl Store {
         view: ViewContext,
         entry: ObjectRef,
     ) -> Result<Option<(LayoutDocument, bool)>, Error> {
-        if entry.world != view.world {
-            return Err(Error::WrongWorld);
-        }
         let tx = self.conn.unchecked_transaction()?;
-        let world = load_world(&tx, view.world)?;
-        if world.main != view.branch {
-            return Err(Error::CapabilityDenied);
-        }
-        if view.revision.0 < 0
-            || view.revision > world.revision
-            || (view.scope != Scope::Author && view.revision != world.revision)
-        {
-            return Err(Error::InvalidRevision);
-        }
-        if let Scope::Character(reader) = view.scope {
-            require_person(
-                &tx,
-                view.world,
-                reader,
-                view.branch,
-                view.revision.0,
-                view.day,
-            )?;
-        }
-        let row: Option<(bool, String)> = tx.query_row(
-            "SELECT published, document FROM entry_layout_versions WHERE world_id=?1 AND entry_id=?2
-             AND revision<=?3 ORDER BY revision DESC LIMIT 1",
-            params![view.world.0.as_bytes(),entry.id.0.as_bytes(),view.revision.0],
-            |row| Ok((row.get(0)?,row.get(1)?))).optional()?;
-        let Some((published, text)) = row else {
-            return Ok(None);
-        };
-        if (!published && view.scope != Scope::Author)
-            || resolve_object(&tx, entry, view.branch, view.revision, view.day)?.is_none()
-        {
-            return Ok(None);
-        }
-        let doc: LayoutDocument = serde_json::from_str(&text)
-            .map_err(|_| Error::Integrity("invalid stored entry layout".into()))?;
-        if doc.entry != entry {
-            return Err(Error::Integrity("layout entry mismatch".into()));
-        }
-        Ok(Some((doc, published)))
+        read_layout_at(&tx, view, entry)
     }
+}
+
+fn read_layout_at(
+    conn: &Connection,
+    view: ViewContext,
+    entry: ObjectRef,
+) -> Result<Option<(LayoutDocument, bool)>, Error> {
+    if entry.world != view.world {
+        return Err(Error::WrongWorld);
+    }
+    let world = load_world(conn, view.world)?;
+    if world.main != view.branch {
+        return Err(Error::CapabilityDenied);
+    }
+    if view.revision.0 < 0
+        || view.revision > world.revision
+        || (view.scope != Scope::Author && view.revision != world.revision)
+    {
+        return Err(Error::InvalidRevision);
+    }
+    if let Scope::Character(reader) = view.scope {
+        require_person(
+            conn,
+            view.world,
+            reader,
+            view.branch,
+            view.revision.0,
+            view.day,
+        )?;
+    }
+    let row: Option<(bool, String)> = conn.query_row(
+        "SELECT published, document FROM entry_layout_versions WHERE world_id=?1 AND entry_id=?2
+         AND revision<=?3 ORDER BY revision DESC LIMIT 1",
+        params![view.world.0.as_bytes(),entry.id.0.as_bytes(),view.revision.0],
+        |row| Ok((row.get(0)?,row.get(1)?))).optional()?;
+    let Some((published, text)) = row else {
+        return Ok(None);
+    };
+    if (!published && view.scope != Scope::Author)
+        || resolve_object(conn, entry, view.branch, view.revision, view.day)?.is_none()
+    {
+        return Ok(None);
+    }
+    let doc: LayoutDocument = serde_json::from_str(&text)
+        .map_err(|_| Error::Integrity("invalid stored entry layout".into()))?;
+    if doc.entry != entry {
+        return Err(Error::Integrity("layout entry mismatch".into()));
+    }
+    Ok(Some((doc, published)))
+}
+
+fn entry_search_term(text: &str, limit: usize) -> Result<String, Error> {
+    let text = text.trim();
+    if text.is_empty() || text.len() > 256 || !(1..=50).contains(&limit) {
+        return Err(Error::InvalidInput("entry search text or limit"));
+    }
+    Ok(text.to_lowercase())
+}
+
+fn find_text_blocks(page: DisplayElement, needle: &str, limit: usize) -> EntryTextSearch {
+    let mut result = EntryTextSearch {
+        matches: Vec::new(),
+        truncated: false,
+    };
+    let mut pending = vec![page];
+    while let Some(element) = pending.pop() {
+        match element.content {
+            DisplayContent::Stack(children) => pending.extend(children.into_iter().rev()),
+            DisplayContent::Text(text) if text.to_lowercase().contains(needle) => {
+                if result.matches.len() == limit {
+                    result.truncated = true;
+                    break;
+                }
+                result.matches.push((element.id, text));
+            }
+            _ => {}
+        }
+    }
+    result
 }

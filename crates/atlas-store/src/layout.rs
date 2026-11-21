@@ -61,6 +61,19 @@ pub struct EntryTextSearch {
     pub truncated: bool,
 }
 
+#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PublicPageMatch {
+    pub entry: ObjectRef,
+    pub element: ElementId,
+    pub text: String,
+}
+
+#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PublicPageSearch {
+    pub matches: Vec<PublicPageMatch>,
+    pub truncated: bool,
+}
+
 impl LayoutDocument {
     pub fn validate(&self) -> Result<(), Error> {
         if self.schema_version != LAYOUT_SCHEMA_VERSION {

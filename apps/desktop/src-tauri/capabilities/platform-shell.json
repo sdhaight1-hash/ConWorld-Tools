@@ -30,6 +30,8 @@
     "allow-workspace-entry-layout",
     "allow-workspace-save-layout",
     "allow-workspace-public-entry",
+    "allow-workspace-search-public-entry",
+    "allow-workspace-search-public-pages",
     "allow-workspace-create-person",
     "allow-workspace-create-relationship",
     "allow-workspace-record-relationship-state",

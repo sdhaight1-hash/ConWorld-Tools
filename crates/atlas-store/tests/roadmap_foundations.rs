@@ -887,3 +887,89 @@ fn entry_find_limits_only_visible_blocks_in_layout_order() -> Result<(), Error> 
     );
     Ok(())
 }
+
+#[test]
+fn global_public_find_excludes_unreleased_and_historical_private_content() -> Result<(), Error> {
+    use atlas_store::query::QueryControl;
+    use std::time::Duration;
+
+    let mut store = Store::open(":memory:")?;
+    let world = seed(&mut store)?;
+    let foreign = seed(&mut store)?;
+    let block = |audience, content| LayoutElement {
+        id: ElementId(Uuid::new_v4()),
+        audience,
+        content,
+    };
+    let page = |entry, audience, text: &str| LayoutDocument {
+        entry,
+        schema_version: LAYOUT_SCHEMA_VERSION,
+        root: block(
+            audience,
+            ElementContent::Stack(vec![
+                block(ClaimAudience::Public, ElementContent::Text(text.into())),
+                block(
+                    ClaimAudience::Author,
+                    ElementContent::Text("Secret gazette".into()),
+                ),
+            ]),
+        ),
+    };
+    let mut author = view(&world, 13);
+    let a = page(id(&world, 1), ClaimAudience::Public, "First gazette");
+    let b = page(id(&world, 2), ClaimAudience::Public, "Second gazette");
+    let draft = page(id(&world, 3), ClaimAudience::Public, "Draft gazette");
+    let hidden = page(id(&world, 4), ClaimAudience::Author, "Hidden gazette");
+    let future = page(id(&world, 7), ClaimAudience::Public, "Future gazette");
+    for (document, release) in [(&a, true), (&b, true), (&draft, false), (&future, true)] {
+        author.revision = store.save_entry_layout(author, document, release, Uuid::new_v4())?;
+    }
+    // The author-only root remains inaccessible even when the release flag is set.
+    let early = ViewContext {
+        day: WorldDay(5),
+        ..author
+    };
+    author.revision = store.save_entry_layout(early, &hidden, true, Uuid::new_v4())?;
+    let foreign_page = page(id(&foreign, 1), ClaimAudience::Public, "Foreign gazette");
+    store.save_entry_layout(view(&foreign, 13), &foreign_page, true, Uuid::new_v4())?;
+
+    let reader = |author: ViewContext, day| ViewContext {
+        scope: Scope::Public,
+        day: WorldDay(day),
+        ..author
+    };
+    let control = QueryControl::new(Duration::from_secs(5))?;
+    let public = reader(author, 5);
+    let matches = store.search_public_pages(public, "GAZETTE", 2, &control)?;
+    assert_eq!(matches.matches.len(), 2);
+    assert_eq!(matches.matches[0].entry, a.entry);
+    assert_eq!(matches.matches[1].entry, b.entry);
+    assert_eq!(matches.matches[0].text, "First gazette");
+    assert_eq!(matches.matches[1].text, "Second gazette");
+    assert!(!matches.truncated);
+    let limited = store.search_public_pages(public, "gazette", 1, &control)?;
+    assert!(limited.truncated);
+    assert_eq!(limited.matches[0], matches.matches[0]);
+    let later = store.search_public_pages(reader(author, 13), "gazette", 5, &control)?;
+    assert_eq!(later.matches.len(), 3);
+    assert_eq!(later.matches[2].entry, future.entry);
+    assert!(matches!(
+        store.search_public_pages(author, "gazette", 5, &control),
+        Err(Error::CapabilityDenied)
+    ));
+    author.revision = store.save_entry_layout(author, &a, false, Uuid::new_v4())?;
+    assert!(matches!(
+        store.search_public_pages(public, "gazette", 5, &control),
+        Err(Error::InvalidRevision)
+    ));
+    let current = reader(author, 5);
+    let revoked = store.search_public_pages(current, "gazette", 5, &control)?;
+    assert_eq!(revoked.matches.len(), 1);
+    assert_eq!(revoked.matches[0].entry, b.entry);
+    control.cancel();
+    assert!(matches!(
+        store.search_public_pages(current, "gazette", 5, &control),
+        Err(Error::QueryCancelled)
+    ));
+    Ok(())
+}
