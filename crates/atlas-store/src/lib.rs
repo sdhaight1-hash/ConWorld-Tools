@@ -369,6 +369,10 @@ pub enum Error {
         "query exceeds the bounded candidate or result budget; narrow the query or use a more specific filter"
     )]
     QueryBudgetExceeded,
+    #[error("query cancelled")]
+    QueryCancelled,
+    #[error("query execution deadline exceeded; narrow the search")]
+    QueryDeadlineExceeded,
     #[error("backup path is not valid UTF-8: {0:?}")]
     InvalidBackupPath(PathBuf),
     #[error("database operation failed: {0}")]

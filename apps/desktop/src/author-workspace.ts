@@ -143,6 +143,7 @@ export async function showAuthorWorkspace(
   const compositeForm = document.querySelector<HTMLFormElement>("#author-composite-form")!;
   const queryResults = document.querySelector<HTMLUListElement>("#author-query-results")!;
   const nextSearchPage = document.querySelector<HTMLButtonElement>("#author-next-search-page")!;
+  const cancelSearch = document.querySelector<HTMLButtonElement>("#author-cancel-query")!;
   const discoverButton = document.querySelector<HTMLButtonElement>("#author-discover-mentions")!;
   const discoveryStatus = document.querySelector<HTMLElement>("#author-discovery-status")!;
   const discoveryResults = document.querySelector<HTMLUListElement>("#author-discovery-results")!;
@@ -186,6 +187,7 @@ export async function showAuthorWorkspace(
   let snapshot: Snapshot | undefined;
   let requestSequence = 0;
   let querySequence = 0;
+  let activeQuery: string | undefined;
   let pageCursor: string | undefined;
   let pageNumber = 1;
   let discoverySequence = 0;
@@ -226,6 +228,8 @@ export async function showAuthorWorkspace(
       : "Choose a person from search results to explore their connections and recorded events.";
     refreshView.disabled = saving || !worldSelect.value;
     nextSearchPage.disabled = !snapshot || saving || !pageCursor;
+    cancelSearch.hidden = !activeQuery;
+    cancelSearch.disabled = !activeQuery;
     const day = snapshot?.day;
     const availability = [
       true,
@@ -473,9 +477,22 @@ export async function showAuthorWorkspace(
     setScene(fixture);
   }
 
+  function cancelActiveQuery() {
+    const requestId = activeQuery;
+    activeQuery = undefined;
+    cancelSearch.hidden = true;
+    cancelSearch.disabled = true;
+    if (requestId) {
+      void invoke("workspace_cancel_query", { requestId }).catch(() => {
+        // The generation guard still prevents stale replies from being displayed.
+      });
+    }
+  }
+
   async function refresh() {
     const sequence = ++requestSequence;
     ++querySequence;
+    cancelActiveQuery();
     pageCursor = undefined;
     pageNumber = 1;
     nextSearchPage.hidden = true;
@@ -610,9 +627,14 @@ export async function showAuthorWorkspace(
         : "World loaded. Edits are saved locally.";
   }
 
-  function runQuery(message: string, execute: () => Promise<SearchResult>, page = 1) {
+  function runQuery(message: string, execute: (requestId: string) => Promise<SearchResult>, page = 1) {
     if (!snapshot || saving) return;
     const sequence = ++querySequence;
+    cancelActiveQuery();
+    const requestId = crypto.randomUUID();
+    activeQuery = requestId;
+    cancelSearch.hidden = false;
+    cancelSearch.disabled = false;
     pageCursor = undefined;
     nextSearchPage.hidden = true;
     nextSearchPage.disabled = true;
@@ -620,7 +642,7 @@ export async function showAuthorWorkspace(
     queryStatus.textContent = message;
     void (async () => {
       try {
-        const result = await execute();
+        const result = await execute(requestId);
         if (sequence !== querySequence || !snapshot) return;
         if (result.revision !== snapshot.view_revision) throw new Error("Search response belongs to a different author revision. Refresh the view.");
         const graphIds = new Set([
@@ -684,6 +706,12 @@ export async function showAuthorWorkspace(
           (pageCursor ? " · more results available." : result.truncated ? " · more results exist; narrow the search." : "");
       } catch (error) {
         if (sequence === querySequence) queryStatus.textContent = "Search failed: " + String(error);
+      } finally {
+        if (sequence === querySequence) {
+          activeQuery = undefined;
+          cancelSearch.hidden = true;
+          cancelSearch.disabled = true;
+        }
       }
     })();
   }
@@ -788,6 +816,17 @@ export async function showAuthorWorkspace(
     })();
   });
 
+  cancelSearch.addEventListener("click", () => {
+    if (!activeQuery) return;
+    ++querySequence;
+    cancelActiveQuery();
+    pageCursor = undefined;
+    nextSearchPage.hidden = true;
+    nextSearchPage.disabled = true;
+    queryResults.replaceChildren();
+    queryStatus.textContent = "Search cancellation requested.";
+  });
+
   nextSearchPage.addEventListener("click", () => {
     if (!snapshot || saving || !pageCursor) return;
     const worldId = snapshot.world.id;
@@ -795,7 +834,7 @@ export async function showAuthorWorkspace(
     const revision = snapshot.view_revision;
     const token = pageCursor;
     runQuery("Loading the next historical results…",
-      () => invoke<SearchResult>("workspace_next_search_page", { worldId, day, revision, token }), pageNumber + 1);
+      (requestId) => invoke<SearchResult>("workspace_next_search_page", { worldId, day, revision, token, requestId }), pageNumber + 1);
   });
 
   function runSearch(mode: string, term: string, limit = 100) {
@@ -804,7 +843,7 @@ export async function showAuthorWorkspace(
     const day = snapshot.day;
     const revision = snapshot.view_revision;
     runQuery(mode === "backlinks" ? "Finding incoming references…" : "Searching historical records…",
-      () => invoke<SearchResult>("workspace_search", { worldId, day, revision, mode, term, limit }));
+      (requestId) => invoke<SearchResult>("workspace_search", { worldId, day, revision, mode, term, limit, requestId }));
   }
 
   queryForm.addEventListener("submit", (event) => {
@@ -841,7 +880,7 @@ export async function showAuthorWorkspace(
         limit: query.limit,
       };
       runQuery("Replaying saved historical predicates…",
-        () => invoke<SearchResult>("workspace_composite_query", { request }));
+        (requestId) => invoke<SearchResult>("workspace_composite_query", { request, requestId }));
     } else {
       field<HTMLInputElement>(queryForm, "term").value = query.term;
       field<HTMLSelectElement>(queryForm, "mode").value = query.mode;
@@ -927,7 +966,7 @@ export async function showAuthorWorkspace(
       limit: 100,
     };
     runQuery("Evaluating bounded historical predicates…",
-      () => invoke<SearchResult>("workspace_composite_query", { request }));
+      (requestId) => invoke<SearchResult>("workspace_composite_query", { request, requestId }));
   });
 
   saveComposite.addEventListener("click", () => {
@@ -981,7 +1020,7 @@ export async function showAuthorWorkspace(
       limit: 100,
     };
     runQuery("Finding explicitly recorded historical event participation…",
-      () => invoke<SearchResult>("workspace_query_participant_events", { request }));
+      (requestId) => invoke<SearchResult>("workspace_query_participant_events", { request, requestId }));
   });
 
   pathForm.addEventListener("submit", (event) => {
@@ -999,7 +1038,7 @@ export async function showAuthorWorkspace(
       limit: 100,
     };
     runQuery("Exploring historical relationship paths…",
-      () => invoke<SearchResult>("workspace_query_path", { request }));
+      (requestId) => invoke<SearchResult>("workspace_query_path", { request, requestId }));
   });
 
   async function refreshWorlds(preferred = worldSelect.value) {
