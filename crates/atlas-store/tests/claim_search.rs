@@ -235,9 +235,21 @@ fn claim_fts_rebuild_backup_migration_and_saved_replay() -> Result<(), Error> {
     let mut store = Store::open(&path)?;
     let world = store.create_world("Archive", Scope::Author)?;
     let (_event, _source, account, first) = seed(&mut store, &world)?;
-    let saved = store.save_named_label_query(SaveNamedLabelQuery {
+    let legacy = store.save_named_label_query(SaveNamedLabelQuery {
         world_id: world.id,
         expected: first,
+        query_id: None,
+        name: "Search event names",
+        spec: &QuerySpec {
+            filter: QueryFilter::FullTextPhrase("Hearing".into()),
+            ..query("obsidian ledger")
+        },
+        command_id: Uuid::new_v4(),
+        scope: Scope::Author,
+    })?;
+    let saved = store.save_named_label_query(SaveNamedLabelQuery {
+        world_id: world.id,
+        expected: legacy.recorded_at,
         query_id: None,
         name: "Search the statements",
         spec: &query("obsidian ledger"),
@@ -246,10 +258,12 @@ fn claim_fts_rebuild_backup_migration_and_saved_replay() -> Result<(), Error> {
     })?;
     let current = saved.recorded_at;
     let definitions = store.saved_label_queries(world.id, current, Scope::Author)?;
-    assert_eq!(definitions[0].spec, query("obsidian ledger"));
+    assert_eq!(definitions.len(), 2);
+    let claim_definition = definitions.iter().find(|item| item.id == saved.id).unwrap();
+    assert_eq!(claim_definition.spec, query("obsidian ledger"));
     assert_eq!(
         store
-            .execute_query(&definitions[0].spec, context(&world, current, 10))?
+            .execute_query(&claim_definition.spec, context(&world, current, 10))?
             .rows[0]
             .object,
         account
@@ -293,6 +307,10 @@ fn claim_fts_rebuild_backup_migration_and_saved_replay() -> Result<(), Error> {
              FOREIGN KEY(world_id, query_id) REFERENCES saved_queries(world_id, id),
              FOREIGN KEY(world_id, revision) REFERENCES author_revisions(world_id, revision)
          ) STRICT;
+         INSERT INTO saved_query_versions_v10
+             (world_id, query_id, revision, name, schema_version, filter_kind, filter_text, result_limit)
+         SELECT world_id, query_id, revision, name, schema_version, filter_kind, filter_text, result_limit
+         FROM saved_query_versions WHERE filter_kind <> 'claimtext';
          DROP TABLE saved_query_versions;
          ALTER TABLE saved_query_versions_v10 RENAME TO saved_query_versions;
          PRAGMA user_version = 10;",
@@ -306,6 +324,10 @@ fn claim_fts_rebuild_backup_migration_and_saved_replay() -> Result<(), Error> {
             .object,
         account
     );
+    let preserved = upgraded.saved_label_queries(world.id, current, Scope::Author)?;
+    assert_eq!(preserved.len(), 1);
+    assert_eq!(preserved[0].id, legacy.id);
+    assert!(matches!(preserved[0].spec.filter, QueryFilter::FullTextPhrase(_)));
     upgraded.verify_foreign_keys(Scope::Author)?;
     Ok(())
 }
