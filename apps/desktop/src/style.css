@@ -104,6 +104,15 @@ button:disabled { opacity: 0.55; cursor: default; }
   .editor-forms { grid-template-columns: 1fr; }
 }
 
+.query-panel { padding: 0.85rem; border: 1px solid var(--border); border-radius: 0.45rem; margin: 0.75rem 0 1rem; }
+.query-panel h3 { margin-bottom: 0.75rem; }
+.query-form { display: grid; grid-template-columns: minmax(12rem, 2fr) minmax(10rem, 1fr) auto; gap: 0.7rem; align-items: end; }
+#author-query-results { list-style: none; display: grid; gap: 0.35rem; margin: 0.65rem 0 0; padding: 0; }
+#author-query-results li { overflow-wrap: anywhere; }
+#author-query-results button { text-align: left; width: 100%; }
+#author-query-results span { display: block; padding: 0.4rem 0.65rem; color: var(--muted); }
+@media (max-width: 760px) { .query-form { grid-template-columns: 1fr; } }
+
 #world-definitions { margin: 0; padding-left: 1.2rem; overflow-wrap: anywhere; }
 #world-definitions li + li { margin-top: 0.35rem; }
 #record-details label { margin: 0.65rem 0 0.35rem; }
