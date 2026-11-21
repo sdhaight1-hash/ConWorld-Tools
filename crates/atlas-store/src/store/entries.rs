@@ -278,7 +278,10 @@ fn replace_public_page_index(
 ) -> Result<(), Error> {
     conn.execute(
         "DELETE FROM public_page_search_documents WHERE world_id=?1 AND entry_id=?2",
-        params![document.entry.world.0.as_bytes(), document.entry.id.0.as_bytes()],
+        params![
+            document.entry.world.0.as_bytes(),
+            document.entry.id.0.as_bytes()
+        ],
     )?;
     if published && let Some(text) = document.public_index_text()? {
         conn.execute(

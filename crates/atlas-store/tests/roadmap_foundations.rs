@@ -1029,8 +1029,12 @@ fn public_index_is_selective_rebuilt_and_revoked_atomically() -> Result<(), Erro
         },
     };
     for person in &people {
-        author.revision =
-            store.save_entry_layout(author, &page(*person, "Routine notice"), true, Uuid::new_v4())?;
+        author.revision = store.save_entry_layout(
+            author,
+            &page(*person, "Routine notice"),
+            true,
+            Uuid::new_v4(),
+        )?;
     }
     let target = page(id(&world, 1), "A rare Étoile \"quoted\" entry");
     author.revision = store.save_entry_layout(author, &target, true, Uuid::new_v4())?;
@@ -1046,8 +1050,16 @@ fn public_index_is_selective_rebuilt_and_revoked_atomically() -> Result<(), Erro
     assert_eq!(expected.matches.len(), 1);
     assert_eq!(expected.matches[0].entry, target.entry);
     assert!(!expected.truncated);
-    assert!(find(&store, author, "Confidential needle")?.matches.is_empty());
-    assert!(find(&store, author, "Unlisted author label")?.matches.is_empty());
+    assert!(
+        find(&store, author, "Confidential needle")?
+            .matches
+            .is_empty()
+    );
+    assert!(
+        find(&store, author, "Unlisted author label")?
+            .matches
+            .is_empty()
+    );
     store.rebuild_search_index(Scope::Author)?;
     assert_eq!(find(&store, author, "étoile \"quoted\"")?, expected);
     drop(store);
