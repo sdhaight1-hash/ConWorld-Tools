@@ -44,7 +44,7 @@ A user-supplied screenshot dated 2026-11-20 shows `ERR_CONNECTION_REFUSED` insid
 
 **Direct standalone debug executable:** build the frontend from `apps/desktop` using `npm ci && npm run build`, then run `cargo build --locked -p atlas-desktop` at repository root. The crate now enables `custom-protocol` by default, so `target/debug/atlas-desktop.exe` loads embedded assets even without a Vite server. Old executables must be rebuilt. An initial build without `apps/desktop/dist` can fail at compile time; this is preferable to silently opening a broken WebView.
 
-**Regression controls:** Tauri devUrl, Vite bind host/port and CSP WebSocket origin all use IPv4 loopback `127.0.0.1:1420`. A Node test checks this static contract. CI now compiles the Windows standalone desktop **with Cargo defaults** and runs the native WebView2 smoke; previously CI explicitly enabled custom-protocol, masking behavior of a direct build.
+**Regression controls:** Tauri devUrl, Vite bind host/port and CSP WebSocket origin all use IPv4 loopback `127.0.0.1:1420`. A Node test checks this static contract; a separate short live-server smoke launches Vite, requests `/` and `/src/main.ts` on the configured loopback address, then shuts it down. CI now compiles the Windows standalone desktop **with Cargo defaults** and runs the native WebView2 smoke; previously CI explicitly enabled custom-protocol, masking behavior of a direct build.
 
 If `tauri dev` still cannot load, first inspect the Vite terminal and the reachability of `http://127.0.0.1:1420` from the affected machine. Do not paper over server failures with retry loops or by disabling security policy. A Windows runtime reproduction of the original screenshot remains necessary to prove the exact user-host cause.
 
