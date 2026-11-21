@@ -126,7 +126,10 @@ fn fts_phrase_indexes_current_version_without_resurrecting_corrections_or_other_
         ..view(&world, second, 20)
     };
     assert_eq!(
-        store.execute_query(&phrase("Alice Vale"), child)?.rows.len(),
+        store
+            .execute_query(&phrase("Alice Vale"), child)?
+            .rows
+            .len(),
         2,
         "later main-line corrections must not rewrite a pinned fork"
     );
