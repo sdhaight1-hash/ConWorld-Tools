@@ -1263,6 +1263,129 @@ fn saved_canvas_binding_pins_definition_and_replays_live_author_history() -> Res
 }
 
 #[test]
+fn caption_search_reauthorizes_destinations_without_resaving_sources() -> Result<(), Error> {
+    use atlas_store::{layout::ObjectLink, query::QueryControl};
+
+    let dir = tempfile::tempdir()?;
+    let path = dir.path().join("captions.sqlite");
+    let mut store = Store::open(&path)?;
+    let world = seed(&mut store)?;
+    let mut author = view(&world, 13);
+    let alice = id(&world, 1);
+    let future = id(&world, 7);
+    let block = |audience, content| LayoutElement {
+        id: ElementId(Uuid::new_v4()),
+        audience,
+        content,
+    };
+    let caption = |label: &str| {
+        block(
+            ClaimAudience::Public,
+            ElementContent::ObjectLink(ObjectLink {
+                target: future,
+                label: label.into(),
+            }),
+        )
+    };
+    let visible = caption("Étoile \"quoted\"");
+    let element = visible.id;
+    let mut source = LayoutDocument {
+        schema_version: LAYOUT_SCHEMA_VERSION,
+        entry: alice,
+        root: block(
+            ClaimAudience::Public,
+            ElementContent::Stack(vec![
+                visible,
+                block(
+                    ClaimAudience::Author,
+                    ElementContent::Stack(vec![caption("Secret étoile")]),
+                ),
+            ]),
+        ),
+    };
+    let target = LayoutDocument {
+        schema_version: LAYOUT_SCHEMA_VERSION,
+        entry: future,
+        root: block(ClaimAudience::Public, ElementContent::Stack(vec![])),
+    };
+    let public = |view| ViewContext {
+        scope: Scope::Public,
+        ..view
+    };
+    let control = QueryControl::new(std::time::Duration::from_secs(10))?;
+    let find = |store: &Store, context, term, limit| {
+        store.search_public_pages(public(context), term, limit, &control)
+    };
+    author.revision = store.save_entry_layout(author, &source, true, Uuid::new_v4())?;
+    assert!(find(&store, author, "étoile", 1)?.matches.is_empty());
+    assert!(
+        store
+            .search_entry_text(public(author), alice, "étoile", 1)?
+            .unwrap()
+            .matches
+            .is_empty()
+    );
+    author.revision = store.save_entry_layout(author, &target, true, Uuid::new_v4())?;
+    let released = author;
+    let found = find(&store, author, "ÉTOILE \"quoted\"", 1)?;
+    assert_eq!(found.matches.len(), 1);
+    assert_eq!(found.matches[0].entry, alice);
+    assert_eq!(found.matches[0].element, element);
+    assert_eq!(found.matches[0].text, "Étoile \"quoted\"");
+    assert!(!found.truncated);
+    assert_eq!(find(&store, author, "ét", 1)?, found);
+    assert_eq!(find(&store, author, "étoile", 1)?, found);
+    assert!(find(&store, author, "secret", 1)?.matches.is_empty());
+    let local = store
+        .search_entry_text(public(author), alice, "étoile", 1)?
+        .unwrap();
+    assert_eq!(local.matches, vec![(element, "Étoile \"quoted\"".into())]);
+    assert!(!local.truncated);
+    let early = ViewContext {
+        day: WorldDay(11),
+        ..author
+    };
+    assert!(find(&store, early, "étoile", 1)?.matches.is_empty());
+    assert!(
+        store
+            .search_entry_text(author, alice, "secret", 1)?
+            .unwrap()
+            .matches
+            .len()
+            == 1
+    );
+    // Simulate an actual schema-26 database without any caption index.
+    drop(store);
+    let conn = rusqlite::Connection::open(&path)?;
+    conn.execute_batch(
+        "DROP TRIGGER entry_caption_ai;
+         DROP TRIGGER entry_caption_ad;
+         DROP TABLE entry_caption_fts;
+         DROP TABLE entry_caption_candidates;
+         PRAGMA user_version=26;",
+    )?;
+    drop(conn);
+    let mut store = Store::open(&path)?;
+    assert_eq!(find(&store, author, "étoile", 1)?, found);
+    store.rebuild_search_index(Scope::Author)?;
+    assert_eq!(find(&store, author, "étoile", 1)?, found);
+    author.revision = store.save_entry_layout(author, &target, false, Uuid::new_v4())?;
+    assert!(find(&store, author, "étoile", 1)?.matches.is_empty());
+    assert!(matches!(
+        find(&store, released, "étoile", 1),
+        Err(Error::InvalidRevision)
+    ));
+    author.revision = store.save_entry_layout(author, &target, true, Uuid::new_v4())?;
+    assert_eq!(find(&store, author, "étoile", 1)?, found);
+    if let ElementContent::Stack(children) = &mut source.root.content {
+        children.clear();
+    }
+    author.revision = store.save_entry_layout(author, &source, true, Uuid::new_v4())?;
+    assert!(find(&store, author, "étoile", 1)?.matches.is_empty());
+    Ok(())
+}
+
+#[test]
 fn authored_links_follow_publication_and_historical_backlinks() -> Result<(), Error> {
     use atlas_store::{layout::ObjectLink, query::QueryControl};
 
