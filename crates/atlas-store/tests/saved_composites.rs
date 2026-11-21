@@ -1,6 +1,6 @@
 //! Versioned composite query definitions: typed ASTs, not cached results.
 use atlas_store::{
-    query::{ObjectKindFilter, QueryFilter, QuerySpec, SaveNamedLabelQuery, QUERY_SCHEMA_VERSION},
+    query::{ObjectKindFilter, QUERY_SCHEMA_VERSION, QueryFilter, QuerySpec, SaveNamedLabelQuery},
     *,
 };
 use tempfile::tempdir;
@@ -90,61 +90,146 @@ fn composite_saved_queries_keep_history_replay_and_stable_ids() -> Result<(), Er
         world.revision,
         vec![
             Change::Create(alice, record("Alice", ObjectData::Person, None)),
-            Change::Create(source, record("Court journal", ObjectData::Source {
-                citation: "Folio 10".into(),
-            }, None)),
-            Change::Create(event, record("Trial", ObjectData::HistoricalEvent {
-                occurrence: EventDate::Exact(WorldDay(10)),
-            }, None)),
+            Change::Create(
+                source,
+                record(
+                    "Court journal",
+                    ObjectData::Source {
+                        citation: "Folio 10".into(),
+                    },
+                    None,
+                ),
+            ),
+            Change::Create(
+                event,
+                record(
+                    "Trial",
+                    ObjectData::HistoricalEvent {
+                        occurrence: EventDate::Exact(WorldDay(10)),
+                    },
+                    None,
+                ),
+            ),
         ],
     ))?;
-    let record_claim = |label: &str| record(label, ObjectData::Claim {
-        subject: event,
-        predicate: "testified".into(),
-        statement: "Ledger was missing".into(),
-        audience: ClaimAudience::Author,
-    }, Some(source));
+    let record_claim = |label: &str| {
+        record(
+            label,
+            ObjectData::Claim {
+                subject: event,
+                predicate: "testified".into(),
+                statement: "Ledger was missing".into(),
+                audience: ClaimAudience::Author,
+            },
+            Some(source),
+        )
+    };
     let documented = store.apply(&command(
         &world,
         created,
         vec![Change::Create(claim, record_claim("Witness note"))],
     ))?;
-    let legacy = save(&mut store, &world, documented, None,
-        "Search witness labels", &spec(QueryFilter::LabelContains("Witness".into())))?;
+    let legacy = save(
+        &mut store,
+        &world,
+        documented,
+        None,
+        "Search witness labels",
+        &spec(QueryFilter::LabelContains("Witness".into())),
+    )?;
     let composite = spec(source_filter(source));
-    let saved = save(&mut store, &world, legacy.recorded_at, None,
-        "Claims cited to court", &composite)?;
+    let saved = save(
+        &mut store,
+        &world,
+        legacy.recorded_at,
+        None,
+        "Claims cited to court",
+        &composite,
+    )?;
     assert_eq!(saved.spec, composite);
-    assert_eq!(store.saved_label_queries(world.id, legacy.recorded_at, Scope::Author)?.len(), 1);
+    assert_eq!(
+        store
+            .saved_label_queries(world.id, legacy.recorded_at, Scope::Author)?
+            .len(),
+        1
+    );
     let definitions = store.saved_label_queries(world.id, saved.recorded_at, Scope::Author)?;
     assert_eq!(definitions.len(), 2);
     let chosen = definitions.iter().find(|item| item.id == saved.id).unwrap();
     assert_eq!(chosen.spec, composite);
-    assert_eq!(store.execute_query(&chosen.spec, view(&world, saved.recorded_at))?.rows[0].object, claim);
+    assert_eq!(
+        store
+            .execute_query(&chosen.spec, view(&world, saved.recorded_at))?
+            .rows[0]
+            .object,
+        claim
+    );
     let revision = store.apply(&command(
-        &world, saved.recorded_at,
+        &world,
+        saved.recorded_at,
         vec![Change::Correct(claim, record_claim("Superseded note"))],
     ))?;
-    assert!(store.execute_query(&chosen.spec, view(&world, revision))?.rows.is_empty(),
-        "saved query must rerun against new content, never cache old results");
-    assert_eq!(store.execute_query(&chosen.spec, view(&world, saved.recorded_at))?.rows[0].object, claim);
+    assert!(
+        store
+            .execute_query(&chosen.spec, view(&world, revision))?
+            .rows
+            .is_empty(),
+        "saved query must rerun against new content, never cache old results"
+    );
+    assert_eq!(
+        store
+            .execute_query(&chosen.spec, view(&world, saved.recorded_at))?
+            .rows[0]
+            .object,
+        claim
+    );
     let revised_spec = spec(QueryFilter::Or(vec![
         QueryFilter::Kind(ObjectKindFilter::Person),
         QueryFilter::ExactLabel("Superseded note".into()),
     ]));
-    let revised = save(&mut store, &world, revision, Some(saved.id), "People and corrected notes", &revised_spec)?;
+    let revised = save(
+        &mut store,
+        &world,
+        revision,
+        Some(saved.id),
+        "People and corrected notes",
+        &revised_spec,
+    )?;
     assert_eq!(revised.id, saved.id);
-    assert_eq!(store.saved_label_queries(world.id, saved.recorded_at, Scope::Author)?
-        .iter().find(|item| item.id == saved.id).unwrap().spec, composite);
-    assert_eq!(store.saved_label_queries(world.id, revised.recorded_at, Scope::Author)?
-        .iter().find(|item| item.id == saved.id).unwrap().spec, revised_spec);
+    assert_eq!(
+        store
+            .saved_label_queries(world.id, saved.recorded_at, Scope::Author)?
+            .iter()
+            .find(|item| item.id == saved.id)
+            .unwrap()
+            .spec,
+        composite
+    );
+    assert_eq!(
+        store
+            .saved_label_queries(world.id, revised.recorded_at, Scope::Author)?
+            .iter()
+            .find(|item| item.id == saved.id)
+            .unwrap()
+            .spec,
+        revised_spec
+    );
     let foreign = ObjectRef::new(other.id);
     assert!(matches!(
-        save(&mut store, &world, revised.recorded_at, None, "Cross-world",
-            &spec(QueryFilter::Not(Box::new(QueryFilter::HasSource(foreign))))),
+        save(
+            &mut store,
+            &world,
+            revised.recorded_at,
+            None,
+            "Cross-world",
+            &spec(QueryFilter::Not(Box::new(QueryFilter::HasSource(foreign))))
+        ),
         Err(Error::WrongWorld)
     ));
-    assert_eq!(store.world(world.id, Scope::Author)?.revision, revised.recorded_at);
+    assert_eq!(
+        store.world(world.id, Scope::Author)?.revision,
+        revised.recorded_at
+    );
     assert!(matches!(
         store.save_named_label_query(SaveNamedLabelQuery {
             world_id: world.id,
@@ -160,8 +245,15 @@ fn composite_saved_queries_keep_history_replay_and_stable_ids() -> Result<(), Er
     store.backup_to(&backup, Scope::Author)?;
     drop(store);
     let reopened = Store::open(&backup)?;
-    assert_eq!(reopened.saved_label_queries(world.id, revised.recorded_at, Scope::Author)?
-        .iter().find(|item| item.id == saved.id).unwrap().spec, revised_spec);
+    assert_eq!(
+        reopened
+            .saved_label_queries(world.id, revised.recorded_at, Scope::Author)?
+            .iter()
+            .find(|item| item.id == saved.id)
+            .unwrap()
+            .spec,
+        revised_spec
+    );
     reopened.verify_foreign_keys(Scope::Author)?;
     Ok(())
 }
@@ -172,8 +264,14 @@ fn schema_eleven_upgrade_preserves_legacy_query_versions() -> Result<(), Error> 
     let path = dir.path().join("schema-11.sqlite");
     let mut store = Store::open(&path)?;
     let world = store.create_world("Old world", Scope::Author)?;
-    let before = save(&mut store, &world, world.revision, None,
-        "Old name search", &spec(QueryFilter::FullTextPhrase("Vale".into())))?;
+    let before = save(
+        &mut store,
+        &world,
+        world.revision,
+        None,
+        "Old name search",
+        &spec(QueryFilter::FullTextPhrase("Vale".into())),
+    )?;
     drop(store);
     let conn = rusqlite::Connection::open(&path)?;
     conn.execute_batch(

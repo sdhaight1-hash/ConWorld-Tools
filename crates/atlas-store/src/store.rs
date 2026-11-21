@@ -8,7 +8,8 @@ use uuid::Uuid;
 
 use crate::discovery::{MentionCandidate, MentionDisposition, ReviewMention, matching_spans};
 use crate::query::{
-    QUERY_SCHEMA_VERSION, PredicateInput, QueryFilter, QuerySpec, SaveNamedLabelQuery, SavedLabelQuery, validate_predicate,
+    PredicateInput, QUERY_SCHEMA_VERSION, QueryFilter, QuerySpec, SaveNamedLabelQuery,
+    SavedLabelQuery, validate_predicate,
 };
 use crate::*;
 

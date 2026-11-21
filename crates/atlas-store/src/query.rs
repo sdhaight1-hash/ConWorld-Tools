@@ -1,6 +1,6 @@
 //! Phase 3 typed reads over a single authorized historical snapshot.
-use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use crate::graph::walk;
@@ -81,7 +81,12 @@ pub enum PredicateInput {
 impl PredicateInput {
     /// Decode a typed predicate with the same depth/node rules as the
     /// authoritative planner. Only its exact saved world supplies references.
-    pub fn into_filter(self, world: WorldId, depth: usize, nodes: &mut usize) -> Result<QueryFilter, Error> {
+    pub fn into_filter(
+        self,
+        world: WorldId,
+        depth: usize,
+        nodes: &mut usize,
+    ) -> Result<QueryFilter, Error> {
         *nodes += 1;
         if depth > MAX_PREDICATE_DEPTH || *nodes > MAX_PREDICATE_NODES {
             return Err(Error::QueryBudgetExceeded);
@@ -92,24 +97,34 @@ impl PredicateInput {
             Self::ObjectKind { kind } => QueryFilter::Kind(kind),
             Self::HasSource { source_id } => QueryFilter::HasSource(ObjectRef {
                 world,
-                id: crate::ObjectId(Uuid::parse_str(&source_id)
-                    .map_err(|_| Error::InvalidInput("predicate source ID"))?),
+                id: crate::ObjectId(
+                    Uuid::parse_str(&source_id)
+                        .map_err(|_| Error::InvalidInput("predicate source ID"))?,
+                ),
             }),
-            Self::And { filters } | Self::Or { filters } if filters.len() > MAX_BOOLEAN_CHILDREN => {
+            Self::And { filters } | Self::Or { filters }
+                if filters.len() > MAX_BOOLEAN_CHILDREN =>
+            {
                 return Err(Error::QueryBudgetExceeded);
             }
             Self::And { filters } | Self::Or { filters } if filters.len() < 2 => {
                 return Err(Error::InvalidInput("boolean predicate children"));
             }
-            Self::And { filters } => QueryFilter::And(filters.into_iter()
-                .map(|item| item.into_filter(world, depth + 1, nodes))
-                .collect::<Result<Vec<_>, _>>()?),
-            Self::Or { filters } => QueryFilter::Or(filters.into_iter()
-                .map(|item| item.into_filter(world, depth + 1, nodes))
-                .collect::<Result<Vec<_>, _>>()?),
-            Self::Not { filter } => QueryFilter::Not(Box::new(
-                filter.into_filter(world, depth + 1, nodes)?,
-            )),
+            Self::And { filters } => QueryFilter::And(
+                filters
+                    .into_iter()
+                    .map(|item| item.into_filter(world, depth + 1, nodes))
+                    .collect::<Result<Vec<_>, _>>()?,
+            ),
+            Self::Or { filters } => QueryFilter::Or(
+                filters
+                    .into_iter()
+                    .map(|item| item.into_filter(world, depth + 1, nodes))
+                    .collect::<Result<Vec<_>, _>>()?,
+            ),
+            Self::Not { filter } => {
+                QueryFilter::Not(Box::new(filter.into_filter(world, depth + 1, nodes)?))
+            }
         })
     }
 
@@ -124,11 +139,15 @@ impl PredicateInput {
                 source_id: source.id.0.to_string(),
             },
             QueryFilter::And(filters) => Self::And {
-                filters: filters.iter().map(Self::from_filter)
+                filters: filters
+                    .iter()
+                    .map(Self::from_filter)
                     .collect::<Result<Vec<_>, _>>()?,
             },
             QueryFilter::Or(filters) => Self::Or {
-                filters: filters.iter().map(Self::from_filter)
+                filters: filters
+                    .iter()
+                    .map(Self::from_filter)
                     .collect::<Result<Vec<_>, _>>()?,
             },
             QueryFilter::Not(filter) => Self::Not {

@@ -9,7 +9,10 @@ use atlas_store::{
     EventRole, ObjectData, ObjectId, ObjectRef, Record, Scope, Store, ValidInterval, VersionRef,
     ViewContext, World, WorldDay, WorldId,
     discovery::{MentionDisposition, ReviewMention},
-    query::{Direction, PredicateInput, QUERY_SCHEMA_VERSION, QueryFilter, QuerySpec, SaveNamedLabelQuery},
+    query::{
+        Direction, PredicateInput, QUERY_SCHEMA_VERSION, QueryFilter, QuerySpec,
+        SaveNamedLabelQuery,
+    },
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -463,7 +466,10 @@ impl AuthorWorkspace {
                     filter => (
                         "composite",
                         String::new(),
-                        Some(PredicateInput::from_filter(filter).map_err(|error| error.to_string())?),
+                        Some(
+                            PredicateInput::from_filter(filter)
+                                .map_err(|error| error.to_string())?,
+                        ),
                     ),
                 };
                 Ok(SavedQuerySummary {
@@ -487,7 +493,8 @@ impl AuthorWorkspace {
             "claimtext" => QueryFilter::ClaimFullTextPhrase(request.term),
             "composite" => {
                 let mut nodes = 0;
-                request.predicate
+                request
+                    .predicate
                     .ok_or("Missing typed composite search predicate")?
                     .into_filter(WorldId(id(&request.world_id)?), 0, &mut nodes)
                     .map_err(|error| error.to_string())?
@@ -685,11 +692,10 @@ impl AuthorWorkspace {
 
     fn composite_query(&self, request: CompositeQueryInput) -> Result<SearchSummary, String> {
         let mut nodes = 0;
-        let predicate =
-            request
-                .predicate
-                .into_filter(WorldId(id(&request.world_id)?), 0, &mut nodes)
-                .map_err(|error| error.to_string())?;
+        let predicate = request
+            .predicate
+            .into_filter(WorldId(id(&request.world_id)?), 0, &mut nodes)
+            .map_err(|error| error.to_string())?;
         self.execute_filter(
             &request.world_id,
             request.day,
