@@ -1739,14 +1739,8 @@ mod tests {
             tags: String::new(),
             day: 0,
         })?;
-        let references = workspace.search(
-            &world.id,
-            0,
-            None,
-            "backlinks",
-            &matches.rows[0].id,
-            20,
-        )?;
+        let references =
+            workspace.search(&world.id, 0, None, "backlinks", &matches.rows[0].id, 20)?;
         assert_eq!(references.rows.len(), 1);
         assert_eq!(references.rows[0].kind, "relationship");
         assert!(
