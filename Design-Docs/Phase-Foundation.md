@@ -25,6 +25,23 @@ The first fixture in each row is the smallest dependency-ready slice. Keep stabl
 
 The Northbridge fixture is the common scenario. Extend it with each delivered slice and reuse canonical Rust data across desktop, renderer, query and publication surfaces.
 
+## Executable roadmap foundations
+
+| Phase | Reusable Rust code | Boundary of this slice |
+| --- | --- | --- |
+| 0 | [Desktop platform and renderer](../apps/desktop/src-tauri/src/main.rs) | Existing Tauri shell, Canvas2D fallback and platform checks. |
+| 1 | [Versioned store](../crates/atlas-store/src/store.rs) | Existing SQLite persistence, calendars, fork history, transactions and backups. |
+| 2 | [Author workspace](../apps/desktop/src-tauri/src/workspace.rs) | Existing relationship and event authoring, historical inspection and attributed effects. |
+| 3 | [Typed query service](../crates/atlas-store/src/query.rs) | Author snapshots support literal label search, ambiguous exact matches, explicit backlinks, typed roles and bounded typed traversal. FTS5, saved queries and a discovery UI are future work. |
+| 4 | [Layout and display projection](../crates/atlas-store/src/layout.rs) | Stable stack, text and query element IDs. Reparenting preserves bindings and inherited restrictions. A restricted projection skips hidden subtrees before evaluation. Layout storage and general authorized data bindings are future work. |
+| 5 | [Dated parentage](../crates/atlas-store/src/genealogy.rs) | Validates accepted biological, adoptive and legal links against visible people in an author snapshot. Accepted biological cycles are rejected. Parentage persistence and the organization model are future work. |
+| 6 | [Conflict and causal traversal](../crates/atlas-store/src/conflict.rs) | Projects issue positions by day and follows supplied confirmed, sourced links between visible events within a budget. Persistence, author editing and affiliation integration are future work. |
+| 7 | [Audience rules](../crates/atlas-store/src/access.rs) | Existing evidence reads and layout compilation use the same policy. Stronger release rules and search/cache invalidation are future work. |
+| 8 | [Fictional inheritance](../crates/atlas-store/src/inheritance.rs) | Two dimensionless segments derived from accepted biological parentage, stable IDs, a seed and a model version. Legal/adoptive parentage has no effect. Population panels and relative matching are future work. |
+| 9 | [Archive inspection](../crates/atlas-store/src/archive.rs) | Read-only inspection of SQLite backups checks application ID, supported schema, integrity and foreign keys, and returns a versioned manifest. Asset packaging and managed restore are future work. |
+
+The [Northbridge foundation tests](../crates/atlas-store/tests/roadmap_foundations.rs) exercise these APIs together. Run them with `cargo test --locked -p atlas-store --test roadmap_foundations`. No new database migration or dependency is needed for this slice.
+
 ## Desktop workspace integration
 
 The Phase One branch builds on the desktop and WASM renderer from Phase Zero. The root workspace has one lockfile for `atlas-desktop`, `atlas-renderer`, and `atlas-store`. The store remains a Rust library. The desktop opens the Northbridge platform fixture and supports persistent author worlds through Tauri IPC.

@@ -8,8 +8,8 @@ use uuid::Uuid;
 
 use crate::*;
 
-const APPLICATION_ID: i64 = 0x4357_4c44; // CWLD
-const SCHEMA_VERSION: i64 = 7;
+pub(crate) const APPLICATION_ID: i64 = 0x4357_4c44; // CWLD
+pub(crate) const SCHEMA_VERSION: i64 = 7;
 
 pub struct Store {
     conn: Connection,
@@ -558,12 +558,7 @@ impl Store {
             else {
                 continue;
             };
-            let visible = match (view.scope, audience) {
-                (Scope::Author, _) | (_, ClaimAudience::Public) => true,
-                (Scope::Character(viewer), ClaimAudience::Character(reader)) => viewer == reader,
-                _ => false,
-            };
-            if subject != event || !visible {
+            if subject != event || !access::can_view(view.scope, audience) {
                 continue;
             }
             let source = if view.scope == Scope::Author {
@@ -1093,7 +1088,7 @@ fn apply_change(
     Ok(())
 }
 
-fn verify_foreign_keys(conn: &Connection) -> Result<(), Error> {
+pub(crate) fn verify_foreign_keys(conn: &Connection) -> Result<(), Error> {
     let violation = conn
         .query_row("PRAGMA foreign_key_check", [], |row| row.get(0))
         .optional()?;
