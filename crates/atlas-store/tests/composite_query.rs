@@ -248,7 +248,7 @@ fn compound_validation_is_upfront_bounded_and_not_bypassable_by_boolean_short_ci
     let invalids = [
         QueryFilter::And(Vec::new()),
         QueryFilter::Or(vec![QueryFilter::Kind(ObjectKindFilter::Person)]),
-        QueryFilter::Not(Box::new(QueryFilter::FullTextPhrase("Alice".into()))),
+        QueryFilter::Not(Box::new(QueryFilter::FullTextPhrase(" ".into()))),
         QueryFilter::Or(vec![
             QueryFilter::Kind(ObjectKindFilter::Person),
             QueryFilter::Backlinks(foreign),
@@ -296,5 +296,137 @@ fn compound_validation_is_upfront_bounded_and_not_bypassable_by_boolean_short_ci
             )
             .is_err()
     );
+    Ok(())
+}
+
+#[test]
+fn indexed_compounds_preserve_exact_results_beyond_snapshot_budget() -> Result<(), Error> {
+    let mut store = Store::open(":memory:")?;
+    let world = store.create_world("Indexed archive", Scope::Author)?;
+    let person = ObjectRef::new(world.id);
+    let source = ObjectRef::new(world.id);
+    let event = ObjectRef::new(world.id);
+    let claim = ObjectRef::new(world.id);
+    let claim_record = |statement: &str| {
+        record(
+            "Witness notes",
+            Some(10),
+            ObjectData::Claim {
+                subject: event,
+                predicate: "testified".into(),
+                statement: statement.into(),
+                audience: ClaimAudience::Author,
+            },
+            Some(source),
+        )
+    };
+    let changes = vec![
+        Change::Create(
+            person,
+            record("Obsidian navigator", None, ObjectData::Person, None),
+        ),
+        Change::Create(
+            source,
+            record(
+                "Court journal",
+                None,
+                ObjectData::Source {
+                    citation: "Folio 23".into(),
+                },
+                None,
+            ),
+        ),
+        Change::Create(
+            event,
+            record(
+                "Trial",
+                Some(10),
+                ObjectData::HistoricalEvent {
+                    occurrence: EventDate::Exact(WorldDay(10)),
+                },
+                None,
+            ),
+        ),
+        Change::Create(claim, claim_record("The sealed ledger was found.")),
+    ];
+    let first = store.apply(&command(&world, world.revision, changes))?;
+    let conjunction = query(
+        QueryFilter::And(vec![
+            QueryFilter::ClaimFullTextPhrase("sealed ledger".into()),
+            QueryFilter::Kind(ObjectKindFilter::Claim),
+            QueryFilter::HasSource(source),
+            QueryFilter::Not(Box::new(QueryFilter::LabelContains("excluded".into()))),
+        ]),
+        100,
+    );
+    let disjunction = query(
+        QueryFilter::Or(vec![
+            conjunction.filter.clone(),
+            QueryFilter::FullTextPhrase("obsidian navigator".into()),
+        ]),
+        100,
+    );
+    let negated = query(
+        QueryFilter::Not(Box::new(QueryFilter::FullTextPhrase("obsidian navigator".into()))),
+        100,
+    );
+    assert_eq!(
+        store.execute_query(&negated, view(&world, first, 20))?.rows.len(),
+        3
+    );
+    let mut changes = Vec::new();
+    for number in 0..2_010 {
+        changes.push(Change::Create(
+            ObjectRef::new(world.id),
+            record(
+                &format!("Ordinary inhabitant {number}"),
+                None,
+                ObjectData::Person,
+                None,
+            ),
+        ));
+    }
+    let large = store.apply(&command(&world, first, changes))?;
+    assert!(matches!(
+        store.objects_at(view(&world, large, 20), 2_000),
+        Err(Error::QueryBudgetExceeded)
+    ));
+    assert_eq!(
+        store.execute_query(&conjunction, view(&world, large, 20))?.rows[0].object,
+        claim
+    );
+    let union = store.execute_query(&disjunction, view(&world, large, 20))?;
+    assert_eq!(union.rows.len(), 2);
+    assert!(union.rows.iter().any(|row| row.object == person));
+    assert!(union.rows.iter().any(|row| row.object == claim));
+    assert!(
+        store.execute_query(&conjunction, view(&world, large, 9))?.rows.is_empty()
+    );
+    assert!(matches!(
+        store.execute_query(&negated, view(&world, large, 20)),
+        Err(Error::QueryBudgetExceeded)
+    ));
+    let corrected = store.apply(&command(
+        &world,
+        large,
+        vec![Change::Correct(claim, claim_record("The document was destroyed."))],
+    ))?;
+    assert!(
+        store.execute_query(&conjunction, view(&world, corrected, 20))?.rows.is_empty()
+    );
+    assert_eq!(
+        store.execute_query(&conjunction, view(&world, large, 20))?.rows[0].object,
+        claim
+    );
+    assert!(matches!(
+        store.execute_query(
+            &conjunction,
+            ViewContext {
+                scope: Scope::Public,
+                ..view(&world, corrected, 20)
+            }
+        ),
+        Err(Error::CapabilityDenied)
+    ));
     Ok(())
 }

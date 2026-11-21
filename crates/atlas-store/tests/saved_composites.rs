@@ -50,6 +50,7 @@ fn source_filter(source: ObjectRef) -> QueryFilter {
     QueryFilter::And(vec![
         QueryFilter::Kind(ObjectKindFilter::Claim),
         QueryFilter::HasSource(source),
+        QueryFilter::ClaimFullTextPhrase("Ledger was missing".into()),
         QueryFilter::Not(Box::new(QueryFilter::LabelContains("superseded".into()))),
     ])
 }
