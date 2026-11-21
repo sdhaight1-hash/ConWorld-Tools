@@ -161,8 +161,9 @@ fn at_03_04_05_08_betrayal_preserves_directional_history_and_actor_evidence() ->
                     "Beatrice disclosed the letter",
                 ),
             ),
-            Change::EventEffect {
+            Change::ActionEffect {
                 event: betrayal,
+                action,
                 target: alice_feels,
                 record: dated(
                     time,
@@ -237,6 +238,7 @@ fn at_03_04_05_08_betrayal_preserves_directional_history_and_actor_evidence() ->
         .effect_on(alice_feels, view(&world, second, time))?
         .unwrap();
     assert_eq!(effect.event.object, betrayal);
+    assert_eq!(effect.action.unwrap().object, action);
     assert_eq!(effect.before.recorded_at, first);
     assert_eq!(effect.after.recorded_at, second);
     assert!(

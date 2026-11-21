@@ -208,8 +208,9 @@ impl NorthbridgeHistory {
                         Some(source),
                     ),
                 ),
-                Change::EventEffect {
+                Change::ActionEffect {
                     event,
+                    action,
                     target: alice_bond,
                     record: record(
                         "Alice distrusts Beatrice",
@@ -293,7 +294,7 @@ impl NorthbridgeHistory {
             }
         }
         let cause = if let Some(effect) = store.effect_on(self.alice_bond, view)? {
-            if effect.event.object != self.event {
+            if effect.event.object != self.event || effect.action.map(|version| version.object) != Some(self.action) {
                 return Err(Error::Integrity("unexpected effect origin".into()));
             }
             let role = store
