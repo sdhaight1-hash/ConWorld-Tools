@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::path::Path;
 use std::time::Duration;
@@ -9,7 +9,7 @@ use uuid::Uuid;
 use crate::*;
 
 pub(crate) const APPLICATION_ID: i64 = 0x4357_4c44; // CWLD
-pub(crate) const SCHEMA_VERSION: i64 = 7;
+pub(crate) const SCHEMA_VERSION: i64 = 8;
 
 pub struct Store {
     conn: Connection,
@@ -60,12 +60,128 @@ impl Store {
         }
         if version < 7 {
             tx.execute_batch(include_str!("../migrations/0007.sql"))?;
+        }
+        if version < 8 {
+            tx.execute_batch(include_str!("../migrations/0008.sql"))?;
             verify_foreign_keys(&tx)?;
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
         tx.commit()?;
         conn.pragma_update(None, "foreign_keys", true)?;
         Ok(Self { conn })
+    }
+
+    /// Reconstruct the disposable label index from canonical historical versions.
+    /// No author revision or object identity is changed.
+    pub fn rebuild_search_index(&mut self, scope: Scope) -> Result<(), Error> {
+        require_author(scope)?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        tx.execute("DELETE FROM object_search_documents", [])?;
+        tx.execute(
+            "INSERT INTO object_search_documents
+                (world_id, object_id, branch_id, state_revision, revision, label)
+             SELECT world_id, object_id, branch_id, state_revision, revision, label
+             FROM object_versions
+             ORDER BY world_id, object_id, branch_id, state_revision, revision",
+            [],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Indexed phrase search still resolves every candidate through the authoritative
+    /// branch/day/revision projection. Matching an obsolete version never returns its
+    /// current replacement. Raw index candidates are explicitly bounded.
+    pub(crate) fn indexed_phrase_at(
+        &self,
+        phrase: &str,
+        view: ViewContext,
+        limit: usize,
+    ) -> Result<crate::query::QueryResult, Error> {
+        require_author(view.scope)?;
+        let phrase = phrase.trim();
+        if phrase.is_empty() || phrase.len() > 800 {
+            return Err(Error::InvalidInput("full-text search phrase"));
+        }
+        // Quote the entire input as a literal FTS5 phrase: never accept FTS
+        // operators, SQL, or untrusted MATCH expressions from the UI.
+        let match_expression = format!("\"{}\"", phrase.replace('"', "\"\""));
+        let tx = self.conn.unchecked_transaction()?;
+        let world = load_world(&tx, view.world)?;
+        if view.revision < AuthorRevision(0) || view.revision > world.revision {
+            return Err(Error::InvalidRevision);
+        }
+        const CANDIDATE_BUDGET: i64 = 10_000;
+        let matches = {
+            let mut statement = tx.prepare(
+                "SELECT d.object_id, d.branch_id, d.state_revision, d.revision
+                 FROM object_search_fts
+                 JOIN object_search_documents d ON d.doc_id = object_search_fts.rowid
+                 WHERE d.world_id = ?1 AND object_search_fts MATCH ?2
+                 ORDER BY d.object_id, d.branch_id, d.state_revision, d.revision
+                 LIMIT ?3",
+            )?;
+            statement
+                .query_map(
+                    params![
+                        view.world.0.as_bytes(),
+                        match_expression,
+                        CANDIDATE_BUDGET + 1
+                    ],
+                    |row| {
+                        Ok((
+                            ObjectId(Uuid::from_bytes(row.get(0)?)),
+                            BranchId(Uuid::from_bytes(row.get(1)?)),
+                            row.get::<_, i64>(2)?,
+                            row.get::<_, i64>(3)?,
+                        ))
+                    },
+                )?
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        if matches.len() > CANDIDATE_BUDGET as usize {
+            return Err(Error::QueryBudgetExceeded);
+        }
+        let mut candidates: HashMap<ObjectId, HashSet<(BranchId, i64, i64)>> = HashMap::new();
+        for (object, branch, state_revision, revision) in matches {
+            candidates
+                .entry(object)
+                .or_default()
+                .insert((branch, state_revision, revision));
+        }
+        let mut rows = Vec::new();
+        for (id, matching_versions) in candidates {
+            let object = ObjectRef {
+                world: view.world,
+                id,
+            };
+            if let Some(version) =
+                resolve_object(&tx, object, view.branch, view.revision, view.day)?
+                && matching_versions.contains(&(
+                    version.source_branch,
+                    version.state_revision.0,
+                    version.recorded_at.0,
+                ))
+            {
+                rows.push(version);
+            }
+        }
+        rows.sort_by(|a, b| {
+            a.record
+                .label
+                .cmp(&b.record.label)
+                .then(a.object.id.0.cmp(&b.object.id.0))
+        });
+        let truncated = rows.len() > limit;
+        rows.truncate(limit);
+        tx.commit()?;
+        Ok(crate::query::QueryResult {
+            rows,
+            revision: view.revision,
+            truncated,
+        })
     }
 
     pub fn create_world(&mut self, name: &str, scope: Scope) -> Result<World, Error> {
