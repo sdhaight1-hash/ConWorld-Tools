@@ -71,6 +71,8 @@ pub enum ObjectKindFilter {
 pub enum PredicateInput {
     Contains { text: String },
     Exact { text: String },
+    FullText { text: String },
+    ClaimFullText { text: String },
     ObjectKind { kind: ObjectKindFilter },
     HasSource { source_id: String },
     And { filters: Vec<PredicateInput> },
@@ -94,6 +96,8 @@ impl PredicateInput {
         Ok(match self {
             Self::Contains { text } => QueryFilter::LabelContains(text),
             Self::Exact { text } => QueryFilter::ExactLabel(text),
+            Self::FullText { text } => QueryFilter::FullTextPhrase(text),
+            Self::ClaimFullText { text } => QueryFilter::ClaimFullTextPhrase(text),
             Self::ObjectKind { kind } => QueryFilter::Kind(kind),
             Self::HasSource { source_id } => QueryFilter::HasSource(ObjectRef {
                 world,
@@ -128,12 +132,14 @@ impl PredicateInput {
         })
     }
 
-    /// Encode only the allowed snapshot predicates; no raw SQL or nested
-    /// full-text/graph execution can be introduced through saved metadata.
+    /// Encode only the allowed typed predicates; no raw SQL or arbitrary
+    /// graph execution can be introduced through saved metadata.
     pub fn from_filter(filter: &QueryFilter) -> Result<Self, Error> {
         Ok(match filter {
             QueryFilter::LabelContains(text) => Self::Contains { text: text.clone() },
             QueryFilter::ExactLabel(text) => Self::Exact { text: text.clone() },
+            QueryFilter::FullTextPhrase(text) => Self::FullText { text: text.clone() },
+            QueryFilter::ClaimFullTextPhrase(text) => Self::ClaimFullText { text: text.clone() },
             QueryFilter::Kind(kind) => Self::ObjectKind { kind: *kind },
             QueryFilter::HasSource(source) => Self::HasSource {
                 source_id: source.id.0.to_string(),
@@ -213,11 +219,18 @@ impl Store {
         ) {
             let mut nodes = 0;
             validate_predicate(&spec.filter, view.world, 0, &mut nodes)?;
-            let objects = self.objects_at(view, 2_000)?;
-            let visible: HashSet<_> = objects.iter().map(|item| item.object).collect();
+            let mut plan = PredicatePlan::default();
+            let candidates = plan.collect(self, &spec.filter, view)?;
+            let objects = match candidates {
+                Some(ids) => ids
+                    .into_iter()
+                    .filter_map(|id| plan.rows.remove(&id))
+                    .collect(),
+                None => self.objects_at(view, 2_000)?,
+            };
             let mut rows: Vec<_> = objects
                 .into_iter()
-                .filter(|item| predicate_matches(&spec.filter, item, &visible))
+                .filter(|item| predicate_matches(&spec.filter, item, &plan))
                 .collect();
             rows.sort_by(|a, b| {
                 a.record
@@ -377,7 +390,10 @@ pub(crate) fn validate_predicate(
         return Err(Error::QueryBudgetExceeded);
     }
     match filter {
-        QueryFilter::LabelContains(label) | QueryFilter::ExactLabel(label) => {
+        QueryFilter::LabelContains(label)
+        | QueryFilter::ExactLabel(label)
+        | QueryFilter::FullTextPhrase(label)
+        | QueryFilter::ClaimFullTextPhrase(label) => {
             search_label(label)?;
         }
         QueryFilter::Kind(_) => {}
@@ -403,11 +419,91 @@ pub(crate) fn validate_predicate(
     Ok(())
 }
 
-fn predicate_matches(
-    filter: &QueryFilter,
-    version: &Version,
-    visible: &HashSet<ObjectRef>,
-) -> bool {
+/// Indexed leaves produce exact historical identity sets. A positive indexed
+/// conjunct bounds an AND; an OR is bounded only if every arm is bounded.
+/// NOT never supplies a candidate universe. All leaves are collected before
+/// evaluating predicates, so short-circuiting cannot conceal failing reads.
+#[derive(Default)]
+struct PredicatePlan<'a> {
+    indexed: HashMap<(bool, &'a str), HashSet<ObjectRef>>,
+    rows: HashMap<ObjectRef, Version>,
+    sources: HashSet<ObjectRef>,
+    matched: usize,
+}
+
+impl<'a> PredicatePlan<'a> {
+    fn collect(
+        &mut self,
+        store: &Store,
+        filter: &'a QueryFilter,
+        view: ViewContext,
+    ) -> Result<Option<HashSet<ObjectRef>>, Error> {
+        const INDEX_BUDGET: usize = 10_000;
+        match filter {
+            QueryFilter::FullTextPhrase(text) | QueryFilter::ClaimFullTextPhrase(text) => {
+                let claims_only = matches!(filter, QueryFilter::ClaimFullTextPhrase(_));
+                let key = (claims_only, text.as_str());
+                if let Some(ids) = self.indexed.get(&key) {
+                    return Ok(Some(ids.clone()));
+                }
+                let result = if claims_only {
+                    store.indexed_claim_phrase_at(text, view, INDEX_BUDGET)?
+                } else {
+                    store.indexed_phrase_at(text, view, INDEX_BUDGET)?
+                };
+                self.matched += result.rows.len();
+                if result.truncated || self.matched > INDEX_BUDGET {
+                    return Err(Error::QueryBudgetExceeded);
+                }
+                let ids: HashSet<_> = result.rows.iter().map(|row| row.object).collect();
+                for row in result.rows {
+                    self.rows.insert(row.object, row);
+                }
+                self.indexed.insert(key, ids.clone());
+                Ok(Some(ids))
+            }
+            QueryFilter::HasSource(source) => {
+                if store.get_object(*source, view)?.is_some() {
+                    self.sources.insert(*source);
+                }
+                Ok(None)
+            }
+            QueryFilter::And(children) => {
+                let mut result: Option<HashSet<ObjectRef>> = None;
+                for child in children {
+                    if let Some(ids) = self.collect(store, child, view)? {
+                        if let Some(existing) = &mut result {
+                            existing.retain(|id| ids.contains(id));
+                        } else {
+                            result = Some(ids);
+                        }
+                    }
+                }
+                Ok(result)
+            }
+            QueryFilter::Or(children) => {
+                let mut result = Some(HashSet::new());
+                for child in children {
+                    result = match (result, self.collect(store, child, view)?) {
+                        (Some(mut existing), Some(ids)) => {
+                            existing.extend(ids);
+                            Some(existing)
+                        }
+                        _ => None,
+                    };
+                }
+                Ok(result)
+            }
+            QueryFilter::Not(child) => {
+                let _ = self.collect(store, child, view)?;
+                Ok(None)
+            }
+            _ => Ok(None),
+        }
+    }
+}
+
+fn predicate_matches(filter: &QueryFilter, version: &Version, plan: &PredicatePlan<'_>) -> bool {
     match filter {
         QueryFilter::LabelContains(text) => version
             .record
@@ -440,16 +536,22 @@ fn predicate_matches(
                 | (ObjectData::Source { .. }, ObjectKindFilter::Source)
                 | (ObjectData::Claim { .. }, ObjectKindFilter::Claim)
         ),
+        QueryFilter::FullTextPhrase(text) | QueryFilter::ClaimFullTextPhrase(text) => {
+            let claims_only = matches!(filter, QueryFilter::ClaimFullTextPhrase(_));
+            plan.indexed
+                .get(&(claims_only, text.as_str()))
+                .is_some_and(|ids| ids.contains(&version.object))
+        }
         QueryFilter::HasSource(source) => {
-            visible.contains(source) && version.record.source == Some(*source)
+            plan.sources.contains(source) && version.record.source == Some(*source)
         }
         QueryFilter::And(children) => children
             .iter()
-            .all(|child| predicate_matches(child, version, visible)),
+            .all(|child| predicate_matches(child, version, plan)),
         QueryFilter::Or(children) => children
             .iter()
-            .any(|child| predicate_matches(child, version, visible)),
-        QueryFilter::Not(inner) => !predicate_matches(inner, version, visible),
+            .any(|child| predicate_matches(child, version, plan)),
+        QueryFilter::Not(inner) => !predicate_matches(inner, version, plan),
         _ => unreachable!("the predicate validator rejects unsupported leaf filters"),
     }
 }

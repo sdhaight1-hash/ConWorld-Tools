@@ -26,7 +26,7 @@ type SearchResult = { revision: number; truncated: boolean; rows: {
   id: string; label: string; kind: string;
   statement?: string | null; source_citation?: string | null;
 }[] };
-type Predicate = { op: "contains" | "exact"; text: string } |
+type Predicate = { op: "contains" | "exact" | "full_text" | "claim_full_text"; text: string } |
   { op: "object_kind"; kind: string } |
   { op: "has_source"; source_id: string } |
   { op: "and" | "or"; filters: Predicate[] } |
@@ -824,9 +824,13 @@ export async function showAuthorWorkspace(
   function compositePredicate(): Predicate | null {
     const filters: Predicate[] = [];
     const text = value(compositeForm, "name").trim();
+    const labelPhrase = value(compositeForm, "label_phrase").trim();
+    const claimPhrase = value(compositeForm, "claim_phrase").trim();
     const kind = value(compositeForm, "kind");
     const source = value(compositeForm, "source").trim();
     if (text) filters.push({ op: "contains", text });
+    if (labelPhrase) filters.push({ op: "full_text", text: labelPhrase });
+    if (claimPhrase) filters.push({ op: "claim_full_text", text: claimPhrase });
     if (kind) filters.push({ op: "object_kind", kind });
     if (source) filters.push({ op: "has_source", source_id: source });
     if (!filters.length) return null;

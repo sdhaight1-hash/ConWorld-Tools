@@ -50,6 +50,7 @@ fn source_filter(source: ObjectRef) -> QueryFilter {
     QueryFilter::And(vec![
         QueryFilter::Kind(ObjectKindFilter::Claim),
         QueryFilter::HasSource(source),
+        QueryFilter::ClaimFullTextPhrase("Ledger was missing".into()),
         QueryFilter::Not(Box::new(QueryFilter::LabelContains("superseded".into()))),
     ])
 }
@@ -300,5 +301,64 @@ fn schema_eleven_upgrade_preserves_legacy_query_versions() -> Result<(), Error> 
     assert_eq!(saved[0].id, before.id);
     assert_eq!(saved[0].spec, before.spec);
     upgraded.verify_foreign_keys(Scope::Author)?;
+    Ok(())
+}
+
+#[test]
+fn schema_fourteen_upgrade_preserves_saved_predicates_and_marks_compatibility() -> Result<(), Error>
+{
+    let dir = tempdir()?;
+    let path = dir.path().join("schema-14.sqlite");
+    let mut store = Store::open(&path)?;
+    let world = store.create_world("Older world", Scope::Author)?;
+    let original = spec(QueryFilter::And(vec![
+        QueryFilter::Kind(ObjectKindFilter::Person),
+        QueryFilter::LabelContains("Vale".into()),
+    ]));
+    let saved = save(
+        &mut store,
+        &world,
+        world.revision,
+        None,
+        "Old compound query",
+        &original,
+    )?;
+    drop(store);
+    let conn = rusqlite::Connection::open(&path)?;
+    conn.pragma_update(None, "user_version", 14)?;
+    drop(conn);
+
+    let mut upgraded = Store::open(&path)?;
+    assert_eq!(
+        upgraded.saved_label_queries(world.id, saved.recorded_at, Scope::Author)?[0].spec,
+        original
+    );
+    let new_spec = spec(QueryFilter::And(vec![
+        QueryFilter::Kind(ObjectKindFilter::Person),
+        QueryFilter::FullTextPhrase("Vale".into()),
+    ]));
+    let next = save(
+        &mut upgraded,
+        &world,
+        saved.recorded_at,
+        Some(saved.id),
+        "Indexed compound query",
+        &new_spec,
+    )?;
+    drop(upgraded);
+    let conn = rusqlite::Connection::open(&path)?;
+    let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    assert_eq!(version, 15);
+    drop(conn);
+    let reopened = Store::open(&path)?;
+    assert_eq!(
+        reopened.saved_label_queries(world.id, next.recorded_at, Scope::Author)?[0].spec,
+        new_spec
+    );
+    assert_eq!(
+        reopened.saved_label_queries(world.id, saved.recorded_at, Scope::Author)?[0].spec,
+        original
+    );
+    reopened.verify_foreign_keys(Scope::Author)?;
     Ok(())
 }

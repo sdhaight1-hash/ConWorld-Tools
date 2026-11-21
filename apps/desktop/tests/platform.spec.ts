@@ -890,6 +890,7 @@ test("native author saves and replays the exact versioned composite AST", async 
   const saved = page.locator("#author-save-query-form");
   const sourceId = "00000000-0000-4000-8000-000000000001";
   await filter.getByLabel("Label contains").fill("Diary");
+  await filter.getByLabel("Indexed claim phrase").fill("ledger was moved");
   await filter.getByLabel("Object kind").selectOption("claim");
   await filter.getByLabel("Has cited source ID").fill(sourceId);
   await filter.getByLabel("Combine selected filters").selectOption("and");
@@ -905,6 +906,7 @@ test("native author saves and replays the exact versioned composite AST", async 
   const calls = await page.evaluate(() => (window as unknown as { __savedCompositeCalls: unknown[] }).__savedCompositeCalls);
   const predicate = { op: "and", filters: [
     { op: "contains", text: "Diary" },
+    { op: "claim_full_text", text: "ledger was moved" },
     { op: "object_kind", kind: "claim" },
     { op: "has_source", source_id: sourceId },
   ] };
