@@ -19,6 +19,7 @@
     "allow-workspace-save-person-alias",
     "allow-workspace-saved-queries",
     "allow-workspace-save-query",
+    "allow-workspace-replay-saved-query",
     "allow-workspace-query-path",
     "allow-workspace-query-participant-events",
     "allow-workspace-composite-query",

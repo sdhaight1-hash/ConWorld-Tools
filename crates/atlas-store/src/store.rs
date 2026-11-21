@@ -13,12 +13,12 @@ use crate::discovery::{
 };
 use crate::query::{
     PredicateInput, QUERY_SCHEMA_VERSION, QueryControl, QueryFilter, QuerySpec,
-    SaveNamedLabelQuery, SavedLabelQuery, validate_predicate,
+    SaveNamedLabelQuery, SavedLabelQuery, query_parameters, validate_predicate,
 };
 use crate::*;
 
 pub(crate) const APPLICATION_ID: i64 = 0x4357_4c44; // CWLD
-pub(crate) const SCHEMA_VERSION: i64 = 18;
+pub(crate) const SCHEMA_VERSION: i64 = 19;
 
 // Candidate queries bind world (?1), focus/phrase (?2), author revision (?3),
 // limit (?4) and branch (?5). Follow only immutable inherited revisions.
@@ -156,6 +156,9 @@ impl Store {
         }
         if version < 18 {
             tx.execute_batch(include_str!("../migrations/0018.sql"))?;
+        }
+        if version < 19 {
+            tx.execute_batch(include_str!("../migrations/0019.sql"))?;
         }
         if version < SCHEMA_VERSION {
             verify_foreign_keys(&tx)?;
@@ -1015,6 +1018,22 @@ impl Store {
         &mut self,
         request: SaveNamedLabelQuery<'_>,
     ) -> Result<SavedLabelQuery, Error> {
+        self.save_query_definition(request, false)
+    }
+
+    /// Persist typed parameter declarations for every supported AST leaf.
+    pub fn save_named_parameterized_query(
+        &mut self,
+        request: SaveNamedLabelQuery<'_>,
+    ) -> Result<SavedLabelQuery, Error> {
+        self.save_query_definition(request, true)
+    }
+
+    fn save_query_definition(
+        &mut self,
+        request: SaveNamedLabelQuery<'_>,
+        parameterize: bool,
+    ) -> Result<SavedLabelQuery, Error> {
         let SaveNamedLabelQuery {
             world_id,
             expected,
@@ -1054,6 +1073,26 @@ impl Store {
         };
         if term.is_empty() || term.len() > if kind == "composite" { 4_096 } else { 800 } {
             return Err(Error::InvalidInput("saved query search term"));
+        }
+        let normalized_spec = QuerySpec {
+            filter: match kind {
+                "contains" => QueryFilter::LabelContains(term.clone()),
+                "exact" => QueryFilter::ExactLabel(term.clone()),
+                "fulltext" => QueryFilter::FullTextPhrase(term.clone()),
+                "claimtext" => QueryFilter::ClaimFullTextPhrase(term.clone()),
+                _ => spec.filter.clone(),
+            },
+            ..spec.clone()
+        };
+        let parameters = if parameterize {
+            query_parameters(&normalized_spec, world_id)?
+        } else {
+            Vec::new()
+        };
+        let parameter_json = serde_json::to_string(&parameters)
+            .map_err(|_| Error::InvalidInput("saved parameter serialization"))?;
+        if parameter_json.len() > 16_384 {
+            return Err(Error::InvalidInput("saved parameter size"));
         }
         let tx = self
             .conn
@@ -1102,21 +1141,26 @@ impl Store {
                 spec.limit as i64
             ],
         )?;
+        if parameterize {
+            tx.execute(
+                "INSERT INTO saved_query_parameters (world_id, query_id, revision, declarations)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    world_id.0.as_bytes(),
+                    id.as_bytes(),
+                    revision,
+                    parameter_json
+                ],
+            )?;
+        }
         tx.commit()?;
         Ok(SavedLabelQuery {
             id,
             name: name.into(),
-            spec: QuerySpec {
-                filter: match kind {
-                    "contains" => QueryFilter::LabelContains(term),
-                    "exact" => QueryFilter::ExactLabel(term),
-                    "fulltext" => QueryFilter::FullTextPhrase(term),
-                    "claimtext" => QueryFilter::ClaimFullTextPhrase(term),
-                    _ => spec.filter.clone(),
-                },
-                ..spec.clone()
-            },
+            world: world_id,
+            spec: normalized_spec,
             recorded_at: AuthorRevision(revision),
+            parameters,
         })
     }
 
@@ -1128,6 +1172,29 @@ impl Store {
         revision: AuthorRevision,
         scope: Scope,
     ) -> Result<Vec<SavedLabelQuery>, Error> {
+        self.saved_queries_at(world_id, revision, scope, None)
+    }
+
+    /// Resolve precisely one saved definition at its recorded history boundary.
+    pub fn saved_label_query(
+        &self,
+        world_id: WorldId,
+        revision: AuthorRevision,
+        scope: Scope,
+        query_id: Uuid,
+    ) -> Result<Option<SavedLabelQuery>, Error> {
+        Ok(self
+            .saved_queries_at(world_id, revision, scope, Some(query_id))?
+            .pop())
+    }
+
+    fn saved_queries_at(
+        &self,
+        world_id: WorldId,
+        revision: AuthorRevision,
+        scope: Scope,
+        query_id: Option<Uuid>,
+    ) -> Result<Vec<SavedLabelQuery>, Error> {
         require_author(scope)?;
         let tx = self.conn.unchecked_transaction()?;
         let world = load_world(&tx, world_id)?;
@@ -1137,9 +1204,12 @@ impl Store {
         let records = {
             let mut statement = tx.prepare(
                 "SELECT q.query_id, q.name, q.schema_version, q.filter_kind,
-                        q.filter_text, q.result_limit, q.revision
+                        q.filter_text, q.result_limit, q.revision, p.declarations
                  FROM saved_query_versions q
-                 WHERE q.world_id = ?1 AND q.revision = (
+                 LEFT JOIN saved_query_parameters p ON p.world_id = q.world_id
+                    AND p.query_id = q.query_id AND p.revision = q.revision
+                 WHERE q.world_id = ?1 AND (?3 IS NULL OR q.query_id = ?3)
+                   AND q.revision = (
                      SELECT MAX(prev.revision) FROM saved_query_versions prev
                      WHERE prev.world_id = q.world_id AND prev.query_id = q.query_id
                        AND prev.revision <= ?2
@@ -1147,21 +1217,29 @@ impl Store {
                  ORDER BY q.name, q.query_id",
             )?;
             statement
-                .query_map(params![world_id.0.as_bytes(), revision.0], |row| {
-                    Ok((
-                        Uuid::from_bytes(row.get(0)?),
-                        row.get::<_, String>(1)?,
-                        row.get::<_, i64>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, String>(4)?,
-                        row.get::<_, i64>(5)?,
-                        row.get::<_, i64>(6)?,
-                    ))
-                })?
+                .query_map(
+                    params![
+                        world_id.0.as_bytes(),
+                        revision.0,
+                        query_id.as_ref().map(Uuid::as_bytes)
+                    ],
+                    |row| {
+                        Ok((
+                            Uuid::from_bytes(row.get(0)?),
+                            row.get::<_, String>(1)?,
+                            row.get::<_, i64>(2)?,
+                            row.get::<_, String>(3)?,
+                            row.get::<_, String>(4)?,
+                            row.get::<_, i64>(5)?,
+                            row.get::<_, i64>(6)?,
+                            row.get::<_, Option<String>>(7)?,
+                        ))
+                    },
+                )?
                 .collect::<Result<Vec<_>, _>>()?
         };
         let mut result = Vec::new();
-        for (id, name, schema, kind, term, limit, recorded_at) in records {
+        for (id, name, schema, kind, term, limit, recorded_at, declarations) in records {
             if schema != i64::from(QUERY_SCHEMA_VERSION) || !(1..=500).contains(&limit) {
                 return Err(Error::InvalidInput("saved query schema or limit"));
             }
@@ -1181,15 +1259,29 @@ impl Store {
                 }
                 _ => return Err(Error::InvalidInput("saved query filter kind")),
             };
+            let spec = QuerySpec {
+                schema_version: QUERY_SCHEMA_VERSION,
+                filter,
+                limit: limit as usize,
+            };
+            let parameters = if let Some(declarations) = declarations {
+                let decoded =
+                    serde_json::from_str::<Vec<crate::query::QueryParameter>>(&declarations)
+                        .map_err(|_| Error::InvalidInput("saved parameter JSON"))?;
+                if decoded != query_parameters(&spec, world_id)? {
+                    return Err(Error::InvalidInput("saved parameter schema"));
+                }
+                decoded
+            } else {
+                Vec::new()
+            };
             result.push(SavedLabelQuery {
                 id,
                 name,
-                spec: QuerySpec {
-                    schema_version: QUERY_SCHEMA_VERSION,
-                    filter,
-                    limit: limit as usize,
-                },
+                world: world_id,
+                spec,
                 recorded_at: AuthorRevision(recorded_at),
+                parameters,
             });
         }
         tx.commit()?;

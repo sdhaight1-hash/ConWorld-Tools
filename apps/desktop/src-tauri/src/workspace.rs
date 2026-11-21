@@ -11,8 +11,8 @@ use atlas_store::{
     VersionRef, ViewContext, World, WorldDay, WorldId,
     discovery::{MentionDisposition, ReviewMention, SavePersonAlias},
     query::{
-        Direction, PredicateInput, QUERY_SCHEMA_VERSION, QueryControl, QueryCursor, QueryFilter,
-        QuerySpec, SaveNamedLabelQuery,
+        Direction, ParameterBinding, PredicateInput, QUERY_SCHEMA_VERSION, QueryControl,
+        QueryCursor, QueryFilter, QueryParameter, QuerySpec, SaveNamedLabelQuery,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -87,6 +87,17 @@ pub struct SavedQueryInput {
     term: String,
     predicate: Option<PredicateInput>,
     limit: usize,
+    #[serde(default)]
+    parameterize: bool,
+}
+
+#[derive(Deserialize)]
+pub struct ReplaySavedQueryInput {
+    world_id: String,
+    day: i64,
+    revision: i64,
+    query_id: String,
+    bindings: Vec<ParameterBinding>,
 }
 
 #[derive(Serialize)]
@@ -98,6 +109,7 @@ pub struct SavedQuerySummary {
     predicate: Option<PredicateInput>,
     limit: usize,
     recorded_at: i64,
+    parameters: Vec<QueryParameter>,
 }
 
 #[derive(Deserialize)]
@@ -593,6 +605,7 @@ impl AuthorWorkspace {
                     predicate,
                     limit: query.spec.limit,
                     recorded_at: query.recorded_at.0,
+                    parameters: query.parameters,
                 })
             })
             .collect::<Result<Vec<_>, String>>()
@@ -622,18 +635,56 @@ impl AuthorWorkspace {
         };
         let query_id = request.query_id.as_deref().map(id).transpose()?;
         let mut store = self.lock()?;
-        let saved = store
-            .save_named_label_query(SaveNamedLabelQuery {
-                world_id: WorldId(id(&request.world_id)?),
-                expected: AuthorRevision(request.expected_revision),
-                query_id,
-                name: &request.name,
-                spec: &spec,
-                command_id: Uuid::new_v4(),
-                scope: Scope::Author,
-            })
-            .map_err(|error| error.to_string())?;
+        let definition = SaveNamedLabelQuery {
+            world_id: WorldId(id(&request.world_id)?),
+            expected: AuthorRevision(request.expected_revision),
+            query_id,
+            name: &request.name,
+            spec: &spec,
+            command_id: Uuid::new_v4(),
+            scope: Scope::Author,
+        };
+        let saved = if request.parameterize {
+            store.save_named_parameterized_query(definition)
+        } else {
+            store.save_named_label_query(definition)
+        }
+        .map_err(|error| error.to_string())?;
         Ok(saved.id.to_string())
+    }
+
+    fn replay_saved_query(
+        &self,
+        request: ReplaySavedQueryInput,
+        control: &QueryControl,
+    ) -> Result<SearchSummary, String> {
+        let spec = {
+            let store = self.lock()?;
+            control.check().map_err(|error| error.to_string())?;
+            let world = store
+                .world(WorldId(id(&request.world_id)?), Scope::Author)
+                .map_err(|error| error.to_string())?;
+            let context = ViewContext {
+                revision: AuthorRevision(request.revision),
+                ..view(&world, request.day)
+            };
+            let query_id = id(&request.query_id)?;
+            let saved = store
+                .saved_label_query(world.id, context.revision, Scope::Author, query_id)
+                .map_err(|error| error.to_string())?
+                .ok_or("Saved query does not exist at this revision.")?;
+            saved
+                .bind(context, &request.bindings)
+                .map_err(|error| error.to_string())?
+        };
+        self.execute_filter(
+            &request.world_id,
+            request.day,
+            Some(request.revision),
+            spec.filter,
+            spec.limit,
+            control,
+        )
     }
 
     fn save_person_alias(&self, input: PersonAliasInput) -> Result<String, String> {
@@ -1996,6 +2047,18 @@ pub fn workspace_saved_queries(
     revision: Option<i64>,
 ) -> Result<Vec<SavedQuerySummary>, String> {
     workspace.saved_queries(&world_id, revision)
+}
+
+#[tauri::command]
+pub async fn workspace_replay_saved_query(
+    app: AppHandle,
+    request_id: String,
+    request: ReplaySavedQueryInput,
+) -> Result<SearchSummary, String> {
+    run_query_job(app, request_id, move |workspace, control| {
+        workspace.replay_saved_query(request, control)
+    })
+    .await
 }
 
 #[tauri::command]

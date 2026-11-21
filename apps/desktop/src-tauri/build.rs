@@ -15,6 +15,7 @@ fn main() {
             "workspace_save_person_alias",
             "workspace_saved_queries",
             "workspace_save_query",
+            "workspace_replay_saved_query",
             "workspace_query_path",
             "workspace_query_participant_events",
             "workspace_composite_query",

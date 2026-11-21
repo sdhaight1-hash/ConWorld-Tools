@@ -99,6 +99,8 @@
             <form id="author-save-query-form" class="query-form saved-query-form">
               <label>Saved search <select name="query_id" aria-label="Saved search"><option value="">New saved search</option></select></label>
               <label>Saved search name <input name="name" maxlength="200" required placeholder="My historical search" /></label>
+              <label><input name="parameterize" type="checkbox" /> Allow typed values to change at replay</label>
+              <fieldset id="author-saved-parameters" hidden></fieldset>
               <button type="submit">Save search definition</button>
               <button type="button" id="author-run-saved-query">Run saved search</button>
               <button type="button" id="author-save-composite-query">Save combined query</button>

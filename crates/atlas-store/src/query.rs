@@ -198,8 +198,196 @@ pub struct SaveNamedLabelQuery<'a> {
 pub struct SavedLabelQuery {
     pub id: Uuid,
     pub name: String,
+    pub world: WorldId,
     pub spec: QuerySpec,
     pub recorded_at: AuthorRevision,
+    pub parameters: Vec<QueryParameter>,
+}
+
+/// Only leaf values may vary. Operators, shape, scope, and context are frozen.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ParameterValue {
+    Text { value: String },
+    ObjectKind { value: ObjectKindFilter },
+    Source { world_id: String, source_id: String },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QueryParameter {
+    pub name: String,
+    pub default: ParameterValue,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ParameterBinding {
+    pub name: String,
+    pub value: ParameterValue,
+}
+
+// The deterministic pre-order leaf walk is part of the v1 parameter contract.
+// Defaults are taken from the actual typed saved AST, never cached query rows.
+fn visit_parameter_leaves(
+    filter: &mut QueryFilter,
+    visit: &mut impl FnMut(&str, &mut ParameterValue) -> Result<(), Error>,
+) -> Result<(), Error> {
+    let (prefix, mut value) = match filter {
+        QueryFilter::LabelContains(text) => (
+            "contains",
+            ParameterValue::Text {
+                value: text.clone(),
+            },
+        ),
+        QueryFilter::ExactLabel(text) => (
+            "exact",
+            ParameterValue::Text {
+                value: text.clone(),
+            },
+        ),
+        QueryFilter::ExactAlias(text) => (
+            "alias",
+            ParameterValue::Text {
+                value: text.clone(),
+            },
+        ),
+        QueryFilter::FullTextPhrase(text) => (
+            "label_phrase",
+            ParameterValue::Text {
+                value: text.clone(),
+            },
+        ),
+        QueryFilter::ClaimFullTextPhrase(text) => (
+            "claim_phrase",
+            ParameterValue::Text {
+                value: text.clone(),
+            },
+        ),
+        QueryFilter::Kind(kind) => ("object_kind", ParameterValue::ObjectKind { value: *kind }),
+        QueryFilter::HasSource(source) => (
+            "source",
+            ParameterValue::Source {
+                world_id: source.world.0.to_string(),
+                source_id: source.id.0.to_string(),
+            },
+        ),
+        QueryFilter::And(children) | QueryFilter::Or(children) => {
+            for child in children {
+                visit_parameter_leaves(child, visit)?;
+            }
+            return Ok(());
+        }
+        QueryFilter::Not(inner) => return visit_parameter_leaves(inner, visit),
+        _ => return Err(Error::InvalidInput("unsupported parameterized predicate")),
+    };
+    visit(prefix, &mut value)?;
+    match (filter, value) {
+        (
+            QueryFilter::LabelContains(text)
+            | QueryFilter::ExactLabel(text)
+            | QueryFilter::ExactAlias(text)
+            | QueryFilter::FullTextPhrase(text)
+            | QueryFilter::ClaimFullTextPhrase(text),
+            ParameterValue::Text { value },
+        ) => {
+            *text = value;
+        }
+        (QueryFilter::Kind(kind), ParameterValue::ObjectKind { value }) => *kind = value,
+        (
+            QueryFilter::HasSource(source),
+            ParameterValue::Source {
+                world_id,
+                source_id,
+            },
+        ) => {
+            if Uuid::parse_str(&world_id).ok() != Some(source.world.0) {
+                return Err(Error::WrongWorld);
+            }
+            source.id = crate::ObjectId(
+                Uuid::parse_str(&source_id)
+                    .map_err(|_| Error::InvalidInput("parameter source ID"))?,
+            );
+        }
+        _ => return Err(Error::InvalidInput("query parameter type")),
+    }
+    Ok(())
+}
+
+pub(crate) fn query_parameters(
+    spec: &QuerySpec,
+    world: WorldId,
+) -> Result<Vec<QueryParameter>, Error> {
+    let mut nodes = 0;
+    validate_predicate(&spec.filter, world, 0, &mut nodes)?;
+    let mut parameters = Vec::new();
+    visit_parameter_leaves(&mut spec.filter.clone(), &mut |prefix, default| {
+        parameters.push(QueryParameter {
+            name: format!("{prefix}_{}", parameters.len() + 1),
+            default: default.clone(),
+        });
+        Ok(())
+    })?;
+    Ok(parameters)
+}
+
+impl SavedLabelQuery {
+    /// Materialize a normal typed query with overrides, using defaults for
+    /// omitted parameters. No caller-supplied operator or context is accepted.
+    pub fn bind(
+        &self,
+        view: ViewContext,
+        bindings: &[ParameterBinding],
+    ) -> Result<QuerySpec, Error> {
+        if view.scope != Scope::Author {
+            return Err(Error::CapabilityDenied);
+        }
+        if view.world != self.world {
+            return Err(Error::WrongWorld);
+        }
+        if view.revision < self.recorded_at {
+            return Err(Error::InvalidRevision);
+        }
+        validate_query_request(&self.spec, view)?;
+        if self.parameters.is_empty() {
+            return if bindings.is_empty() {
+                Ok(self.spec.clone())
+            } else {
+                Err(Error::InvalidInput("query has no parameters"))
+            };
+        }
+        if self.parameters != query_parameters(&self.spec, self.world)? {
+            return Err(Error::InvalidInput("saved parameter schema"));
+        }
+        if bindings.len() > self.parameters.len() {
+            return Err(Error::InvalidInput("query parameter count"));
+        }
+        let mut remaining = HashMap::new();
+        for binding in bindings {
+            if remaining
+                .insert(binding.name.as_str(), &binding.value)
+                .is_some()
+            {
+                return Err(Error::InvalidInput("duplicate query parameter"));
+            }
+        }
+        let mut spec = self.spec.clone();
+        let mut index = 0;
+        visit_parameter_leaves(&mut spec.filter, &mut |_, value| {
+            let parameter = &self.parameters[index];
+            index += 1;
+            if let Some(replacement) = remaining.remove(parameter.name.as_str()) {
+                *value = replacement.clone();
+            }
+            Ok(())
+        })?;
+        if !remaining.is_empty() {
+            return Err(Error::InvalidInput("unknown query parameter"));
+        }
+        let mut nodes = 0;
+        validate_predicate(&spec.filter, self.world, 0, &mut nodes)?;
+        Ok(spec)
+    }
 }
 
 #[derive(Clone, Debug)]
