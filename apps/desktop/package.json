@@ -4,10 +4,11 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --host localhost --port 1420 --strictPort",
+    "dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
     "build:renderer": "node scripts/build-renderer.mjs",
     "build": "tsc --noEmit && vite build",
     "test": "playwright test",
+    "test:launch": "node --test tests/launch-config.test.mjs",
     "tauri": "tauri"
   },
   "dependencies": {

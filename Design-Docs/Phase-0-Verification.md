@@ -36,6 +36,14 @@ npx playwright install chromium --only-shell
 npm test
 ```
 
+## Standalone Windows startup and refused-connection regression
+
+The native window can start yet display Edge WebView2 `ERR_CONNECTION_REFUSED` if it was compiled to load the Tauri `devUrl` without a live Vite server. Previously, the workspace's CI explicitly passed `--features custom-protocol` while an ordinary `cargo build` omitted it, allowing a direct-launch binary to point at `localhost`. The desktop crate now enables `custom-protocol` by default, so a normal standalone Cargo build selects the bundled frontend. Tauri's development CLI deliberately disables default features and starts Vite through `beforeDevCommand` for live reload. The Vite bind host and `devUrl` are both fixed to `127.0.0.1:1420` to avoid inconsistent IPv4/IPv6 localhost resolution.
+
+For development, run `npm run tauri dev` from `apps/desktop` and leave the process running. For a direct executable, run `npm --prefix apps/desktop run build` and `cargo build --workspace --locked` from the repository root before launching the debug executable. Do not double-click an old development-only binary. The new Node configuration regression test checks both modes; Windows CI now builds and smoke-tests the **default-feature** standalone executable rather than relying on an explicit `--features custom-protocol` override.
+
+This is a repository-level prevention fix. The supplied user screenshot establishes an Edge WebView localhost refusal, but without the user's original launch command or runtime logs it cannot prove which startup path created that particular binary. A direct Windows retest of the updated build is still the final confirmation on the affected machine.
+
 ## Renderer benchmark
 
 Install the WASM Rust target and the binding generator used by the lockfile. Build the optional renderer bundle before building or starting the desktop frontend.

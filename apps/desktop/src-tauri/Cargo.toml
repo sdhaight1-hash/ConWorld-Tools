@@ -13,4 +13,7 @@ serde_json = "1"
 tauri = "2"
 
 [features]
+# Standalone Cargo builds load bundled assets. The Tauri dev CLI disables default
+# features and starts Vite through beforeDevCommand for live reload.
+default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
