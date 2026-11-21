@@ -220,9 +220,15 @@ async function showAuthorWorkspace() {
       }
       return item;
     }));
-    relationshipForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = snapshot.people.length < 2;
-    eventForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = snapshot.people.length === 0 || snapshot.relationships.length === 0;
-    status.textContent = "World loaded. Edits are saved to the local SQLite database.";
+    const readOnly = selectedRevision() !== null;
+    personForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = readOnly;
+    relationshipForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled =
+      readOnly || snapshot.people.length < 2;
+    eventForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled =
+      readOnly || snapshot.people.length === 0 || snapshot.relationships.length === 0;
+    status.textContent = readOnly
+      ? "Read-only author revision. Clear the author revision field to resume editing."
+      : "World loaded. Edits are saved to the local SQLite database.";
   }
   async function refreshWorlds(preferred?: string) {
     const worlds = await invoke<AuthorWorld[]>("workspace_worlds");
@@ -237,6 +243,9 @@ async function showAuthorWorkspace() {
         const button = form.querySelector<HTMLButtonElement>('button[type="submit"]')!;
         button.disabled = true;
         try {
+          if (form !== worldForm && selectedRevision() !== null) {
+            throw new Error("Archived author revisions are read-only. Clear the revision field before editing.");
+          }
           await action();
           revisionInput.value = "";
           await refresh();
@@ -245,11 +254,12 @@ async function showAuthorWorkspace() {
         } catch (error) {
           status.textContent = "Unable to save: " + String(error);
         } finally {
-          button.disabled = form === relationshipForm
+          const pinned = form !== worldForm && revisionInput.value.trim() !== "";
+          button.disabled = pinned || (form === relationshipForm
             ? (relationshipForm.elements.namedItem("subject") as HTMLSelectElement).options.length < 2
             : form === eventForm
               ? (eventForm.elements.namedItem("relationship") as HTMLSelectElement).options.length === 0
-              : false;
+              : false);
         }
       })();
     });

@@ -108,7 +108,7 @@ test("native author form refuses a missing historical day instead of silently sa
           }
           if (command === "workspace_worlds") return [world];
           if (command === "workspace_snapshot") {
-            return { world, day: 0, people, relationships: [] };
+            return { world, day: 0, view_revision: 0, people, relationships: [] };
           }
           if (command === "workspace_create_relationship") {
             writes.push(command);
@@ -130,4 +130,15 @@ test("native author form refuses a missing historical day instead of silently sa
   await expect(page.locator("#author-status")).toContainText("Enter a whole-number historical day.");
   const writes = await page.evaluate(() => (window as unknown as { __authorTestWrites: string[] }).__authorTestWrites);
   expect(writes).toEqual([]);
+
+  await day.fill("0");
+  await day.blur();
+  const revision = page.locator("#author-revision");
+  await revision.fill("0");
+  await revision.blur();
+  await expect(page.locator("#author-status")).toContainText("Read-only author revision");
+  await expect(form.getByRole("button", { name: "Create relationship at selected day" })).toBeDisabled();
+  await revision.fill("");
+  await revision.blur();
+  await expect(form.getByRole("button", { name: "Create relationship at selected day" })).toBeEnabled();
 });
