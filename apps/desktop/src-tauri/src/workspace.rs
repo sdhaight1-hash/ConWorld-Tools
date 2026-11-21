@@ -429,7 +429,7 @@ impl AuthorWorkspace {
             .save_named_label_query(SaveNamedLabelQuery {
                 world_id: WorldId(id(&request.world_id)?),
                 expected: AuthorRevision(request.expected_revision),
-                query_id: query_id,
+                query_id,
                 name: &request.name,
                 spec: &spec,
                 command_id: Uuid::new_v4(),
