@@ -324,7 +324,8 @@ fn aliases_preserve_revision_and_valid_day_collisions_with_reviewed_backlinks() 
 
     let conn = rusqlite::Connection::open(&path)?;
     conn.execute_batch(
-        "DROP TABLE person_alias_versions;
+        "DROP TABLE person_alias_name_keys;
+         DROP TABLE person_alias_versions;
          DROP TABLE person_aliases;
          PRAGMA user_version = 13;",
     )?;
