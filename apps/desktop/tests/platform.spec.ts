@@ -290,7 +290,9 @@ test("native historical search keeps ambiguous identities and navigates the real
           };
           if (command === "workspace_search") {
             calls.push(args);
-            return { revision: args.revision ?? 3, truncated: false, rows: people.slice(0, args.revision === 1 ? 1 : 2).map(person => ({ ...person, kind: "person" })) };
+            return { revision: args.revision ?? 3, truncated: false,
+              rows: args.mode === "backlinks" ? [{ id: "bond-1", label: "Friendship", kind: "relationship" }] :
+                people.slice(0, args.revision === 1 ? 1 : 2).map(person => ({ ...person, kind: "person" })) };
           }
           throw new Error("Unexpected mock command: " + command);
         },
@@ -303,18 +305,21 @@ test("native historical search keeps ambiguous identities and navigates the real
   await form.getByLabel("Match names").selectOption("exact");
   await form.getByRole("button", { name: "Search history" }).click();
   const results = page.locator("#author-query-results");
-  await expect(results.getByRole("button", { name: /Alice Vale/ })).toHaveCount(2);
-  await results.getByRole("button", { name: /alice-b/ }).click();
+  await expect(results.getByRole("button", { name: /^Alice Vale ·/ })).toHaveCount(2);
+  await results.getByRole("button", { name: /^Alice Vale ·.*alice-b$/ }).click();
   await expect(page.locator('#nodes button[data-node="alice-b"]')).toHaveAttribute("aria-pressed", "true");
   const revision = page.locator("#author-revision");
   await revision.fill("1");
   await revision.blur();
-  await expect(results.getByRole("button", { name: /Alice Vale/ })).toHaveCount(0);
+  await expect(results.getByRole("button", { name: /^Alice Vale ·/ })).toHaveCount(0);
   await form.getByRole("button", { name: "Search history" }).click();
-  await expect(results.getByRole("button", { name: /Alice Vale/ })).toHaveCount(1);
+  await expect(results.getByRole("button", { name: /^Alice Vale ·/ })).toHaveCount(1);
+  await results.getByRole("button", { name: "Find references to Alice Vale alice-a" }).click();
+  await expect(results.getByText(/Friendship · relationship · bond-1/)).toBeVisible();
   const calls = await page.evaluate(() => (window as unknown as { __searchCalls: unknown[] }).__searchCalls);
   expect(calls).toMatchObject([
     { worldId: "world", day: 0, revision: null, mode: "exact", term: "Alice Vale", limit: 100 },
     { worldId: "world", day: 0, revision: 1, mode: "exact", term: "Alice Vale", limit: 100 },
+    { worldId: "world", day: 0, revision: 1, mode: "backlinks", term: "alice-a", limit: 100 },
   ]);
 });
