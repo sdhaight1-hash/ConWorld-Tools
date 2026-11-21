@@ -480,17 +480,21 @@ impl AuthorWorkspace {
         Ok(MentionDiscoverySummary {
             revision: discovery.revision.0,
             truncated: discovery.truncated,
-            rows: discovery.rows.into_iter().map(|candidate| MentionDiscoveryRow {
-                source_id: candidate.source.object.id.0.to_string(),
-                source_revision: candidate.source.recorded_at.0,
-                source_label: candidate.source_label,
-                statement: candidate.statement,
-                target_id: candidate.target.id.0.to_string(),
-                target_label: candidate.target_label,
-                start_byte: candidate.start_byte,
-                end_byte: candidate.end_byte,
-                collisions: candidate.collisions,
-            }).collect(),
+            rows: discovery
+                .rows
+                .into_iter()
+                .map(|candidate| MentionDiscoveryRow {
+                    source_id: candidate.source.object.id.0.to_string(),
+                    source_revision: candidate.source.recorded_at.0,
+                    source_label: candidate.source_label,
+                    statement: candidate.statement,
+                    target_id: candidate.target.id.0.to_string(),
+                    target_label: candidate.target_label,
+                    start_byte: candidate.start_byte,
+                    end_byte: candidate.end_byte,
+                    collisions: candidate.collisions,
+                })
+                .collect(),
         })
     }
 

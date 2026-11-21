@@ -135,7 +135,9 @@ fn matching_spans(text: &str, label: &str) -> Vec<(usize, usize)> {
         let Some(found) = text.get(start..end) else {
             continue;
         };
-        if found != label && !(found.is_ascii() && label.is_ascii() && found.eq_ignore_ascii_case(label)) {
+        if found != label
+            && !(found.is_ascii() && label.is_ascii() && found.eq_ignore_ascii_case(label))
+        {
             continue;
         }
         let before = text[..start].chars().next_back();
