@@ -688,7 +688,8 @@ impl AuthorWorkspace {
         let predicate =
             request
                 .predicate
-                .into_filter(WorldId(id(&request.world_id)?), 0, &mut nodes)?;
+                .into_filter(WorldId(id(&request.world_id)?), 0, &mut nodes)
+                .map_err(|error| error.to_string())?;
         self.execute_filter(
             &request.world_id,
             request.day,
