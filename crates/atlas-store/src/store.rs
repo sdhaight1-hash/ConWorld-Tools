@@ -84,6 +84,29 @@ impl Store {
         Ok(Self { conn })
     }
 
+    /// Reject unknown branches (including forks not yet created at the selected
+    /// author revision) even when the world contains no objects.
+    pub(crate) fn validate_query_view(&self, view: ViewContext) -> Result<(), Error> {
+        let world = load_world(&self.conn, view.world)?;
+        if view.revision < AuthorRevision(0) || view.revision > world.revision {
+            return Err(Error::InvalidRevision);
+        }
+        let exists: bool = self.conn.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM branches b
+                LEFT JOIN branch_forks f ON f.world_id = b.world_id AND f.branch_id = b.id
+                WHERE b.world_id = ?1 AND b.id = ?2
+                  AND (b.is_main = 1 OR f.created_revision <= ?3)
+            )",
+            params![view.world.0.as_bytes(), view.branch.0.as_bytes(), view.revision.0],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            return Err(Error::NotFound);
+        }
+        Ok(())
+    }
+
     /// Reconstruct disposable label and claim statement indexes from canonical versions.
     /// No author revision or object identity is changed.
     pub fn rebuild_search_index(&mut self, scope: Scope) -> Result<(), Error> {

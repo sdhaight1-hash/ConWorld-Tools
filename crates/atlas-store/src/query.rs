@@ -107,6 +107,7 @@ impl Store {
         if spec.schema_version != QUERY_SCHEMA_VERSION || !(1..=500).contains(&spec.limit) {
             return Err(Error::InvalidInput("query schema or result limit"));
         }
+        self.validate_query_view(view)?;
         if matches!(
             &spec.filter,
             QueryFilter::Kind(_)
