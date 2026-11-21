@@ -4,6 +4,12 @@ fn main() {
             "platform_scene",
             "complete_platform_smoke",
             "northbridge_history",
+            "workspace_worlds",
+            "workspace_create_world",
+            "workspace_snapshot",
+            "workspace_create_person",
+            "workspace_create_relationship",
+            "workspace_record_event",
         ]),
     ))
     .expect("failed to build the desktop shell configuration");

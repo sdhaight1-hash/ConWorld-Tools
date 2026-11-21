@@ -1,9 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod history;
+mod workspace;
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 #[derive(Deserialize, Serialize)]
 struct Scene {
@@ -101,10 +102,22 @@ fn main() {
     tauri::Builder::default()
         .manage(PlatformSmoke(smoke))
         .manage(history)
+        .setup(|app| {
+            let directory = app.path().app_data_dir()?;
+            std::fs::create_dir_all(&directory)?;
+            app.manage(workspace::AuthorWorkspace::open(directory.join("worlds.sqlite"))?);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             platform_scene,
             complete_platform_smoke,
-            history::northbridge_history
+            history::northbridge_history,
+            workspace::workspace_worlds,
+            workspace::workspace_create_world,
+            workspace::workspace_snapshot,
+            workspace::workspace_create_person,
+            workspace::workspace_create_relationship,
+            workspace::workspace_record_event
         ])
         .run(tauri::generate_context!())
         .expect("failed to start Living History Atlas");
