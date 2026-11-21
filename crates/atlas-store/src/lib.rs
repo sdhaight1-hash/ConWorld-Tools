@@ -3,6 +3,7 @@ pub mod access;
 pub mod archive;
 mod calendar;
 pub mod conflict;
+pub mod discovery;
 pub mod genealogy;
 mod graph;
 pub mod inheritance;

@@ -60,6 +60,26 @@ pub struct SavedQuerySummary {
 }
 
 #[derive(Serialize)]
+pub struct MentionDiscoveryRow {
+    source_id: String,
+    source_revision: i64,
+    source_label: String,
+    statement: String,
+    target_id: String,
+    target_label: String,
+    start_byte: usize,
+    end_byte: usize,
+    collisions: usize,
+}
+
+#[derive(Serialize)]
+pub struct MentionDiscoverySummary {
+    revision: i64,
+    truncated: bool,
+    rows: Vec<MentionDiscoveryRow>,
+}
+
+#[derive(Serialize)]
 pub struct SearchRow {
     id: String,
     label: String,
@@ -437,6 +457,45 @@ impl AuthorWorkspace {
             })
             .map_err(|error| error.to_string())?;
         Ok(saved.id.to_string())
+    }
+
+    fn discover_mentions(
+        &self,
+        world_id: &str,
+        day: i64,
+        revision: Option<i64>,
+        limit: usize,
+    ) -> Result<MentionDiscoverySummary, String> {
+        let store = self.lock()?;
+        let world = store
+            .world(WorldId(id(world_id)?), Scope::Author)
+            .map_err(|error| error.to_string())?;
+        let context = ViewContext {
+            revision: AuthorRevision(revision.unwrap_or(world.revision.0)),
+            ..view(&world, day)
+        };
+        let discovery = store
+            .discover_mentions(context, limit)
+            .map_err(|error| error.to_string())?;
+        Ok(MentionDiscoverySummary {
+            revision: discovery.revision.0,
+            truncated: discovery.truncated,
+            rows: discovery
+                .rows
+                .into_iter()
+                .map(|candidate| MentionDiscoveryRow {
+                    source_id: candidate.source.object.id.0.to_string(),
+                    source_revision: candidate.source.recorded_at.0,
+                    source_label: candidate.source_label,
+                    statement: candidate.statement,
+                    target_id: candidate.target.id.0.to_string(),
+                    target_label: candidate.target_label,
+                    start_byte: candidate.start_byte,
+                    end_byte: candidate.end_byte,
+                    collisions: candidate.collisions,
+                })
+                .collect(),
+        })
     }
 
     fn search(
@@ -1368,6 +1427,17 @@ pub fn workspace_search(
     limit: usize,
 ) -> Result<SearchSummary, String> {
     workspace.search(&world_id, day, revision, &mode, &term, limit)
+}
+
+#[tauri::command]
+pub fn workspace_discover_mentions(
+    workspace: State<'_, AuthorWorkspace>,
+    world_id: String,
+    day: i64,
+    revision: Option<i64>,
+    limit: usize,
+) -> Result<MentionDiscoverySummary, String> {
+    workspace.discover_mentions(&world_id, day, revision, limit)
 }
 
 #[tauri::command]
