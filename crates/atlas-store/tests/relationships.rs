@@ -671,3 +671,50 @@ fn phase_two_author_world_listing_is_persistent_and_historically_scoped() -> Res
     assert_eq!(reopened.objects_at(view(&world, first, 10), 20)?.len(), 3);
     Ok(())
 }
+
+
+#[test]
+fn phase_two_object_listing_filters_historical_visibility_before_limiting() -> Result<(), Error> {
+    let mut store = Store::open(":memory:")?;
+    let world = store.create_world("Chronology", Scope::Author)?;
+    // Deterministic IDs put the future objects first in the registry order.
+    // A SQL LIMIT before time filtering incorrectly produces an empty result.
+    let future_a = ObjectRef {
+        world: world.id,
+        id: ObjectId(Uuid::from_u128(1)),
+    };
+    let future_b = ObjectRef {
+        world: world.id,
+        id: ObjectId(Uuid::from_u128(2)),
+    };
+    let present_a = ObjectRef {
+        world: world.id,
+        id: ObjectId(Uuid::from_u128(100)),
+    };
+    let present_b = ObjectRef {
+        world: world.id,
+        id: ObjectId(Uuid::from_u128(200)),
+    };
+    let revision = store.apply(&command(
+        &world,
+        world.revision,
+        vec![
+            Change::Create(future_a, dated(100, ObjectData::Person, None, "Future A")),
+            Change::Create(future_b, dated(100, ObjectData::Person, None, "Future B")),
+            Change::Create(present_a, person("Present A")),
+            Change::Create(present_b, person("Present B")),
+        ],
+    ))?;
+    let visible = store.objects_at(view(&world, revision, 0), 2)?;
+    let ids: Vec<_> = visible.iter().map(|version| version.object).collect();
+    assert_eq!(ids, vec![present_a, present_b]);
+    // A truncated list must never be returned as though it contains every
+    // visible object. This matters to author editing, where missing nodes
+    // otherwise look like deleted people or relationships.
+    assert!(matches!(
+        store.objects_at(view(&world, revision, 100), 2),
+        Err(Error::QueryBudgetExceeded)
+    ));
+    assert_eq!(store.objects_at(view(&world, revision, 100), 4)?.len(), 4);
+    store.verify_foreign_keys(Scope::Author)
+}

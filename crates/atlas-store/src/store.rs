@@ -122,25 +122,37 @@ impl Store {
         if view.revision < AuthorRevision(0) || view.revision > world.revision {
             return Err(Error::InvalidRevision);
         }
-        let ids: Vec<[u8; 16]> = {
-            let mut statement =
-                tx.prepare("SELECT id FROM objects WHERE world_id = ?1 ORDER BY id LIMIT ?2")?;
-            statement
-                .query_map(params![view.world.0.as_bytes(), limit as i64], |row| {
-                    row.get(0)
-                })?
-                .collect::<Result<_, _>>()?
-        };
+        // The world registry contains facts from other dates and branches.
+        // Applying LIMIT before historical visibility silently hides valid records.
+        // Until Phase Three adds indexed/paginated queries, scan a bounded set
+        // of candidates and report truncation explicitly instead of returning
+        // an incomplete "complete" author workspace.
+        const SCAN_BUDGET: i64 = 10_000;
         let mut visible = Vec::new();
-        for id in ids {
-            let object = ObjectRef {
-                world: view.world,
-                id: ObjectId(Uuid::from_bytes(id)),
-            };
-            if let Some(version) =
-                resolve_object(&tx, object, view.branch, view.revision, view.day)?
-            {
-                visible.push(version);
+        {
+            let mut statement = tx.prepare(
+                "SELECT id FROM objects WHERE world_id = ?1 ORDER BY id LIMIT ?2",
+            )?;
+            let candidates = statement.query_map(
+                params![view.world.0.as_bytes(), SCAN_BUDGET + 1],
+                |row| row.get::<_, [u8; 16]>(0),
+            )?;
+            for (scanned, id) in candidates.enumerate() {
+                if scanned == SCAN_BUDGET as usize {
+                    return Err(Error::QueryBudgetExceeded);
+                }
+                let object = ObjectRef {
+                    world: view.world,
+                    id: ObjectId(Uuid::from_bytes(id?)),
+                };
+                if let Some(version) =
+                    resolve_object(&tx, object, view.branch, view.revision, view.day)?
+                {
+                    visible.push(version);
+                    if visible.len() > limit {
+                        return Err(Error::QueryBudgetExceeded);
+                    }
+                }
             }
         }
         tx.commit()?;
