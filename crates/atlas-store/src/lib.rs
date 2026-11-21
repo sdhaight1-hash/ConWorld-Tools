@@ -1,5 +1,13 @@
 //! Local, author-scoped world persistence for Living History Atlas.
+pub mod access;
+pub mod archive;
 mod calendar;
+pub mod conflict;
+pub mod genealogy;
+mod graph;
+pub mod inheritance;
+pub mod layout;
+pub mod query;
 mod store;
 
 use std::path::PathBuf;
