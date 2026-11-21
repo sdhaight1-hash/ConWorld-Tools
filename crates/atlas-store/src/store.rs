@@ -6,7 +6,7 @@ use std::time::Duration;
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use uuid::Uuid;
 
-use crate::query::{QUERY_SCHEMA_VERSION, QueryFilter, QuerySpec, SavedLabelQuery};
+use crate::query::{QUERY_SCHEMA_VERSION, QueryFilter, QuerySpec, SaveNamedLabelQuery, SavedLabelQuery};
 use crate::*;
 
 pub(crate) const APPLICATION_ID: i64 = 0x4357_4c44; // CWLD
@@ -192,14 +192,17 @@ impl Store {
     /// metadata. The query definition has a stable ID and its own author history.
     pub fn save_named_label_query(
         &mut self,
-        world_id: WorldId,
-        expected: AuthorRevision,
-        query_id: Option<Uuid>,
-        name: &str,
-        spec: &QuerySpec,
-        command_id: Uuid,
-        scope: Scope,
+        request: SaveNamedLabelQuery<'_>,
     ) -> Result<SavedLabelQuery, Error> {
+        let SaveNamedLabelQuery {
+            world_id,
+            expected,
+            query_id,
+            name,
+            spec,
+            command_id,
+            scope,
+        } = request;
         require_author(scope)?;
         let name = name.trim();
         if name.is_empty() || name.len() > 200 {
