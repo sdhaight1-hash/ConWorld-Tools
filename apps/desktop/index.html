@@ -59,6 +59,61 @@
         <div id="history-relations" class="history-grid" aria-live="polite"></div>
         <div id="history-cause" class="history-cause" role="status"></div>
       </section>
+      <section id="author-workspace" class="history author-workspace" aria-label="Persistent author workspace" hidden>
+        <div class="toolbar">
+          <div>
+            <h2>Author workspace</h2>
+            <p class="hint">Saved locally in app data. Day numbers are normalized fictional days until the calendar editor is available.</p>
+          </div>
+          <label for="author-world">World <select id="author-world"></select></label>
+          <label for="author-day">Historical day <input id="author-day" type="number" value="0" step="1" /></label>
+        </div>
+        <form id="author-create-world" class="editor-row">
+          <label>New world <input name="name" maxlength="200" required placeholder="World name" /></label>
+          <button type="submit">Create world</button>
+        </form>
+        <div id="author-world-content" hidden>
+          <p id="author-world-info" class="hint"></p>
+          <div class="editor-forms">
+            <form id="author-create-person" class="editor-form">
+              <h3>Create person</h3>
+              <label>Name <input name="name" maxlength="200" required /></label>
+              <button type="submit">Add person</button>
+            </form>
+            <form id="author-create-relationship" class="editor-form">
+              <h3>Create directed relationship</h3>
+              <label>From <select name="subject" required></select></label>
+              <label>To <select name="target" required></select></label>
+              <label>Kind <input name="kind" maxlength="200" required value="friendship" /></label>
+              <label>Trust (0–100) <input name="trust" type="number" min="0" max="100" value="75" /></label>
+              <label>Tags, comma separated <input name="tags" placeholder="friends, trusted" /></label>
+              <button type="submit">Create relationship at selected day</button>
+            </form>
+            <form id="author-record-event" class="editor-form">
+              <h3>Record event-driven change</h3>
+              <label>Relationship <select name="relationship" required></select></label>
+              <label>Actor <select name="actor" required></select></label>
+              <label>Event <input name="event" required maxlength="200" placeholder="Disclosed letter" /></label>
+              <label>Action <input name="action" required maxlength="200" placeholder="disclose_letter" /></label>
+              <label>Intent <input name="intent" required maxlength="200" /></label>
+              <label>Outcome <select name="outcome">
+                <option value="attempted">Attempted</option>
+                <option value="succeeded">Succeeded</option>
+                <option value="failed">Failed</option>
+              </select></label>
+              <label>Source citation <input name="citation" required maxlength="200" /></label>
+              <label>New trust (0–100) <input name="trust" type="number" min="0" max="100" value="20" /></label>
+              <label>New tags <input name="tags" placeholder="estranged" /></label>
+              <button type="submit">Record event and relationship effect</button>
+            </form>
+          </div>
+          <div class="editor-summary">
+            <div><h3>People</h3><ul id="author-people"></ul></div>
+            <div><h3>Relationships at selected day</h3><ul id="author-relationships"></ul></div>
+          </div>
+        </div>
+        <p id="author-status" role="status" aria-live="polite">Select or create a world to begin.</p>
+      </section>
     </main>
     <script type="module" src="/src/main.ts"></script>
   </body>

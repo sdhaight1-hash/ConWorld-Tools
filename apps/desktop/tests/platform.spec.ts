@@ -81,3 +81,8 @@ test("the browser-only preview does not expose native author history", async ({ 
   await expect(page.getByRole("region", { name: "Scrollable diagram" })).toBeVisible();
   await expect(page.locator("#history")).toBeHidden();
 });
+
+test("browser preview does not expose the persistent native author workspace", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator("#author-workspace")).toBeHidden();
+});

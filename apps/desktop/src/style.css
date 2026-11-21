@@ -68,3 +68,18 @@ button:disabled { opacity: 0.55; cursor: default; }
 @media (forced-colors: active) {
   #nodes [aria-pressed="true"] { color: HighlightText; background: Highlight; forced-color-adjust: none; }
 }
+
+.author-workspace { margin-bottom: 1rem; }
+.author-workspace input, .author-workspace select {
+  min-width: 0; width: 100%; padding: 0.4rem;
+  background: #233e44; color: #efece0; border: 1px solid var(--border);
+  border-radius: 0.35rem; font: inherit;
+}
+.editor-forms { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: 0.75rem; }
+.editor-form { padding: 0.85rem; border: 1px solid var(--border); border-radius: 0.45rem; display: grid; align-content: start; gap: 0.65rem; }
+.author-workspace label { display: grid; gap: 0.3rem; font-size: 0.85rem; color: var(--muted); }
+.editor-row { display: flex; flex-wrap: wrap; align-items: end; gap: 0.75rem; margin: 0.3rem 0 1rem; }
+.editor-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 1rem; margin-top: 1rem; }
+.editor-summary ul { padding-left: 1.2rem; font-size: 0.85rem; }
+.editor-summary li + li { margin-top: 0.4rem; }
+#author-status { font-size: 0.88rem; color: var(--muted); }

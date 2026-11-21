@@ -38,6 +38,7 @@ async function start() {
   }
   const graph = showScene(benchmark ? makeBenchmark() : response.scene, benchmark);
   const historyVerified = await showHistory(response.smoke);
+  if (!response.smoke) await showAuthorWorkspace();
   const webgpu = await probeWebGpu();
   if (graph) renderer.textContent = `Canvas2D · ${webGpuLabels[webgpu]}`;
   if (benchmark && graph && webgpu === "available") void graph.tryGpu();
@@ -98,6 +99,160 @@ async function showHistory(smoke: boolean): Promise<boolean> {
     await refresh();
   }
   return true;
+}
+
+
+type AuthorWorld = { id: string; name: string; revision: number };
+type AuthorPerson = { id: string; label: string };
+type AuthorRelationship = {
+  id: string; subject_id: string; target_id: string; kind: string;
+  trust: number | null; tags: string[]; starts_at: number | null;
+};
+type AuthorSnapshot = {
+  world: AuthorWorld; day: number; people: AuthorPerson[]; relationships: AuthorRelationship[];
+};
+
+// Phase Two editor calls native Rust and keeps no independent world database.
+async function showAuthorWorkspace() {
+  if (!isTauri()) return;
+  const section = document.querySelector<HTMLElement>("#author-workspace")!;
+  const worldSelect = document.querySelector<HTMLSelectElement>("#author-world")!;
+  const dayInput = document.querySelector<HTMLInputElement>("#author-day")!;
+  const content = document.querySelector<HTMLElement>("#author-world-content")!;
+  const info = document.querySelector<HTMLElement>("#author-world-info")!;
+  const status = document.querySelector<HTMLElement>("#author-status")!;
+  const peopleList = document.querySelector<HTMLUListElement>("#author-people")!;
+  const relationshipList = document.querySelector<HTMLUListElement>("#author-relationships")!;
+  const worldForm = document.querySelector<HTMLFormElement>("#author-create-world")!;
+  const personForm = document.querySelector<HTMLFormElement>("#author-create-person")!;
+  const relationshipForm = document.querySelector<HTMLFormElement>("#author-create-relationship")!;
+  const eventForm = document.querySelector<HTMLFormElement>("#author-record-event")!;
+  section.hidden = false;
+  let requestSequence = 0;
+  const value = (form: HTMLFormElement, name: string) =>
+    (form.elements.namedItem(name) as HTMLInputElement | HTMLSelectElement).value;
+  const score = (raw: string): number | null => raw.trim() === "" ? null : Number(raw);
+  const currentDay = () => {
+    const day = Number(dayInput.value);
+    if (!Number.isSafeInteger(day)) throw new Error("Enter a whole-number historical day.");
+    return day;
+  };
+  function options(select: HTMLSelectElement, values: Array<{ id: string; label: string }>) {
+    const previous = select.value;
+    select.replaceChildren(...values.map(({ id, label }) => {
+      const option = document.createElement("option");
+      option.value = id;
+      option.textContent = label;
+      return option;
+    }));
+    if (values.some((item) => item.id === previous)) select.value = previous;
+  }
+  async function refresh() {
+    const sequence = ++requestSequence;
+    const worldId = worldSelect.value;
+    content.hidden = !worldId;
+    if (!worldId) return;
+    const snapshot = await invoke<AuthorSnapshot>("workspace_snapshot", {
+      worldId, day: currentDay(),
+    });
+    if (sequence !== requestSequence) return;
+    info.textContent = snapshot.world.name + " · revision " + snapshot.world.revision + " · day " + snapshot.day;
+    const people = new Map(snapshot.people.map((person) => [person.id, person.label]));
+    const personOptions = snapshot.people.map((person) => ({ id: person.id, label: person.label }));
+    for (const form of [relationshipForm, eventForm]) {
+      for (const field of ["subject", "target", "actor"]) {
+        const select = form.elements.namedItem(field);
+        if (select instanceof HTMLSelectElement) options(select, personOptions);
+      }
+    }
+    options(eventForm.elements.namedItem("relationship") as HTMLSelectElement,
+      snapshot.relationships.map((bond) => ({
+        id: bond.id,
+        label: (people.get(bond.subject_id) ?? bond.subject_id) + " → " +
+          (people.get(bond.target_id) ?? bond.target_id) + " (" + bond.kind + ")",
+      })));
+    peopleList.replaceChildren(...snapshot.people.map((person) => {
+      const item = document.createElement("li");
+      item.textContent = person.label;
+      return item;
+    }));
+    relationshipList.replaceChildren(...snapshot.relationships.map((bond) => {
+      const item = document.createElement("li");
+      item.textContent = (people.get(bond.subject_id) ?? bond.subject_id) + " → " +
+        (people.get(bond.target_id) ?? bond.target_id) + " · " + bond.kind +
+        " · trust " + (bond.trust ?? "unscored") + " · " +
+        (bond.tags.join(", ") || "no tags") + " · since day " + (bond.starts_at ?? "unknown");
+      return item;
+    }));
+    relationshipForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = snapshot.people.length < 2;
+    eventForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = snapshot.people.length === 0 || snapshot.relationships.length === 0;
+    status.textContent = "World loaded. Edits are saved to the local SQLite database.";
+  }
+  async function refreshWorlds(preferred?: string) {
+    const worlds = await invoke<AuthorWorld[]>("workspace_worlds");
+    options(worldSelect, worlds.map((world) => ({ id: world.id, label: world.name })));
+    if (preferred && worlds.some((world) => world.id === preferred)) worldSelect.value = preferred;
+    await refresh();
+  }
+  function bind(form: HTMLFormElement, action: () => Promise<void>) {
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      void (async () => {
+        const button = form.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+        button.disabled = true;
+        try {
+          await action();
+          await refresh();
+          form.querySelectorAll<HTMLInputElement>('input[name="name"], input[name="event"], input[name="citation"]').forEach((input) => { input.value = ""; });
+          status.textContent = "Saved to local world history.";
+        } catch (error) {
+          status.textContent = "Unable to save: " + String(error);
+        } finally {
+          button.disabled = false;
+        }
+      })();
+    });
+  }
+  bind(worldForm, async () => {
+    const world = await invoke<AuthorWorld>("workspace_create_world", { name: value(worldForm, "name") });
+    await refreshWorlds(world.id);
+  });
+  bind(personForm, async () => {
+    await invoke("workspace_create_person", { worldId: worldSelect.value, name: value(personForm, "name") });
+  });
+  bind(relationshipForm, async () => {
+    await invoke("workspace_create_relationship", { request: {
+      world_id: worldSelect.value,
+      subject_id: value(relationshipForm, "subject"),
+      target_id: value(relationshipForm, "target"),
+      kind: value(relationshipForm, "kind"),
+      trust: score(value(relationshipForm, "trust")),
+      tags: value(relationshipForm, "tags"),
+      day: currentDay(),
+    } });
+  });
+  bind(eventForm, async () => {
+    await invoke("workspace_record_event", { request: {
+      world_id: worldSelect.value,
+      relationship_id: value(eventForm, "relationship"),
+      actor_id: value(eventForm, "actor"),
+      day: currentDay(),
+      event_label: value(eventForm, "event"),
+      action: value(eventForm, "action"),
+      intent: value(eventForm, "intent"),
+      outcome: value(eventForm, "outcome"),
+      source_citation: value(eventForm, "citation"),
+      trust: score(value(eventForm, "trust")),
+      tags: value(eventForm, "tags"),
+    } });
+  });
+  worldSelect.addEventListener("change", () => { void refresh().catch((error) => { status.textContent = String(error); }); });
+  dayInput.addEventListener("change", () => { void refresh().catch((error) => { status.textContent = String(error); }); });
+  try {
+    await refreshWorlds();
+  } catch (error) {
+    status.textContent = "Author workspace unavailable: " + String(error);
+  }
 }
 
 function showScene(scene: Scene, benchmark: boolean) {
