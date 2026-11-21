@@ -168,11 +168,10 @@ fn participant_event_search_respects_role_valid_time_and_author_corrections() ->
             .rows
             .is_empty()
     );
-    assert_eq!(
+    assert!(
         store
             .execute_query(&query(alice, None, 1), view(&world, second, 25))?
-            .truncated,
-        true
+            .truncated
     );
     let fork = store.fork(&ForkCommand {
         world: world.id,
