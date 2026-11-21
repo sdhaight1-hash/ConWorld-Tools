@@ -1164,6 +1164,13 @@ test("historical result pages use opaque native tokens and reset on refresh", as
   await expect(page.locator("#author-query-status")).toContainText("page 2");
   await expect(page.locator("#author-query-results")).toContainText("Identical name · person · two");
   await expect(next).toBeHidden();
+  if (process.env.ATLAS_CAPTURE_PHASE3 === "1") {
+    const timestamp = new Date().toISOString().slice(0, 19).replace("T", "_").replaceAll(":", "-") + "Z";
+    await page.locator("#author-query-status").locator("..").screenshot({
+      path: "../../Development-Screenshots/" + timestamp + "_phase-03_query_mock-native-page-two_01.png",
+      animations: "disabled",
+    });
+  }
   await search.click();
   await expect(next).toBeVisible();
   await page.getByRole("button", { name: "Refresh historical view" }).click();

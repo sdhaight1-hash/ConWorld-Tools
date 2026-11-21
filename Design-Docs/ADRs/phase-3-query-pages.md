@@ -11,3 +11,5 @@ Regression covers 525 equal labels with stable distinct IDs, a correction betwee
 ## Native desktop integration
 
 A single bounded continuation slot belongs to the local author workspace. Existing search, composite, saved and participant-event reads return a random opaque token only when another complete page exists. Native retains the typed query and private Rust cursor; tokens rotate after each successful page, and new search or snapshot refresh clears the slot. The registered Tauri command checks world/day/revision and token before replay. Traversal keeps the existing explicit truncation UI. The next-page control replaces the bounded list and shows page number; stale asynchronous replies and refreshed contexts cannot restore old tokens. Native and mock IPC regression coverage added. No cancellation or streaming claim.
+
+The Linux Playwright job captures the successful synthetic second-page UI in the chronological Development-Screenshots path and uploads only that matching PNG as a CI artifact. This is actual browser UI with mocked native IPC, not a running native Tauri/database screenshot. The capture is not claimed until a successful artifact is observed.

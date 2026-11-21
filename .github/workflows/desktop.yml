@@ -70,4 +70,14 @@ jobs:
       - name: Browser fallback smoke tests
         if: runner.os == 'Linux'
         working-directory: apps/desktop
+        env:
+          ATLAS_CAPTURE_PHASE3: "1"
         run: npx playwright install --with-deps chromium --only-shell && npm test
+      - name: Upload Phase 3 browser development capture
+        if: runner.os == 'Linux' && success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: phase-03-browser-pagination
+          path: Development-Screenshots/*_phase-03_query_mock-native-page-two_01.png
+          if-no-files-found: error
+          retention-days: 30
