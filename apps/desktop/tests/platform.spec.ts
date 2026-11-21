@@ -779,3 +779,63 @@ test("native author queries historical events by person and recorded role", asyn
   await form.getByRole("button", { name: "Find participant events" }).click();
   await expect(page.locator("#author-query-status")).toContainText("author revision 1");
 });
+
+
+test("native author composes bounded kind/source/name predicates and clears stale results", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "world", name: "Composite search", revision: 4 };
+    const calls: unknown[] = [];
+    Object.assign(window, {
+      isTauri: true,
+      __compositeCalls: calls,
+      __TAURI_INTERNALS__: {
+        invoke: async (command: string, args: Record<string, unknown>) => {
+          if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+          if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+          if (command === "workspace_worlds") return [world];
+          if (command === "workspace_saved_queries") return [];
+          if (command === "workspace_snapshot") return {
+            world, day: args.day, view_revision: args.revision ?? world.revision,
+            people: [], relationships: [], events: [], definitions: [],
+          };
+          if (command === "workspace_composite_query") {
+            const request = args.request as Record<string, unknown>;
+            calls.push(request);
+            return { revision: request.revision ?? world.revision, truncated: false,
+              rows: [{ id: "claim-1", kind: "claim", label: "Diary testimony",
+                statement: "The ledger was missing.", source_citation: "Archive 7" }] };
+          }
+          throw new Error("Unexpected native command: " + command);
+        },
+      },
+    });
+  });
+  await page.goto("/");
+  const form = page.locator("#author-composite-form");
+  await form.getByRole("button", { name: "Run combined query" }).click();
+  await expect(page.locator("#author-query-status")).toContainText("Select at least one");
+  await form.getByLabel("Label contains").fill("Diary");
+  await form.getByLabel("Object kind").selectOption("claim");
+  await form.getByLabel("Has cited source ID").fill("source-uuid");
+  await form.getByLabel("Combine selected filters").selectOption("or");
+  await form.getByLabel("Exclude matches (NOT)").check();
+  await form.getByRole("button", { name: "Run combined query" }).click();
+  const results = page.locator("#author-query-results li");
+  await expect(results).toHaveCount(1);
+  await expect(results.first()).toContainText("Archive 7");
+  await expect(results.first()).toContainText("ledger was missing");
+  const calls = await page.evaluate(() => (window as unknown as { __compositeCalls: unknown[] }).__compositeCalls);
+  expect(calls).toEqual([{
+    world_id: "world", day: 0, revision: null, limit: 100,
+    predicate: { op: "not", filter: { op: "or", filters: [
+      { op: "contains", text: "Diary" },
+      { op: "object_kind", kind: "claim" },
+      { op: "has_source", source_id: "source-uuid" },
+    ] } },
+  }]);
+  await page.locator("#author-revision").fill("2");
+  await page.locator("#author-revision").blur();
+  await expect(results).toHaveCount(0);
+  await form.getByRole("button", { name: "Run combined query" }).click();
+  await expect(page.locator("#author-query-status")).toContainText("author revision 2");
+});
