@@ -60,14 +60,14 @@ fn saved_queries_keep_stable_ids_and_prior_author_revisions() -> Result<(), Erro
     ))?;
     let save_id = Uuid::new_v4();
     let saved = store.save_named_label_query(SaveNamedLabelQuery {
-                world_id: world.id,
-                expected: first,
-                query_id: None,
-                name: "Search Alice",
-                spec: &search("Alice Vale"),
-                command_id: save_id,
-                scope: Scope::Author,
-            })?;
+        world_id: world.id,
+        expected: first,
+        query_id: None,
+        name: "Search Alice",
+        spec: &search("Alice Vale"),
+        command_id: save_id,
+        scope: Scope::Author,
+    })?;
     assert_eq!(saved.recorded_at, AuthorRevision(2));
     assert_eq!(
         store
@@ -87,26 +87,26 @@ fn saved_queries_keep_stable_ids_and_prior_author_revisions() -> Result<(), Erro
     );
     assert!(matches!(
         store.save_named_label_query(SaveNamedLabelQuery {
-                world_id: world.id,
-                expected: saved.recorded_at,
-                query_id: None,
-                name: "Duplicate",
-                spec: &search("Alice Vale"),
-                command_id: save_id,
-                scope: Scope::Author,
-            }),
+            world_id: world.id,
+            expected: saved.recorded_at,
+            query_id: None,
+            name: "Duplicate",
+            spec: &search("Alice Vale"),
+            command_id: save_id,
+            scope: Scope::Author,
+        }),
         Err(Error::DuplicateCommand(_))
     ));
 
     let revised = store.save_named_label_query(SaveNamedLabelQuery {
-                world_id: world.id,
-                expected: saved.recorded_at,
-                query_id: Some(saved.id),
-                name: "Search renamed",
-                spec: &search("Beatrice Thorne"),
-                command_id: Uuid::new_v4(),
-                scope: Scope::Author,
-            })?;
+        world_id: world.id,
+        expected: saved.recorded_at,
+        query_id: Some(saved.id),
+        name: "Search renamed",
+        spec: &search("Beatrice Thorne"),
+        command_id: Uuid::new_v4(),
+        scope: Scope::Author,
+    })?;
     assert_eq!(revised.id, saved.id);
     assert_eq!(revised.recorded_at, AuthorRevision(3));
     assert_eq!(
@@ -118,14 +118,14 @@ fn saved_queries_keep_stable_ids_and_prior_author_revisions() -> Result<(), Erro
     assert_eq!(current[0].spec, search("Beatrice Thorne"));
     assert!(matches!(
         store.save_named_label_query(SaveNamedLabelQuery {
-                world_id: other.id,
-                expected: other.revision,
-                query_id: Some(saved.id),
-                name: "Cross-world",
-                spec: &search("Alice"),
-                command_id: Uuid::new_v4(),
-                scope: Scope::Author,
-            }),
+            world_id: other.id,
+            expected: other.revision,
+            query_id: Some(saved.id),
+            name: "Cross-world",
+            spec: &search("Alice"),
+            command_id: Uuid::new_v4(),
+            scope: Scope::Author,
+        }),
         Err(Error::NotFound)
     ));
     assert!(matches!(
@@ -134,26 +134,26 @@ fn saved_queries_keep_stable_ids_and_prior_author_revisions() -> Result<(), Erro
     ));
     assert!(matches!(
         store.save_named_label_query(SaveNamedLabelQuery {
-                world_id: world.id,
-                expected: revised.recorded_at,
-                query_id: None,
-                name: "Public",
-                spec: &search("Alice"),
-                command_id: Uuid::new_v4(),
-                scope: Scope::Public,
-            }),
+            world_id: world.id,
+            expected: revised.recorded_at,
+            query_id: None,
+            name: "Public",
+            spec: &search("Alice"),
+            command_id: Uuid::new_v4(),
+            scope: Scope::Public,
+        }),
         Err(Error::CapabilityDenied)
     ));
     assert!(matches!(
         store.save_named_label_query(SaveNamedLabelQuery {
-                world_id: world.id,
-                expected: revised.recorded_at,
-                query_id: None,
-                name: "Empty search",
-                spec: &search(" "),
-                command_id: Uuid::new_v4(),
-                scope: Scope::Author,
-            }),
+            world_id: world.id,
+            expected: revised.recorded_at,
+            query_id: None,
+            name: "Empty search",
+            spec: &search(" "),
+            command_id: Uuid::new_v4(),
+            scope: Scope::Author,
+        }),
         Err(Error::InvalidInput(_))
     ));
     assert_eq!(
