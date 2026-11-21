@@ -4,9 +4,9 @@ use std::collections::HashSet;
 use uuid::Uuid;
 
 use crate::{
-    ClaimAudience, Error, ObjectRef, Scope, Store, ViewContext,
+    AuthorRevision, ClaimAudience, Error, ObjectRef, Scope, Store, ViewContext, WorldId,
     access::{can_view, restrict},
-    query::QuerySpec,
+    query::{ParameterBinding, QuerySpec},
 };
 
 pub const LAYOUT_SCHEMA_VERSION: u16 = 1;
@@ -36,6 +36,39 @@ pub enum ElementContent {
     Stack(Vec<LayoutElement>),
     Text(String),
     Query(QuerySpec),
+    SavedQuery(SavedQueryBinding),
+}
+
+/// Pin the definition, not its results. Runtime data follows the layout's view.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedQueryBinding {
+    pub world: WorldId,
+    pub query_id: Uuid,
+    pub definition_revision: i64,
+    pub bindings: Vec<ParameterBinding>,
+}
+
+impl SavedQueryBinding {
+    pub fn resolve(&self, store: &Store, view: ViewContext) -> Result<QuerySpec, Error> {
+        if view.scope != Scope::Author {
+            return Err(Error::CapabilityDenied);
+        }
+        if self.world != view.world {
+            return Err(Error::WrongWorld);
+        }
+        let pinned = AuthorRevision(self.definition_revision);
+        if pinned.0 <= 0 || pinned > view.revision {
+            return Err(Error::InvalidRevision);
+        }
+        let saved = store
+            .saved_label_query(self.world, pinned, view.scope, self.query_id)?
+            .ok_or(Error::NotFound)?;
+        if saved.recorded_at != pinned {
+            return Err(Error::InvalidRevision);
+        }
+        saved.bind(view, &self.bindings)
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -106,6 +139,14 @@ impl LayoutDocument {
                 ElementContent::Text(text) if text.len() > 16_384 => {
                     return Err(Error::InvalidInput("layout text length"));
                 }
+                ElementContent::SavedQuery(binding) => {
+                    if binding.world != self.entry.world {
+                        return Err(Error::WrongWorld);
+                    }
+                    if binding.definition_revision <= 0 || binding.bindings.len() > 32 {
+                        return Err(Error::InvalidInput("saved layout binding"));
+                    }
+                }
                 _ => {}
             }
         }
@@ -122,7 +163,9 @@ impl LayoutDocument {
                 continue;
             }
             match &element.content {
-                ElementContent::Query(_) => return Err(Error::CapabilityDenied),
+                ElementContent::Query(_) | ElementContent::SavedQuery(_) => {
+                    return Err(Error::CapabilityDenied);
+                }
                 ElementContent::Stack(children) => {
                     pending.extend(children.iter().map(|child| (child, audience)))
                 }
@@ -154,7 +197,9 @@ impl LayoutDocument {
                     text.push_str(&block.to_lowercase().replace('\0', " "));
                     text.push('\n');
                 }
-                ElementContent::Query(_) => return Err(Error::CapabilityDenied),
+                ElementContent::Query(_) | ElementContent::SavedQuery(_) => {
+                    return Err(Error::CapabilityDenied);
+                }
             }
         }
         Ok(Some(text))
@@ -263,7 +308,7 @@ fn project(
             }
             DisplayContent::Text(text.clone())
         }
-        ElementContent::Query(query) => {
+        ElementContent::Query(_) | ElementContent::SavedQuery(_) => {
             if view.scope != Scope::Author {
                 return Err(Error::CapabilityDenied);
             }
@@ -271,7 +316,13 @@ fn project(
                 return Err(Error::QueryBudgetExceeded);
             }
             budget.queries += 1;
-            let result = store.execute_query(query, view)?;
+            let result = match &element.content {
+                ElementContent::Query(query) => store.execute_query(query, view)?,
+                ElementContent::SavedQuery(binding) => {
+                    store.execute_query(&binding.resolve(store, view)?, view)?
+                }
+                _ => unreachable!("query component"),
+            };
             DisplayContent::QueryRows {
                 records: result
                     .rows

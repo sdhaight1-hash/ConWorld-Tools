@@ -1086,3 +1086,159 @@ fn public_index_is_selective_rebuilt_and_revoked_atomically() -> Result<(), Erro
     assert!(find(&store, author, "étoile")?.matches.is_empty());
     Ok(())
 }
+
+#[test]
+fn saved_canvas_binding_pins_definition_and_replays_live_author_history() -> Result<(), Error> {
+    use atlas_store::{
+        layout::SavedQueryBinding,
+        query::{ParameterBinding, ParameterValue, SaveNamedLabelQuery},
+    };
+
+    let dir = tempfile::tempdir()?;
+    let path = dir.path().join("saved-layout.sqlite");
+    let mut store = Store::open(&path)?;
+    let world = seed(&mut store)?;
+    let mut author = view(&world, 13);
+    let saved = store.save_named_parameterized_query(SaveNamedLabelQuery {
+        world_id: world.id,
+        expected: author.revision,
+        query_id: None,
+        name: "People of interest",
+        spec: &query(QueryFilter::ExactLabel("Alice Vale".into())),
+        command_id: Uuid::new_v4(),
+        scope: Scope::Author,
+    })?;
+    author.revision = saved.recorded_at;
+    let binding = SavedQueryBinding {
+        world: world.id,
+        query_id: saved.id,
+        definition_revision: saved.recorded_at.0,
+        bindings: vec![ParameterBinding {
+            name: "exact_1".into(),
+            value: ParameterValue::Text {
+                value: "Beatrice Thorne".into(),
+            },
+        }],
+    };
+    let entry = id(&world, 1);
+    let block = |audience, content| LayoutElement {
+        id: ElementId(Uuid::new_v4()),
+        audience,
+        content,
+    };
+    let query_block = block(
+        ClaimAudience::Author,
+        ElementContent::SavedQuery(binding.clone()),
+    );
+    let query_id = query_block.id;
+    let mut doc = LayoutDocument {
+        schema_version: LAYOUT_SCHEMA_VERSION,
+        entry,
+        root: block(
+            ClaimAudience::Public,
+            ElementContent::Stack(vec![
+                block(
+                    ClaimAudience::Public,
+                    ElementContent::Text("Released biography".into()),
+                ),
+                query_block,
+            ]),
+        ),
+    };
+    let direct = store.execute_query(&binding.resolve(&store, author)?, author)?;
+    assert_eq!(direct.rows.len(), 1);
+    assert_eq!(direct.rows[0].object, id(&world, 2));
+    let mut unsafe_doc = doc.clone();
+    if let ElementContent::Stack(children) = &mut unsafe_doc.root.content {
+        children[1].audience = ClaimAudience::Public;
+    }
+    assert!(matches!(
+        store.save_entry_layout(author, &unsafe_doc, true, Uuid::new_v4()),
+        Err(Error::CapabilityDenied)
+    ));
+    let mut foreign = binding.clone();
+    foreign.world = WorldId(Uuid::new_v4());
+    assert!(matches!(
+        foreign.resolve(&store, author),
+        Err(Error::WrongWorld)
+    ));
+    let mut nonexistent_version = binding.clone();
+    nonexistent_version.definition_revision += 1;
+    assert!(matches!(
+        nonexistent_version.resolve(&store, author),
+        Err(Error::InvalidRevision)
+    ));
+    let target = block(ClaimAudience::Author, ElementContent::Stack(vec![]));
+    let target_id = target.id;
+    if let ElementContent::Stack(children) = &mut doc.root.content {
+        children.push(target);
+    }
+    doc.reparent(query_id, target_id)?;
+    author.revision = store.save_entry_layout(author, &doc, true, Uuid::new_v4())?;
+    let pinned = author;
+    let rows = |store: &Store, context| -> Result<Vec<(ObjectRef, String)>, Error> {
+        let page = store.display_entry(context, entry)?.ok_or(Error::NotFound)?;
+        let DisplayContent::Stack(children) = page.content else {
+            panic!("expected layout")
+        };
+        let DisplayContent::Stack(private) = &children[1].content else {
+            panic!("expected private stack")
+        };
+        assert_eq!(private[0].id, query_id);
+        let DisplayContent::QueryRows { records, .. } = &private[0].content else {
+            panic!("expected bound query")
+        };
+        Ok(records.clone())
+    };
+    assert_eq!(
+        rows(&store, pinned)?,
+        vec![(id(&world, 2), "Beatrice Thorne".into())]
+    );
+    let revision = store.save_named_label_query(SaveNamedLabelQuery {
+        world_id: world.id,
+        expected: author.revision,
+        query_id: Some(saved.id),
+        name: "Revised definition",
+        spec: &query(QueryFilter::ExactLabel("Alice Vale".into())),
+        command_id: Uuid::new_v4(),
+        scope: Scope::Author,
+    })?;
+    author.revision = revision.recorded_at;
+    assert_eq!(rows(&store, author)?, rows(&store, pinned)?);
+    author.revision = store.apply(&Command {
+        world: world.id,
+        branch: world.main,
+        expected: author.revision,
+        id: Uuid::new_v4(),
+        author: "Fixture".into(),
+        rationale: "Correct person label".into(),
+        scope: Scope::Author,
+        changes: vec![Change::Correct(
+            id(&world, 2),
+            Record {
+                label: "Beatrice Florin".into(),
+                valid: ValidInterval::default(),
+                source: None,
+                data: ObjectData::Person,
+            },
+        )],
+    })?;
+    assert!(rows(&store, author)?.is_empty());
+    assert_eq!(rows(&store, pinned)?.len(), 1);
+    let public = ViewContext {
+        scope: Scope::Public,
+        ..author
+    };
+    let page = store.display_entry(public, entry)?.unwrap();
+    assert!(matches!(page.content, DisplayContent::Stack(children) if children.len() == 1));
+    assert!(matches!(
+        binding.resolve(&store, public),
+        Err(Error::CapabilityDenied)
+    ));
+    drop(store);
+    let store = Store::open(&path)?;
+    assert_eq!(store.entry_layout(pinned, entry)?, Some((doc, true)));
+    assert_eq!(rows(&store, pinned)?.len(), 1);
+    assert!(rows(&store, author)?.is_empty());
+    Ok(())
+}
