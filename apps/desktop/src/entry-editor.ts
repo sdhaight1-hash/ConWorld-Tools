@@ -318,6 +318,8 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
       event.preventDefault();
       if (fields.disabled) return;
       const document = draft();
+      ++request;
+      result.replaceChildren();
       clearAuthorPreview();
       fields.disabled = true;
       authorPreview.disabled = true;

@@ -44,6 +44,13 @@ impl Store {
         )?;
         resolve_object(&tx, document.entry, view.branch, view.revision, view.day)?
             .ok_or(Error::NotFound)?;
+        // Stable targets can be temporarily absent at the selected fictional day,
+        // but a typo must not silently create an unresolved reference.
+        for (_, link) in document.visible_links(Scope::Author) {
+            if kind_of(&tx, link.target)?.is_none() {
+                return Err(Error::NotFound);
+            }
+        }
         tx.execute(
             "INSERT INTO entry_layout_versions(world_id,entry_id,revision,document,published)
             VALUES (?1,?2,?3,?4,?5)",
