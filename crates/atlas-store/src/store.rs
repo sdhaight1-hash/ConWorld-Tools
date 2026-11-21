@@ -93,6 +93,59 @@ impl Store {
         load_world(&self.conn, world)
     }
 
+    /// List existing worlds for the trusted local author UI.
+    pub fn worlds(&self, scope: Scope) -> Result<Vec<World>, Error> {
+        require_author(scope)?;
+        let ids: Vec<[u8; 16]> = {
+            let mut statement = self.conn.prepare("SELECT id FROM worlds ORDER BY name, id")?;
+            statement
+                .query_map([], |row| row.get(0))?
+                .collect::<Result<_, _>>()?
+        };
+        ids.into_iter()
+            .map(|id| load_world(&self.conn, WorldId(Uuid::from_bytes(id))))
+            .collect()
+    }
+
+    /// Phase Two authoring projection: bounded object snapshots, using one
+    /// revision/branch/day and one SQLite read transaction. Phase Three will
+    /// replace the scan with the indexed query engine.
+    pub fn objects_at(&self, view: ViewContext, limit: usize) -> Result<Vec<Version>, Error> {
+        require_author(view.scope)?;
+        if !(1..=2_000).contains(&limit) {
+            return Err(Error::InvalidInput("object listing limit"));
+        }
+        let tx = self.conn.unchecked_transaction()?;
+        let world = load_world(&tx, view.world)?;
+        if view.revision < AuthorRevision(0) || view.revision > world.revision {
+            return Err(Error::InvalidRevision);
+        }
+        let ids: Vec<[u8; 16]> = {
+            let mut statement =
+                tx.prepare("SELECT id FROM objects WHERE world_id = ?1 ORDER BY id LIMIT ?2")?;
+            statement
+                .query_map(
+                    params![view.world.0.as_bytes(), limit as i64],
+                    |row| row.get(0),
+                )?
+                .collect::<Result<_, _>>()?
+        };
+        let mut visible = Vec::new();
+        for id in ids {
+            let object = ObjectRef {
+                world: view.world,
+                id: ObjectId(Uuid::from_bytes(id)),
+            };
+            if let Some(version) =
+                resolve_object(&tx, object, view.branch, view.revision, view.day)?
+            {
+                visible.push(version);
+            }
+        }
+        tx.commit()?;
+        Ok(visible)
+    }
+
     pub fn register_calendar(
         &mut self,
         command: &CalendarCommand,

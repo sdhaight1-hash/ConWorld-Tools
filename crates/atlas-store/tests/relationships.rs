@@ -597,3 +597,66 @@ fn phase_two_action_effect_rejects_a_different_event_and_rolls_back() -> Result<
     assert!(store.effect_on(bond_id, view(&world, first, 20))?.is_none());
     store.verify_foreign_keys(Scope::Author)
 }
+
+#[test]
+fn phase_two_author_world_listing_is_persistent_and_historically_scoped() -> Result<(), Error> {
+    let directory = tempfile::tempdir()?;
+    let database = directory.path().join("author.sqlite");
+    let mut store = Store::open(&database)?;
+    assert!(store.worlds(Scope::Author)?.is_empty());
+    let world = store.create_world("Author workspace", Scope::Author)?;
+    let other = store.create_world("Other world", Scope::Author)?;
+    let alice = ObjectRef::new(world.id);
+    let bob = ObjectRef::new(world.id);
+    let bond_id = ObjectRef::new(world.id);
+    let first = store.apply(&command(
+        &world,
+        world.revision,
+        vec![
+            Change::Create(alice, person("Alice")),
+            Change::Create(bob, person("Bob")),
+            Change::Create(
+                bond_id,
+                dated(10, bond(alice, bob, 80, &["friends"]), None, "Their friendship"),
+            ),
+        ],
+    ))?;
+    let early = store.objects_at(view(&world, first, 9), 20)?;
+    assert_eq!(early.len(), 2);
+    assert!(early.iter().all(|entry| entry.object != bond_id));
+    let later = store.objects_at(view(&world, first, 10), 20)?;
+    assert_eq!(later.len(), 3);
+    assert!(later.iter().any(|entry| entry.object == bond_id));
+    let scoped = ViewContext {
+        world: other.id,
+        branch: other.main,
+        revision: other.revision,
+        day: WorldDay(10),
+        scope: Scope::Author,
+    };
+    assert!(store.objects_at(scoped, 20)?.is_empty());
+    assert!(matches!(
+        store.objects_at(view(&world, first, 10), 0),
+        Err(Error::InvalidInput(_))
+    ));
+    assert!(matches!(
+        store.objects_at(view(&world, first, 10), 2_001),
+        Err(Error::InvalidInput(_))
+    ));
+    assert!(matches!(store.worlds(Scope::Public), Err(Error::CapabilityDenied)));
+    assert!(matches!(
+        store.objects_at(ViewContext { scope: Scope::Public, ..view(&world, first, 10) }, 20),
+        Err(Error::CapabilityDenied)
+    ));
+    drop(store);
+    let reopened = Store::open(&database)?;
+    let worlds = reopened.worlds(Scope::Author)?;
+    assert_eq!(worlds.len(), 2);
+    assert_eq!(worlds[0].id, world.id);
+    assert_eq!(worlds[1].id, other.id);
+    assert_eq!(
+        reopened.objects_at(view(&world, first, 10), 20)?.len(),
+        3
+    );
+    Ok(())
+}
