@@ -1,0 +1,11 @@
+# Phase 3 — Dependency-driven mention preview refresh
+
+Status: draft stacked on #44; tracks #4. No schema change.
+
+The existing cancellable native discovery entry point consumes the revision-delta plan through a single Store-local preview slot. It stores at most 100 complete author candidates, including zero rows, with exact world/branch/day/revision/scope, optional focus and result limit. No client-supplied cached rows or persistent materialized claim corpus. Both matching and delta evaluation run under the same deadline and SQLite progress handler.
+
+On same selection and a compatible historical delta, remove all previous candidates for affected source IDs and recompute only those claims. Focused previews ignore changes to unrelated claims. Source deletion/invisibility replaces old rows with empty results. Sort by the existing stable source/span/target order; if a source preview itself truncates, or more than 32 affected sources need scan, fall back to the existing bounded scan. A partial/truncated result is never recorded as a complete corpus. Full invalidation on person/alias edits, different day/world/branch, reverse revision, or incompatible selection. A cancelled/failed read cannot publish a new preview. Explicit index rebuild clears the slot.
+
+The native IPC already calls the controlled discovery entry point and therefore automatically benefits on repeated scans and immediate post-review refreshes. The UI still clears stale rows when switching context; no background refresh, no public cache, no speculative shared-cache framework. This is the first concrete dependency consumer; Canvas component dependency scheduling remains later work.
+
+Regression compares controlled refresh results to uncached canonical scans after review and source correction, checks reverse history, truncation, focused unrelated changes, rename, scope denial, cancellation and rebuild parity. CI required.

@@ -92,6 +92,15 @@ pub struct MentionDiscovery {
     pub truncated: bool,
 }
 
+/// Internal, single-slot, author-only preview. Never accepts client rows.
+#[derive(Clone)]
+pub(crate) struct MentionPreview {
+    view: ViewContext,
+    source: Option<ObjectRef>,
+    limit: usize,
+    result: MentionDiscovery,
+}
+
 /// Which existing source previews must be discarded between exact views.
 /// A full refresh is necessary when the name dictionary or context changes.
 /// A source-only refresh replaces ALL candidates for each returned ID,
@@ -132,9 +141,67 @@ impl Store {
         if view.scope != Scope::Author {
             return Err(Error::CapabilityDenied);
         }
-        self.with_query_control(control, |store| {
+        let preview = self.with_query_control(control, |store| {
+            if !(1..=100).contains(&limit) {
+                return Err(Error::InvalidInput("discovery result limit"));
+            }
+            store.validate_query_view(view)?;
+            if source.is_some_and(|id| id.world != view.world) {
+                return Err(Error::WrongWorld);
+            }
+            let previous = store.mention_preview.borrow().clone();
+            if let Some(previous) = previous
+                && previous.source == source
+                && previous.limit == limit
+                && !previous.result.truncated
+                && let MentionRefresh::Sources(changed) =
+                    store.mention_refresh_plan(previous.view, view)?
+            {
+                // Bound delta work. A large delta uses the normal scan budgets.
+                let affected: Vec<_> = changed
+                    .into_iter()
+                    .filter(|id| source.is_none_or(|focus| focus == *id))
+                    .collect();
+                if affected.len() <= 32 {
+                    let mut rows = previous.result.rows;
+                    rows.retain(|row| !affected.contains(&row.source.object));
+                    let mut complete = true;
+                    for id in affected {
+                        store.check_query_control()?;
+                        let latest = store.discover_mentions_inner(view, Some(id), limit)?;
+                        if latest.truncated {
+                            complete = false;
+                            break;
+                        }
+                        rows.extend(latest.rows);
+                    }
+                    if complete {
+                        sort_candidates(&mut rows);
+                        let truncated = rows.len() > limit;
+                        rows.truncate(limit);
+                        return Ok(MentionDiscovery {
+                            revision: view.revision,
+                            rows,
+                            truncated,
+                        });
+                    }
+                }
+            }
             store.discover_mentions_inner(view, source, limit)
-        })
+        })?;
+        // Publish the cache only after the entire controlled read succeeds.
+        // Never use an incomplete preview as a complete corpus.
+        *self.mention_preview.borrow_mut() = if preview.truncated {
+            None
+        } else {
+            Some(MentionPreview {
+                view,
+                source,
+                limit,
+                result: preview.clone(),
+            })
+        };
+        Ok(preview)
     }
 
     fn discover_mentions_inner(
@@ -213,16 +280,7 @@ impl Store {
             }
         }
 
-        rows.sort_by(|a, b| {
-            a.source
-                .object
-                .id
-                .0
-                .cmp(&b.source.object.id.0)
-                .then(a.start_byte.cmp(&b.start_byte))
-                .then(a.end_byte.cmp(&b.end_byte))
-                .then(a.target.id.0.cmp(&b.target.id.0))
-        });
+        sort_candidates(&mut rows);
         let mut group = 0;
         while group < rows.len() {
             let mut last = group + 1;
@@ -250,6 +308,19 @@ impl Store {
             truncated,
         })
     }
+}
+
+fn sort_candidates(rows: &mut [MentionCandidate]) {
+    rows.sort_by(|a, b| {
+        a.source
+            .object
+            .id
+            .0
+            .cmp(&b.source.object.id.0)
+            .then(a.start_byte.cmp(&b.start_byte))
+            .then(a.end_byte.cmp(&b.end_byte))
+            .then(a.target.id.0.cmp(&b.target.id.0))
+    });
 }
 
 /// Conservative keys for SQLite's ASCII-lowercased, three-character

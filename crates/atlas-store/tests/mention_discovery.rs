@@ -579,3 +579,121 @@ fn indexed_names_ignore_large_unmatched_dictionary_and_preserve_exact_spans() ->
     store.verify_foreign_keys(Scope::Author)?;
     Ok(())
 }
+
+#[test]
+fn controlled_previews_refresh_only_changed_sources_and_match_fresh_reads() -> Result<(), Error> {
+    use atlas_store::discovery::{MentionDisposition, ReviewMention};
+    use atlas_store::query::QueryControl;
+    use std::time::Duration;
+
+    let mut store = Store::open(":memory:")?;
+    let world = store.create_world("Refresh archive", Scope::Author)?;
+    let person = ObjectRef::new(world.id);
+    let event = ObjectRef::new(world.id);
+    let source = ObjectRef::new(world.id);
+    let first = ObjectRef::new(world.id);
+    let second = ObjectRef::new(world.id);
+    let initial = store.apply(&command(
+        &world,
+        world.revision,
+        vec![
+            Change::Create(person, record("Ann", ObjectData::Person)),
+            Change::Create(
+                event,
+                record("Meeting", ObjectData::HistoricalEvent {
+                    occurrence: EventDate::Exact(WorldDay(0)),
+                }),
+            ),
+            Change::Create(source, record("Diary", ObjectData::Source {
+                citation: "Folio 1".into(),
+            })),
+        ],
+    ))?;
+    let claim = |label: &str, statement: &str| Record {
+        source: Some(source),
+        ..record(label, ObjectData::Claim {
+            subject: event,
+            predicate: "reported".into(),
+            statement: statement.into(),
+            audience: ClaimAudience::Author,
+        })
+    };
+    let written = store.apply(&command(
+        &world,
+        initial,
+        vec![
+            Change::Create(first, claim("First", "Ann arrived.")),
+            Change::Create(second, claim("Second", "Ann departed.")),
+        ],
+    ))?;
+    let read = |store: &Store, revision, focus, limit| {
+        store.discover_mentions_controlled(
+            view(&world, revision, 0),
+            focus,
+            limit,
+            &QueryControl::new(Duration::from_secs(10))?,
+        )
+    };
+    let before = read(&store, written, None, 100)?;
+    assert_eq!(before.rows.len(), 2);
+    let chosen = before.rows.iter().find(|row| row.source.object == first).unwrap();
+    let approved = store.review_mention(ReviewMention {
+        view: view(&world, written, 0),
+        expected: written,
+        source: chosen.source,
+        target: chosen.target,
+        start_byte: chosen.start_byte,
+        end_byte: chosen.end_byte,
+        decision: MentionDisposition::Approved,
+        command_id: Uuid::new_v4(),
+    })?;
+    let updated = read(&store, approved, None, 100)?;
+    assert_eq!(updated.rows, store.discover_mentions(view(&world, approved, 0), 100)?.rows);
+    assert_eq!(updated.rows.iter().find(|row| row.source.object == first).unwrap().disposition, Some(MentionDisposition::Approved));
+    let corrected = store.apply(&command(
+        &world,
+        approved,
+        vec![Change::Correct(first, claim("First", "Nobody arrived."))],
+    ))?;
+    let refreshed = read(&store, corrected, None, 100)?;
+    assert_eq!(refreshed.rows.len(), 1);
+    assert_eq!(refreshed.rows[0].source.object, second);
+    assert_eq!(refreshed.rows, store.discover_mentions(view(&world, corrected, 0), 100)?.rows);
+    assert_eq!(read(&store, written, None, 100)?.rows, before.rows);
+
+    // Incomplete results cannot serve as complete cached corpora.
+    assert!(read(&store, written, None, 1)?.truncated);
+    let focused = read(&store, corrected, Some(first), 100)?;
+    assert!(focused.rows.is_empty());
+    let unrelated = store.apply(&command(
+        &world,
+        corrected,
+        vec![Change::Correct(second, claim("Second", "Ann returned."))],
+    ))?;
+    assert!(read(&store, unrelated, Some(first), 100)?.rows.is_empty());
+    let rename = store.apply(&command(
+        &world,
+        unrelated,
+        vec![Change::Correct(person, record("Anna", ObjectData::Person))],
+    ))?;
+    assert!(read(&store, rename, None, 100)?.rows.is_empty());
+    assert!(matches!(
+        store.discover_mentions_controlled(
+            ViewContext { scope: Scope::Public, ..view(&world, rename, 0) },
+            None,
+            100,
+            &QueryControl::new(Duration::from_secs(10))?,
+        ),
+        Err(Error::CapabilityDenied)
+    ));
+    let cancelled = QueryControl::new(Duration::from_secs(10))?;
+    cancelled.cancel();
+    assert!(matches!(
+        store.discover_mentions_controlled(view(&world, rename, 0), None, 100, &cancelled),
+        Err(Error::QueryCancelled)
+    ));
+    assert!(read(&store, rename, None, 100)?.rows.is_empty());
+    store.rebuild_search_index(Scope::Author)?;
+    assert_eq!(read(&store, written, None, 100)?.rows, before.rows);
+    Ok(())
+}
