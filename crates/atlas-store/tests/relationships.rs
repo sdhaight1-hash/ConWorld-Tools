@@ -502,3 +502,42 @@ fn phase_two_relationship_identity_is_not_reassigned() -> Result<(), Error> {
     );
     store.verify_foreign_keys(Scope::Author)
 }
+
+#[test]
+fn phase_two_action_effect_rejects_a_different_event_and_rolls_back() -> Result<(), Error> {
+    let mut store = Store::open(":memory:")?;
+    let world = store.create_world("Northbridge", Scope::Author)?;
+    let alice = ObjectRef::new(world.id);
+    let beatrice = ObjectRef::new(world.id);
+    let source_id = ObjectRef::new(world.id);
+    let first_event = ObjectRef::new(world.id);
+    let second_event = ObjectRef::new(world.id);
+    let bond_id = ObjectRef::new(world.id);
+    let action = ObjectRef::new(world.id);
+    let first = store.apply(&command(&world, world.revision, vec![
+        Change::Create(alice, person("Alice")),
+        Change::Create(beatrice, person("Beatrice")),
+        Change::Create(source_id, source()),
+        Change::Create(first_event, dated(10, ObjectData::HistoricalEvent {
+            occurrence: EventDate::Exact(WorldDay(10)) }, Some(source_id), "First event")),
+        Change::Create(second_event, dated(12, ObjectData::HistoricalEvent {
+            occurrence: EventDate::Exact(WorldDay(12)) }, Some(source_id), "Second event")),
+        Change::Create(bond_id, dated(0, bond(alice, beatrice, 80, &["friends"]), None, "Friendship")),
+        Change::Create(action, dated(12, ObjectData::ActorAction {
+            event: second_event, actor: beatrice, target: Some(alice),
+            action: "disclosure".into(), intent: "secure a title".into(),
+            outcome: ActionOutcome::Failed,
+        }, Some(source_id), "Failed attempt")),
+    ]))?;
+    let invalid_effect = Change::ActionEffect {
+        event: first_event, action, target: bond_id,
+        record: dated(12, bond(alice, beatrice, 20, &["estranged"]), Some(source_id), "Distrust"),
+    };
+    assert!(matches!(store.apply(&command(&world, first, vec![invalid_effect])),
+        Err(Error::InvalidInput(_))));
+    assert_eq!(store.world(world.id, Scope::Author)?.revision, first);
+    assert_eq!(store.get_object(bond_id, view(&world, first, 20))?.unwrap().record.data,
+        bond(alice, beatrice, 80, &["friends"]));
+    assert!(store.effect_on(bond_id, view(&world, first, 20))?.is_none());
+    store.verify_foreign_keys(Scope::Author)
+}
