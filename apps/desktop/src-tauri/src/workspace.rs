@@ -1891,7 +1891,10 @@ pub fn workspace_cancel_query(
 }
 
 #[tauri::command]
-#[allow(clippy::too_many_arguments, reason = "Keep the named Tauri IPC contract stable; the request ID is independent of query data")]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Keep the named Tauri IPC contract stable; the request ID is independent of query data"
+)]
 pub async fn workspace_search(
     app: AppHandle,
     request_id: String,
