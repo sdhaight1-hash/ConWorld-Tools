@@ -168,7 +168,10 @@ impl Store {
                                 role: recorded,
                             } if member == participant
                                 && role.is_none_or(|wanted| wanted == *recorded)
-                                && visible.contains(event) => Some(*event),
+                                && visible.contains(event) =>
+                            {
+                                Some(*event)
+                            }
                             _ => None,
                         })
                         .collect();

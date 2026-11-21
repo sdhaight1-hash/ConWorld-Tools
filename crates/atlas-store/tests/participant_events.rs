@@ -62,20 +62,38 @@ fn participant_event_search_respects_role_valid_time_and_author_corrections() ->
         vec![
             Change::Create(alice, record("Alice", 0, ObjectData::Person)),
             Change::Create(bob, record("Bob", 0, ObjectData::Person)),
-            Change::Create(meeting, record("Guild meeting", 10, ObjectData::HistoricalEvent {
-                occurrence: EventDate::Exact(WorldDay(10)),
-            })),
-            Change::Create(hearing, record("Court hearing", 20, ObjectData::HistoricalEvent {
-                occurrence: EventDate::Exact(WorldDay(20)),
-            })),
+            Change::Create(
+                meeting,
+                record(
+                    "Guild meeting",
+                    10,
+                    ObjectData::HistoricalEvent {
+                        occurrence: EventDate::Exact(WorldDay(10)),
+                    },
+                ),
+            ),
+            Change::Create(
+                hearing,
+                record(
+                    "Court hearing",
+                    20,
+                    ObjectData::HistoricalEvent {
+                        occurrence: EventDate::Exact(WorldDay(20)),
+                    },
+                ),
+            ),
         ],
     ))?;
     let role_record = |label: &str, event, participant, role, day| {
-        record(label, day, ObjectData::EventInvolvement {
-            event,
-            participant,
-            role,
-        })
+        record(
+            label,
+            day,
+            ObjectData::EventInvolvement {
+                event,
+                participant,
+                role,
+            },
+        )
     };
     let involvement = ObjectRef::new(world.id);
     let later_involvement = ObjectRef::new(world.id);
@@ -84,21 +102,78 @@ fn participant_event_search_respects_role_valid_time_and_author_corrections() ->
         &world,
         first,
         vec![
-            Change::Create(involvement, role_record("Guild attendance", meeting, alice, EventRole::Actor, 10)),
-            Change::Create(later_involvement, role_record("Court attendance", hearing, alice, EventRole::Actor, 20)),
-            Change::Create(witness, role_record("Witness at meeting", meeting, bob, EventRole::Witness, 10)),
+            Change::Create(
+                involvement,
+                role_record("Guild attendance", meeting, alice, EventRole::Actor, 10),
+            ),
+            Change::Create(
+                later_involvement,
+                role_record("Court attendance", hearing, alice, EventRole::Actor, 20),
+            ),
+            Change::Create(
+                witness,
+                role_record("Witness at meeting", meeting, bob, EventRole::Witness, 10),
+            ),
         ],
     ))?;
     let actor = query(alice, Some(EventRole::Actor), 100);
     let all = query(alice, None, 100);
-    assert_eq!(store.execute_query(&actor, view(&world, second, 9))?.rows.len(), 0);
-    assert_eq!(store.execute_query(&actor, view(&world, second, 10))?.rows[0].object, meeting);
-    assert_eq!(store.execute_query(&actor, view(&world, second, 25))?.rows.len(), 2);
-    assert_eq!(store.execute_query(&all, view(&world, second, 25))?.rows.len(), 2);
-    assert!(store.execute_query(&actor, view(&world, first, 25))?.rows.is_empty());
-    assert_eq!(store.execute_query(&query(bob, Some(EventRole::Witness), 100), view(&world, second, 25))?.rows[0].object, meeting);
-    assert!(store.execute_query(&query(alice, Some(EventRole::Witness), 100), view(&world, second, 25))?.rows.is_empty());
-    assert_eq!(store.execute_query(&query(alice, None, 1), view(&world, second, 25))?.truncated, true);
+    assert_eq!(
+        store
+            .execute_query(&actor, view(&world, second, 9))?
+            .rows
+            .len(),
+        0
+    );
+    assert_eq!(
+        store.execute_query(&actor, view(&world, second, 10))?.rows[0].object,
+        meeting
+    );
+    assert_eq!(
+        store
+            .execute_query(&actor, view(&world, second, 25))?
+            .rows
+            .len(),
+        2
+    );
+    assert_eq!(
+        store
+            .execute_query(&all, view(&world, second, 25))?
+            .rows
+            .len(),
+        2
+    );
+    assert!(
+        store
+            .execute_query(&actor, view(&world, first, 25))?
+            .rows
+            .is_empty()
+    );
+    assert_eq!(
+        store
+            .execute_query(
+                &query(bob, Some(EventRole::Witness), 100),
+                view(&world, second, 25)
+            )?
+            .rows[0]
+            .object,
+        meeting
+    );
+    assert!(
+        store
+            .execute_query(
+                &query(alice, Some(EventRole::Witness), 100),
+                view(&world, second, 25)
+            )?
+            .rows
+            .is_empty()
+    );
+    assert_eq!(
+        store
+            .execute_query(&query(alice, None, 1), view(&world, second, 25))?
+            .truncated,
+        true
+    );
     let fork = store.fork(&ForkCommand {
         world: world.id,
         parent: world.main,
@@ -112,25 +187,63 @@ fn participant_event_search_respects_role_valid_time_and_author_corrections() ->
     let corrected = store.apply(&command(
         &world,
         fork.created_revision,
-        vec![Change::Correct(involvement, role_record("Guild attendance", meeting, alice, EventRole::Witness, 10))],
+        vec![Change::Correct(
+            involvement,
+            role_record("Guild attendance", meeting, alice, EventRole::Witness, 10),
+        )],
     ))?;
-    assert_eq!(store.execute_query(&actor, view(&world, corrected, 25))?.rows.len(), 1);
-    assert_eq!(store.execute_query(&query(alice, Some(EventRole::Witness), 100), view(&world, corrected, 25))?.rows[0].object, meeting);
-    assert_eq!(store.execute_query(&actor, view(&world, second, 25))?.rows.len(), 2);
+    assert_eq!(
+        store
+            .execute_query(&actor, view(&world, corrected, 25))?
+            .rows
+            .len(),
+        1
+    );
+    assert_eq!(
+        store
+            .execute_query(
+                &query(alice, Some(EventRole::Witness), 100),
+                view(&world, corrected, 25)
+            )?
+            .rows[0]
+            .object,
+        meeting
+    );
+    assert_eq!(
+        store
+            .execute_query(&actor, view(&world, second, 25))?
+            .rows
+            .len(),
+        2
+    );
     let forked = ViewContext {
         branch: fork.id,
         ..view(&world, corrected, 25)
     };
     assert_eq!(store.execute_query(&actor, forked)?.rows.len(), 2);
-    assert!(matches!(store.execute_query(&actor, ViewContext {
-        scope: Scope::Public,
-        ..view(&world, corrected, 25)
-    }), Err(Error::CapabilityDenied)));
-    assert!(matches!(store.execute_query(
-        &query(ObjectRef::new(other.id), None, 100),
-        view(&world, corrected, 25),
-    ), Err(Error::WrongWorld)));
-    assert!(store.execute_query(&query(meeting, None, 100), view(&world, corrected, 25))?.rows.is_empty(),
-        "a historical event identity must not be mistaken for a participant person");
+    assert!(matches!(
+        store.execute_query(
+            &actor,
+            ViewContext {
+                scope: Scope::Public,
+                ..view(&world, corrected, 25)
+            }
+        ),
+        Err(Error::CapabilityDenied)
+    ));
+    assert!(matches!(
+        store.execute_query(
+            &query(ObjectRef::new(other.id), None, 100),
+            view(&world, corrected, 25),
+        ),
+        Err(Error::WrongWorld)
+    ));
+    assert!(
+        store
+            .execute_query(&query(meeting, None, 100), view(&world, corrected, 25))?
+            .rows
+            .is_empty(),
+        "a historical event identity must not be mistaken for a participant person"
+    );
     Ok(())
 }
