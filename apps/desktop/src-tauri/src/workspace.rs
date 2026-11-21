@@ -1818,7 +1818,12 @@ mod tests {
         }
         let people = workspace.snapshot(&world.id, 0, None)?.people;
         let person = |name: &str| {
-            people.iter().find(|item| item.label == name).unwrap().id.clone()
+            people
+                .iter()
+                .find(|item| item.label == name)
+                .unwrap()
+                .id
+                .clone()
         };
         for (from, to) in [("Alice", "Beatrice"), ("Beatrice", "Cara")] {
             workspace.create_relationship(RelationshipInput {
@@ -1847,41 +1852,56 @@ mod tests {
         let ids: HashSet<_> = found.rows.iter().map(|row| row.id.clone()).collect();
         assert_eq!(ids, HashSet::from([person("Beatrice"), person("Cara")]));
         assert!(!found.truncated);
-        assert_eq!(
-            workspace.query_path(PathQueryInput { max_depth: 1, ..request.clone() })?.rows.len(),
-            1
-        );
+
+        let one_hop = workspace.query_path(PathQueryInput {
+            max_depth: 1,
+            ..request.clone()
+        })?;
+        assert_eq!(one_hop.rows.len(), 1);
         let limited = workspace.query_path(PathQueryInput {
             max_visited: 2,
             ..request.clone()
         })?;
         assert_eq!(limited.rows.len(), 1);
         assert!(limited.truncated);
-        assert!(
-            workspace.query_path(PathQueryInput { day: 9, ..request.clone() })?.rows.is_empty()
-        );
-        assert!(
-            workspace.query_path(PathQueryInput { revision: Some(3), ..request.clone() })?.rows.is_empty()
-        );
+
+        let earlier = workspace.query_path(PathQueryInput {
+            day: 9,
+            ..request.clone()
+        })?;
+        assert!(earlier.rows.is_empty());
+        let archived = workspace.query_path(PathQueryInput {
+            revision: Some(3),
+            ..request.clone()
+        })?;
+        assert!(archived.rows.is_empty());
         let reverse = workspace.query_path(PathQueryInput {
             start_id: person("Cara"),
             direction: "incoming".into(),
             ..request.clone()
         })?;
         assert_eq!(reverse.rows.len(), 2);
-        assert!(
-            workspace.query_path(PathQueryInput { direction: "sideways".into(), ..request.clone() }).is_err()
-        );
-        assert!(
-            workspace.query_path(PathQueryInput { max_depth: 0, ..request.clone() }).is_err()
-        );
-        assert!(
-            workspace.query_path(PathQueryInput { max_visited: 0, ..request.clone() }).is_err()
-        );
-        assert!(
-            workspace.query_path(PathQueryInput { start_id: "not-a-uuid".into(), ..request }).is_err()
-        );
+
+        let invalid_direction = workspace.query_path(PathQueryInput {
+            direction: "sideways".into(),
+            ..request.clone()
+        });
+        assert!(invalid_direction.is_err());
+        let invalid_depth = workspace.query_path(PathQueryInput {
+            max_depth: 0,
+            ..request.clone()
+        });
+        assert!(invalid_depth.is_err());
+        let invalid_visited = workspace.query_path(PathQueryInput {
+            max_visited: 0,
+            ..request.clone()
+        });
+        assert!(invalid_visited.is_err());
+        let invalid_start = workspace.query_path(PathQueryInput {
+            start_id: "not-a-uuid".into(),
+            ..request
+        });
+        assert!(invalid_start.is_err());
         Ok(())
     }
-
 }
