@@ -418,7 +418,8 @@ fn phase_two_rejects_invalid_links_and_rolls_back_the_whole_command() -> Result<
                 Change::Create(bad_action, wrong_time),
             ]
         )),
-        Err(Error::InvalidOccurrence)
+        // The event is not visible at day 9: its valid interval begins on day 10.
+        Err(Error::NotFound)
     ));
     assert_eq!(store.world(world.id, Scope::Author)?.revision, first);
     assert!(
