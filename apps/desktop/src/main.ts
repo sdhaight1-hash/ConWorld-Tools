@@ -114,7 +114,8 @@ type AuthorRelationship = {
   cause: AuthorCause | null;
 };
 type AuthorSnapshot = {
-  world: AuthorWorld; day: number; people: AuthorPerson[]; relationships: AuthorRelationship[];
+  world: AuthorWorld; day: number; view_revision: number;
+  people: AuthorPerson[]; relationships: AuthorRelationship[];
 };
 
 // Phase Two editor calls native Rust and keeps no independent world database.
@@ -123,6 +124,7 @@ async function showAuthorWorkspace() {
   const section = document.querySelector<HTMLElement>("#author-workspace")!;
   const worldSelect = document.querySelector<HTMLSelectElement>("#author-world")!;
   const dayInput = document.querySelector<HTMLInputElement>("#author-day")!;
+  const revisionInput = document.querySelector<HTMLInputElement>("#author-revision")!;
   const content = document.querySelector<HTMLElement>("#author-world-content")!;
   const info = document.querySelector<HTMLElement>("#author-world-info")!;
   const status = document.querySelector<HTMLElement>("#author-status")!;
@@ -144,6 +146,14 @@ async function showAuthorWorkspace() {
     if (!Number.isSafeInteger(day)) throw new Error("Historical day is outside the supported range.");
     return day;
   };
+  const selectedRevision = () => {
+    const raw = revisionInput.value.trim();
+    if (!raw) return null;
+    if (!/^\d+$/.test(raw) || !Number.isSafeInteger(Number(raw))) {
+      throw new Error("Enter a non-negative, whole-number author revision.");
+    }
+    return Number(raw);
+  };
   function options(select: HTMLSelectElement, values: Array<{ id: string; label: string }>) {
     const previous = select.value;
     select.replaceChildren(...values.map(({ id, label }) => {
@@ -160,10 +170,11 @@ async function showAuthorWorkspace() {
     content.hidden = !worldId;
     if (!worldId) return;
     const snapshot = await invoke<AuthorSnapshot>("workspace_snapshot", {
-      worldId, day: currentDay(),
+      worldId, day: currentDay(), revision: selectedRevision(),
     });
     if (sequence !== requestSequence) return;
-    info.textContent = snapshot.world.name + " · revision " + snapshot.world.revision + " · day " + snapshot.day;
+    info.textContent = snapshot.world.name + " · viewing author revision " +
+      snapshot.view_revision + " / " + snapshot.world.revision + " · historical day " + snapshot.day;
     const people = new Map(snapshot.people.map((person) => [person.id, person.label]));
     const personOptions = snapshot.people.map((person) => ({ id: person.id, label: person.label }));
     for (const form of [relationshipForm, eventForm]) {
@@ -227,6 +238,7 @@ async function showAuthorWorkspace() {
         button.disabled = true;
         try {
           await action();
+          revisionInput.value = "";
           await refresh();
           form.querySelectorAll<HTMLInputElement>('input[name="name"], input[name="event"], input[name="citation"]').forEach((input) => { input.value = ""; });
           status.textContent = "Saved to local world history.";
@@ -277,6 +289,7 @@ async function showAuthorWorkspace() {
   });
   worldSelect.addEventListener("change", () => { void refresh().catch((error) => { status.textContent = String(error); }); });
   dayInput.addEventListener("change", () => { void refresh().catch((error) => { status.textContent = String(error); }); });
+  revisionInput.addEventListener("change", () => { void refresh().catch((error) => { status.textContent = String(error); }); });
   try {
     await refreshWorlds();
   } catch (error) {

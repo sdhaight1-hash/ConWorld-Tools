@@ -4,7 +4,8 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 use atlas_store::{
-    ActionOutcome, Change, Command, EventDate, EventRole, ObjectData, ObjectId, ObjectRef, Record,
+    ActionOutcome, AuthorRevision, Change, Command, EventDate, EventRole, ObjectData, ObjectId,
+    ObjectRef, Record,
     Scope, Store, ValidInterval, ViewContext, World, WorldDay, WorldId,
 };
 use serde::{Deserialize, Serialize};
@@ -54,6 +55,7 @@ pub struct CauseSummary {
 #[derive(Serialize)]
 pub struct WorkspaceSnapshot {
     world: WorldSummary,
+    view_revision: i64,
     day: i64,
     people: Vec<PersonSummary>,
     relationships: Vec<RelationshipSummary>,
@@ -174,13 +176,22 @@ impl AuthorWorkspace {
             .map_err(|error| error.to_string())
     }
 
-    fn snapshot(&self, world_id: &str, day: i64) -> Result<WorkspaceSnapshot, String> {
+    fn snapshot(
+        &self,
+        world_id: &str,
+        day: i64,
+        revision: Option<i64>,
+    ) -> Result<WorkspaceSnapshot, String> {
         let store = self.lock()?;
         let world = store
             .world(WorldId(id(world_id)?), Scope::Author)
             .map_err(|error| error.to_string())?;
+        let context = ViewContext {
+            revision: AuthorRevision(revision.unwrap_or(world.revision.0)),
+            ..view(&world, day)
+        };
         let versions = store
-            .objects_at(view(&world, day), 2_000)
+            .objects_at(context, 2_000)
             .map_err(|error| error.to_string())?;
         let mut people = Vec::new();
         let mut relationships = Vec::new();
@@ -200,10 +211,9 @@ impl AuthorWorkspace {
                 } => relationships.push(RelationshipSummary {
                     cause: Self::explain(
                         &store,
-                        &world,
+                        context,
                         version.object,
                         version.record.source,
-                        day,
                     )?,
                     id: object_id,
                     subject_id: subject.id.0.to_string(),
@@ -220,6 +230,7 @@ impl AuthorWorkspace {
         relationships.sort_by(|a, b| a.kind.cmp(&b.kind).then(a.id.cmp(&b.id)));
         Ok(WorkspaceSnapshot {
             world: summary(world),
+            view_revision: context.revision.0,
             day,
             people,
             relationships,
@@ -228,12 +239,10 @@ impl AuthorWorkspace {
 
     fn explain(
         store: &Store,
-        world: &World,
+        context: ViewContext,
         bond: ObjectRef,
         source: Option<ObjectRef>,
-        day: i64,
     ) -> Result<Option<CauseSummary>, String> {
-        let context = view(world, day);
         let Some(effect) = store
             .effect_on(bond, context)
             .map_err(|error| error.to_string())?
@@ -490,8 +499,9 @@ pub fn workspace_snapshot(
     workspace: State<'_, AuthorWorkspace>,
     world_id: String,
     day: i64,
+    revision: Option<i64>,
 ) -> Result<WorkspaceSnapshot, String> {
-    workspace.snapshot(&world_id, day)
+    workspace.snapshot(&world_id, day, revision)
 }
 
 #[tauri::command]
@@ -538,7 +548,7 @@ mod tests {
             world_id = world.id;
             workspace.create_person(&world_id, "Alice")?;
             workspace.create_person(&world_id, "Beatrice")?;
-            let people = workspace.snapshot(&world_id, 0)?.people;
+            let people = workspace.snapshot(&world_id, 0, None)?.people;
             alice = people
                 .iter()
                 .find(|p| p.label == "Alice")
@@ -560,7 +570,7 @@ mod tests {
                 tags: "friends".into(),
                 day: 0,
             })?;
-            relationship = workspace.snapshot(&world_id, 0)?.relationships[0]
+            relationship = workspace.snapshot(&world_id, 0, None)?.relationships[0]
                 .id
                 .clone();
             workspace.record_event(EventInput {
@@ -595,13 +605,13 @@ mod tests {
                     .is_err()
             );
             assert_eq!(
-                workspace.snapshot(&world_id, 9)?.relationships[0].trust,
+                workspace.snapshot(&world_id, 9, None)?.relationships[0].trust,
                 Some(90)
             );
         }
         let reopened = AuthorWorkspace::open(&database)?;
         assert_eq!(reopened.worlds()?.len(), 1);
-        let after = reopened.snapshot(&world_id, 10)?;
+        let after = reopened.snapshot(&world_id, 10, None)?;
         assert_eq!(after.people.len(), 2);
         assert_eq!(after.relationships[0].id, relationship);
         assert_eq!(after.relationships[0].trust, Some(12));
@@ -613,15 +623,21 @@ mod tests {
         assert_eq!(cause.day, 10);
         assert_eq!(cause.source, "Northbridge folio 14");
         assert!(
-            reopened.snapshot(&world_id, 9)?.relationships[0]
+            reopened.snapshot(&world_id, 9, None)?.relationships[0]
                 .cause
                 .is_none()
         );
         assert_eq!(
-            reopened.snapshot(&world_id, 9)?.relationships[0].trust,
+            reopened.snapshot(&world_id, 9, None)?.relationships[0].trust,
             Some(90)
         );
         assert_eq!(after.world.revision, 4);
+        assert_eq!(after.view_revision, 4);
+        let prior_revision = reopened.snapshot(&world_id, 10, Some(3))?;
+        assert_eq!(prior_revision.view_revision, 3);
+        assert_eq!(prior_revision.relationships[0].trust, Some(90));
+        assert!(prior_revision.relationships[0].cause.is_none());
+        assert!(reopened.snapshot(&world_id, 10, Some(5)).is_err());
         Ok(())
     }
 }
