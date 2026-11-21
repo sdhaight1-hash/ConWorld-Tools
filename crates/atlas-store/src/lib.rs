@@ -325,7 +325,9 @@ pub enum Error {
     Integrity(String),
     #[error("invalid input for {0}")]
     InvalidInput(&'static str),
-    #[error("the author history view exceeds the temporary Phase Two listing budget; narrow the view or use the indexed Phase Three query service")]
+    #[error(
+        "the author history view exceeds the temporary Phase Two listing budget; narrow the view or use the indexed Phase Three query service"
+    )]
     QueryBudgetExceeded,
     #[error("backup path is not valid UTF-8: {0:?}")]
     InvalidBackupPath(PathBuf),

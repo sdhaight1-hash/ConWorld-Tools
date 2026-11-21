@@ -138,8 +138,10 @@ async function showAuthorWorkspace() {
     (form.elements.namedItem(name) as HTMLInputElement | HTMLSelectElement).value;
   const score = (raw: string): number | null => raw.trim() === "" ? null : Number(raw);
   const currentDay = () => {
-    const day = Number(dayInput.value);
-    if (!Number.isSafeInteger(day)) throw new Error("Enter a whole-number historical day.");
+    const raw = dayInput.value.trim();
+    if (!/^-?\d+$/.test(raw)) throw new Error("Enter a whole-number historical day.");
+    const day = Number(raw);
+    if (!Number.isSafeInteger(day)) throw new Error("Historical day is outside the supported range.");
     return day;
   };
   function options(select: HTMLSelectElement, values: Array<{ id: string; label: string }>) {

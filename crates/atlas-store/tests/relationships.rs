@@ -672,7 +672,6 @@ fn phase_two_author_world_listing_is_persistent_and_historically_scoped() -> Res
     Ok(())
 }
 
-
 #[test]
 fn phase_two_object_listing_filters_historical_visibility_before_limiting() -> Result<(), Error> {
     let mut store = Store::open(":memory:")?;

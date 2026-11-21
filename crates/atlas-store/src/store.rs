@@ -130,13 +130,12 @@ impl Store {
         const SCAN_BUDGET: i64 = 10_000;
         let mut visible = Vec::new();
         {
-            let mut statement = tx.prepare(
-                "SELECT id FROM objects WHERE world_id = ?1 ORDER BY id LIMIT ?2",
-            )?;
-            let candidates = statement.query_map(
-                params![view.world.0.as_bytes(), SCAN_BUDGET + 1],
-                |row| row.get::<_, [u8; 16]>(0),
-            )?;
+            let mut statement =
+                tx.prepare("SELECT id FROM objects WHERE world_id = ?1 ORDER BY id LIMIT ?2")?;
+            let candidates = statement
+                .query_map(params![view.world.0.as_bytes(), SCAN_BUDGET + 1], |row| {
+                    row.get::<_, [u8; 16]>(0)
+                })?;
             for (scanned, id) in candidates.enumerate() {
                 if scanned == SCAN_BUDGET as usize {
                     return Err(Error::QueryBudgetExceeded);
