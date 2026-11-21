@@ -53,6 +53,12 @@ For live frontend development, in `apps/desktop` run `npm ci` followed by `npm r
 
 For a **standalone executable with no localhost server**, in `apps/desktop` run `npm ci && npm run build`, then from the repository root run `cargo build --locked -p atlas-desktop`. Launch `target/debug/atlas-desktop.exe` (Windows) or `target/debug/atlas-desktop` (Linux). Rebuild older executables; a raw dev-mode executable without Vite can show `ERR_CONNECTION_REFUSED`. See [Phase Zero launch diagnostics](Design-Docs/Phase-0-Verification.md).
 
+### Phase Two persistent author workspace
+
+The native desktop now includes a **persistent author workspace** beneath the Northbridge demonstration. Create a world and people, record directed relationships with dated trust/tags, then select a later fictional day to record an event with an actor, action outcome, intent, source citation, and linked relationship change. Earlier historical states remain selectable, and a relationship affected by an event shows its recorded cause and citation.
+
+This workspace uses the existing Rust `atlas-store` engine and stores `worlds.sqlite` in the operating system's Tauri application-data directory, **not** the source checkout. Its history is reopened on subsequent launches. The **Historical day** field currently accepts a normalized fictional day number, not a calendar year. Northbridge remains a separate in-memory example. There is no end-user backup/export, multi-actor editor, branch editor, or public/character publishing view yet.
+
 ### Development screenshots and video evidence
 
 The [**Development-Screenshots**](Development-Screenshots/) directory is the project's chronological archive of **real screenshots and screen recordings** captured during development, debugging, testing, and visual reviews. Its [Dev-Screenshots.md guide](Development-Screenshots/Dev-Screenshots.md) defines the filename convention, documentation requirements, and media index.
