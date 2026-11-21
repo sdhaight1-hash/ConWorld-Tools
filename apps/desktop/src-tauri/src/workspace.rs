@@ -40,6 +40,16 @@ pub struct PathQueryInput {
 }
 
 #[derive(Deserialize)]
+pub struct ParticipantEventsInput {
+    world_id: String,
+    day: i64,
+    revision: Option<i64>,
+    participant_id: String,
+    role: String,
+    limit: usize,
+}
+
+#[derive(Deserialize)]
 pub struct SavedQueryInput {
     world_id: String,
     expected_revision: i64,
@@ -612,6 +622,40 @@ impl AuthorWorkspace {
             request.day,
             request.revision,
             filter,
+            request.limit,
+        )
+    }
+
+    fn participant_events(&self, request: ParticipantEventsInput) -> Result<SearchSummary, String> {
+        let world_id = WorldId(id(&request.world_id)?);
+        let role = match request.role.as_str() {
+            "any" => None,
+            "actor" => Some(EventRole::Actor),
+            "witness" => Some(EventRole::Witness),
+            "victim" => Some(EventRole::Victim),
+            "stakeholder" => Some(EventRole::Stakeholder),
+            "sponsor" => Some(EventRole::Sponsor),
+            other => {
+                let definition = other
+                    .strip_prefix("definition:")
+                    .ok_or("Unknown event participation role")?;
+                Some(EventRole::Custom(ObjectRef {
+                    world: world_id,
+                    id: ObjectId(id(definition)?),
+                }))
+            }
+        };
+        self.execute_filter(
+            &request.world_id,
+            request.day,
+            request.revision,
+            QueryFilter::ParticipantEvents {
+                participant: ObjectRef {
+                    world: world_id,
+                    id: ObjectId(id(&request.participant_id)?),
+                },
+                role,
+            },
             request.limit,
         )
     }
@@ -1540,6 +1584,14 @@ pub fn workspace_discover_mentions(
     limit: usize,
 ) -> Result<MentionDiscoverySummary, String> {
     workspace.discover_mentions(&world_id, day, revision, limit)
+}
+
+#[tauri::command]
+pub fn workspace_query_participant_events(
+    workspace: State<'_, AuthorWorkspace>,
+    request: ParticipantEventsInput,
+) -> Result<SearchSummary, String> {
+    workspace.participant_events(request)
 }
 
 #[tauri::command]

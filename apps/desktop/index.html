@@ -114,6 +114,13 @@
               <label>Visited budget <input name="max_visited" type="number" min="1" max="2000" step="1" value="100" required /></label>
               <button type="submit">Explore connections</button>
             </form>
+            <form id="author-participant-events-form" class="query-form">
+              <label>Participant person <select name="participant" required></select></label>
+              <label>Recorded event role
+                <select name="role" required><option value="any">Any recorded role</option></select>
+              </label>
+              <button type="submit">Find participant events</button>
+            </form>
             <section id="author-mention-discovery" aria-label="Mention discovery" class="mention-discovery">
               <h4>Possible name references in sourced accounts</h4>
               <p class="hint">Review possible references from historical claim statements. Approval records an explicit hyperlink only—not a membership, relationship, or historical fact. Duplicate names must be chosen by stable identity.</p>

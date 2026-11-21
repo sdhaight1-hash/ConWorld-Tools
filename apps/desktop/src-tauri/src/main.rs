@@ -185,6 +185,7 @@ fn main() {
             workspace::workspace_saved_queries,
             workspace::workspace_save_query,
             workspace::workspace_query_path,
+            workspace::workspace_query_participant_events,
             workspace::workspace_create_person,
             workspace::workspace_create_relationship,
             workspace::workspace_record_relationship_state,

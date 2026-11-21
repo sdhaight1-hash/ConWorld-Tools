@@ -30,6 +30,12 @@ pub enum QueryFilter {
         event: ObjectRef,
         role: EventRole,
     },
+    /// Return visible historical events involving a specific person,
+    /// optionally in one explicitly recorded role.
+    ParticipantEvents {
+        participant: ObjectRef,
+        role: Option<EventRole>,
+    },
     RelationshipPath {
         start: ObjectRef,
         kind: String,
@@ -141,6 +147,42 @@ impl Store {
                         if candidate == event && candidate_role == role
                             && visible.contains(event) && visible.contains(participant)
                 )).collect()
+            }
+            QueryFilter::ParticipantEvents { participant, role } => {
+                same_world(*participant, view)?;
+                if let Some(EventRole::Custom(definition)) = role {
+                    same_world(*definition, view)?;
+                }
+                let person_visible = objects.iter().any(|item| {
+                    item.object == *participant && matches!(&item.record.data, ObjectData::Person)
+                });
+                if !person_visible {
+                    Vec::new()
+                } else {
+                    let events: HashSet<_> = objects
+                        .iter()
+                        .filter_map(|item| match &item.record.data {
+                            ObjectData::EventInvolvement {
+                                event,
+                                participant: member,
+                                role: recorded,
+                            } if member == participant
+                                && role.is_none_or(|wanted| wanted == *recorded)
+                                && visible.contains(event) =>
+                            {
+                                Some(*event)
+                            }
+                            _ => None,
+                        })
+                        .collect();
+                    objects
+                        .into_iter()
+                        .filter(|item| {
+                            events.contains(&item.object)
+                                && matches!(&item.record.data, ObjectData::HistoricalEvent { .. })
+                        })
+                        .collect()
+                }
             }
             QueryFilter::RelationshipPath {
                 start,
