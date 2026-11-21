@@ -236,7 +236,12 @@ impl Store {
         tx.execute(
             "INSERT INTO person_alias_name_keys (world_id, alias_id, revision, name_key)
              VALUES (?1, ?2, ?3, ?4)",
-            params![world.id.0.as_bytes(), id.as_bytes(), revision, label.to_lowercase()],
+            params![
+                world.id.0.as_bytes(),
+                id.as_bytes(),
+                revision,
+                label.to_lowercase()
+            ],
         )?;
         tx.commit()?;
         Ok(PersonAlias {
@@ -2227,9 +2232,8 @@ fn validate_text(value: &str, field: &'static str) -> Result<(), Error> {
 /// Recreate Unicode-lowercase lookup keys from immutable authored versions.
 fn rebuild_alias_name_index(conn: &Connection) -> Result<(), Error> {
     conn.execute("DELETE FROM person_alias_name_keys", [])?;
-    let mut select = conn.prepare(
-        "SELECT world_id, alias_id, revision, label FROM person_alias_versions",
-    )?;
+    let mut select =
+        conn.prepare("SELECT world_id, alias_id, revision, label FROM person_alias_versions")?;
     let mut rows = select.query([])?;
     let mut insert = conn.prepare(
         "INSERT INTO person_alias_name_keys (world_id, alias_id, revision, name_key)

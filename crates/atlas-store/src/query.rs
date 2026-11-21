@@ -529,11 +529,10 @@ fn predicate_matches(filter: &QueryFilter, version: &Version, plan: &PredicatePl
         ),
         QueryFilter::FullTextPhrase(text)
         | QueryFilter::ClaimFullTextPhrase(text)
-        | QueryFilter::ExactAlias(text) => {
-            plan.indexed
-                .get(&(indexed_text_kind(filter), text.as_str()))
-                .is_some_and(|ids| ids.contains(&version.object))
-        }
+        | QueryFilter::ExactAlias(text) => plan
+            .indexed
+            .get(&(indexed_text_kind(filter), text.as_str()))
+            .is_some_and(|ids| ids.contains(&version.object)),
         QueryFilter::HasSource(source) => {
             plan.sources.contains(source) && version.record.source == Some(*source)
         }
