@@ -323,3 +323,82 @@ test("native historical search keeps ambiguous identities and navigates the real
     { worldId: "world", day: 0, revision: 1, mode: "backlinks", term: "alice-a", limit: 100 },
   ]);
 });
+
+
+test("native path explorer uses typed direction, hop and visit budgets at the selected history", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "world", name: "Paths", revision: 5 };
+    const people = [
+      { id: "alice", label: "Alice" }, { id: "beatrice", label: "Beatrice" },
+      { id: "cara", label: "Cara" },
+    ];
+    const calls: unknown[] = [];
+    Object.assign(window, {
+      isTauri: true,
+      __pathCalls: calls,
+      __TAURI_INTERNALS__: {
+        invoke: async (command: string, args: Record<string, unknown>) => {
+          if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+          if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+          if (command === "workspace_worlds") return [world];
+          if (command === "workspace_snapshot") return {
+            world, day: args.day, view_revision: args.revision ?? 5,
+            people, relationships: [], events: [], definitions: [],
+          };
+          if (command === "workspace_query_path") {
+            const request = args.request as { day: number; revision: number | null; max_depth: number; max_visited: number };
+            calls.push(request);
+            const rows = request.day < 10 || request.revision === 3 ? [] :
+              people.slice(1, request.max_depth === 1 || request.max_visited === 2 ? 2 : 3).map(person => ({ ...person, kind: "person" }));
+            return { revision: request.revision ?? 5, truncated: request.max_visited === 2, rows };
+          }
+          throw new Error("Unexpected mock command: " + command);
+        },
+      },
+    });
+  });
+  await page.goto("/");
+  const day = page.locator("#author-day");
+  await day.fill("10");
+  await day.blur();
+  const form = page.locator("#author-path-form");
+  await form.getByLabel("Start person").selectOption("alice");
+  await form.getByLabel("Relationship kind").fill("friendship");
+  await form.getByLabel("Direction").selectOption("outgoing");
+  await form.getByLabel("Maximum hops").fill("2");
+  await form.getByLabel("Visited budget").fill("3");
+  await form.getByRole("button", { name: "Explore connections" }).click();
+  const results = page.locator("#author-query-results");
+  await expect(results.getByRole("button", { name: /^Beatrice ·/ })).toBeVisible();
+  await expect(results.getByRole("button", { name: /^Cara ·/ })).toBeVisible();
+  await results.getByRole("button", { name: /^Beatrice ·/ }).click();
+  await expect(page.locator('#nodes button[data-node="beatrice"]')).toHaveAttribute("aria-pressed", "true");
+  await day.fill("9");
+  await day.blur();
+  await expect(results.getByRole("button", { name: /^Beatrice ·/ })).toHaveCount(0);
+  await form.getByRole("button", { name: "Explore connections" }).click();
+  await expect(page.locator("#author-query-status")).toContainText("0 match(es)");
+  await day.fill("10");
+  await day.blur();
+  const revision = page.locator("#author-revision");
+  await revision.fill("3");
+  await revision.blur();
+  await form.getByRole("button", { name: "Explore connections" }).click();
+  await expect(page.locator("#author-query-status")).toContainText("0 match(es)");
+  await revision.fill("");
+  await revision.blur();
+  await form.getByLabel("Maximum hops").fill("2");
+  await form.getByLabel("Visited budget").fill("2");
+  await form.getByRole("button", { name: "Explore connections" }).click();
+  await expect(results.getByRole("button", { name: /^Beatrice ·/ })).toBeVisible();
+  await expect(results.getByRole("button", { name: /^Cara ·/ })).toHaveCount(0);
+  await expect(page.locator("#author-query-status")).toContainText("more results exist");
+  const recorded = await page.evaluate(() => (window as unknown as { __pathCalls: unknown[] }).__pathCalls);
+  expect(recorded).toMatchObject([
+    { world_id: "world", day: 10, revision: null, start_id: "alice", kind: "friendship",
+      direction: "outgoing", max_depth: 2, max_visited: 3, limit: 100 },
+    { world_id: "world", day: 9, revision: null },
+    { world_id: "world", day: 10, revision: 3 },
+    { world_id: "world", day: 10, revision: null, max_depth: 2, max_visited: 2 },
+  ]);
+});

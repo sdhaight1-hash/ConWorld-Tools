@@ -8,7 +8,7 @@ use atlas_store::{
     ActionOutcome, AuthorRevision, Change, ClaimAudience, Command, Definition, EventDate,
     EventRole, ObjectData, ObjectId, ObjectRef, Record, Scope, Store, ValidInterval, ViewContext,
     World, WorldDay, WorldId,
-    query::{QUERY_SCHEMA_VERSION, QueryFilter, QuerySpec},
+    query::{Direction, QUERY_SCHEMA_VERSION, QueryFilter, QuerySpec},
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -23,6 +23,19 @@ pub struct WorldSummary {
     id: String,
     name: String,
     revision: i64,
+}
+
+#[derive(Clone, Deserialize)]
+pub struct PathQueryInput {
+    world_id: String,
+    day: i64,
+    revision: Option<i64>,
+    start_id: String,
+    kind: String,
+    direction: String,
+    max_depth: u8,
+    max_visited: usize,
+    limit: usize,
 }
 
 #[derive(Serialize)]
@@ -349,6 +362,52 @@ impl AuthorWorkspace {
         term: &str,
         limit: usize,
     ) -> Result<SearchSummary, String> {
+        let filter = match mode {
+            "contains" => QueryFilter::LabelContains(term.into()),
+            "exact" => QueryFilter::ExactLabel(term.into()),
+            "backlinks" => QueryFilter::Backlinks(ObjectRef {
+                world: WorldId(id(world_id)?),
+                id: ObjectId(id(term.trim())?),
+            }),
+            _ => return Err("Unknown historical search mode".into()),
+        };
+        self.execute_filter(world_id, day, revision, filter, limit)
+    }
+
+    fn query_path(&self, request: PathQueryInput) -> Result<SearchSummary, String> {
+        let direction = match request.direction.as_str() {
+            "outgoing" => Direction::Outgoing,
+            "incoming" => Direction::Incoming,
+            "both" => Direction::Both,
+            _ => return Err("Unknown relationship direction".into()),
+        };
+        let filter = QueryFilter::RelationshipPath {
+            start: ObjectRef {
+                world: WorldId(id(&request.world_id)?),
+                id: ObjectId(id(&request.start_id)?),
+            },
+            kind: request.kind,
+            direction,
+            max_depth: request.max_depth,
+            max_visited: request.max_visited,
+        };
+        self.execute_filter(
+            &request.world_id,
+            request.day,
+            request.revision,
+            filter,
+            request.limit,
+        )
+    }
+
+    fn execute_filter(
+        &self,
+        world_id: &str,
+        day: i64,
+        revision: Option<i64>,
+        filter: QueryFilter,
+        limit: usize,
+    ) -> Result<SearchSummary, String> {
         let store = self.lock()?;
         let world = store
             .world(WorldId(id(world_id)?), Scope::Author)
@@ -356,15 +415,6 @@ impl AuthorWorkspace {
         let view = ViewContext {
             revision: AuthorRevision(revision.unwrap_or(world.revision.0)),
             ..view(&world, day)
-        };
-        let filter = match mode {
-            "contains" => QueryFilter::LabelContains(term.into()),
-            "exact" => QueryFilter::ExactLabel(term.into()),
-            "backlinks" => QueryFilter::Backlinks(ObjectRef {
-                world: world.id,
-                id: ObjectId(id(term.trim())?),
-            }),
-            _ => return Err("Unknown historical search mode".into()),
         };
         let result = store
             .execute_query(
@@ -1234,6 +1284,14 @@ pub fn workspace_search(
 }
 
 #[tauri::command]
+pub fn workspace_query_path(
+    workspace: State<'_, AuthorWorkspace>,
+    request: PathQueryInput,
+) -> Result<SearchSummary, String> {
+    workspace.query_path(request)
+}
+
+#[tauri::command]
 pub fn workspace_create_person(
     workspace: State<'_, AuthorWorkspace>,
     world_id: String,
@@ -1748,6 +1806,102 @@ mod tests {
                 .search(&world.id, 0, None, "backlinks", "not-a-uuid", 20)
                 .is_err()
         );
+        Ok(())
+    }
+    #[test]
+    fn phase_3_typed_relationship_paths_are_dated_bounded_and_directional()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let workspace = AuthorWorkspace::open(":memory:")?;
+        let world = workspace.create_world("Path fixture")?;
+        for name in ["Alice", "Beatrice", "Cara"] {
+            workspace.create_person(&world.id, name)?;
+        }
+        let people = workspace.snapshot(&world.id, 0, None)?.people;
+        let person = |name: &str| {
+            people
+                .iter()
+                .find(|item| item.label == name)
+                .unwrap()
+                .id
+                .clone()
+        };
+        for (from, to) in [("Alice", "Beatrice"), ("Beatrice", "Cara")] {
+            workspace.create_relationship(RelationshipInput {
+                world_id: world.id.clone(),
+                subject_id: person(from),
+                target_id: person(to),
+                kind: "friendship".into(),
+                trust: None,
+                tags: String::new(),
+                day: 10,
+            })?;
+        }
+        let request = PathQueryInput {
+            world_id: world.id.clone(),
+            day: 10,
+            revision: None,
+            start_id: person("Alice"),
+            kind: "friendship".into(),
+            direction: "outgoing".into(),
+            max_depth: 2,
+            max_visited: 3,
+            limit: 20,
+        };
+        let found = workspace.query_path(request.clone())?;
+        assert_eq!(found.revision, 5);
+        let ids: HashSet<_> = found.rows.iter().map(|row| row.id.clone()).collect();
+        assert_eq!(ids, HashSet::from([person("Beatrice"), person("Cara")]));
+        assert!(!found.truncated);
+
+        let one_hop = workspace.query_path(PathQueryInput {
+            max_depth: 1,
+            ..request.clone()
+        })?;
+        assert_eq!(one_hop.rows.len(), 1);
+        let limited = workspace.query_path(PathQueryInput {
+            max_visited: 2,
+            ..request.clone()
+        })?;
+        assert_eq!(limited.rows.len(), 1);
+        assert!(limited.truncated);
+
+        let earlier = workspace.query_path(PathQueryInput {
+            day: 9,
+            ..request.clone()
+        })?;
+        assert!(earlier.rows.is_empty());
+        let archived = workspace.query_path(PathQueryInput {
+            revision: Some(3),
+            ..request.clone()
+        })?;
+        assert!(archived.rows.is_empty());
+        let reverse = workspace.query_path(PathQueryInput {
+            start_id: person("Cara"),
+            direction: "incoming".into(),
+            ..request.clone()
+        })?;
+        assert_eq!(reverse.rows.len(), 2);
+
+        let invalid_direction = workspace.query_path(PathQueryInput {
+            direction: "sideways".into(),
+            ..request.clone()
+        });
+        assert!(invalid_direction.is_err());
+        let invalid_depth = workspace.query_path(PathQueryInput {
+            max_depth: 0,
+            ..request.clone()
+        });
+        assert!(invalid_depth.is_err());
+        let invalid_visited = workspace.query_path(PathQueryInput {
+            max_visited: 0,
+            ..request.clone()
+        });
+        assert!(invalid_visited.is_err());
+        let invalid_start = workspace.query_path(PathQueryInput {
+            start_id: "not-a-uuid".into(),
+            ..request
+        });
+        assert!(invalid_start.is_err());
         Ok(())
     }
 }
