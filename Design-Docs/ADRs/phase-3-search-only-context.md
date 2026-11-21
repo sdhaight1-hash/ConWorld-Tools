@@ -13,3 +13,7 @@ Every read launched from the loaded workspace (saved definitions, search, path, 
 Rust desktop regression creates >2,000 objects, checks search-only mode, retrieves an indexed result at exactly that revision and returns to a smaller historical scene. Mock-native Playwright exercises empty scene versus searchable records, disabled editing and discovery, saved definition revision, external revision advancement, rejected mismatched replies, explicit refresh and recovery of a historical graph. Existing IPC assertions are updated to require numerical revision. Exact-head CI is required; no native screenshot captured or claimed here.
 
 **Limitations:** This does not implement focused graph exploration or pagination. Editing a large world's records requires the future focused authoring path. The initial bounded scene attempt still occurs; no measured latency/50k claim is made. Public and character query execution remains denied, and cross-studio authorization and cancellation remain open.
+
+## Focused navigation extension
+
+A search-only author can explicitly select a person result by stable ID, enabling the existing relationship and participant-event queries without a full graph. Refreshing the world/day/revision discards focus. Only standard/any role choices are available without a loaded definition catalog; no partial authoring graph is implied. Large-world traversal itself requires the indexed path work in PR #34. Browser regressions exercise the exact IPC identities/revision and focus reset.

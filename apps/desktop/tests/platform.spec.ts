@@ -1042,6 +1042,11 @@ test("oversized worlds preserve pinned indexed search while disabling incomplete
             revision: mismatch ? world.revision : args.revision, truncated: false,
             rows: [{ id: "person", label: "Obsidian navigator", kind: "person" }],
           };
+          if (command === "workspace_query_participant_events" || command === "workspace_query_path") {
+            const request = args.request as { revision: number };
+            return { revision: request.revision, truncated: false,
+              rows: [{ id: "meeting", label: "Guild meeting", kind: "historical_event" }] };
+          }
           throw new Error("Unexpected native command: " + command);
         },
       },
@@ -1060,6 +1065,14 @@ test("oversized worlds preserve pinned indexed search while disabling incomplete
   await search.click();
   await expect(page.locator("#author-query-results")).toContainText("Obsidian navigator");
   await expect(page.locator("#author-query-status")).toContainText("author revision 7");
+  await expect(page.locator("#author-path-form")).toBeHidden();
+  await page.getByRole("button", { name: "Explore Obsidian navigator person" }).click();
+  await expect(page.locator("#author-search-focus")).toContainText("Obsidian navigator · person");
+  await expect(page.locator("#author-path-form select[name=start]")).toHaveValue("person");
+  await page.getByRole("button", { name: "Explore connections" }).click();
+  await expect(page.locator("#author-query-results")).toContainText("Guild meeting");
+  await page.getByRole("button", { name: "Find participant events" }).click();
+  await expect(page.locator("#author-query-results")).toContainText("Guild meeting");
   await page.evaluate(() => (window as unknown as { __largeWorldMismatch: (value: boolean) => void }).__largeWorldMismatch(true));
   await search.click();
   await expect(page.locator("#author-query-status")).toContainText("different author revision");
@@ -1067,6 +1080,8 @@ test("oversized worlds preserve pinned indexed search while disabling incomplete
   await page.evaluate(() => (window as unknown as { __largeWorldMismatch: (value: boolean) => void }).__largeWorldMismatch(false));
   await page.getByRole("button", { name: "Refresh historical view" }).click();
   await expect(page.locator("#author-world-info")).toContainText("Author revision 8 / 8");
+  await expect(page.locator("#author-path-form")).toBeHidden();
+  await expect(page.locator("#author-participant-events-form")).toBeHidden();
   await search.click();
   await expect(page.locator("#author-query-status")).toContainText("author revision 8");
   const revision = page.locator("#author-revision");
@@ -1080,6 +1095,8 @@ test("oversized worlds preserve pinned indexed search while disabling incomplete
     { command: "workspace_snapshot", args: { revision: null } },
     { command: "workspace_saved_queries", args: { revision: 7 } },
     { command: "workspace_search", args: { revision: 7, mode: "fulltext" } },
+    { command: "workspace_query_path", args: { request: { revision: 7, start_id: "person" } } },
+    { command: "workspace_query_participant_events", args: { request: { revision: 7, participant_id: "person" } } },
     { command: "workspace_search", args: { revision: 7, mode: "fulltext" } },
     { command: "workspace_snapshot", args: { revision: null } },
     { command: "workspace_saved_queries", args: { revision: 8 } },

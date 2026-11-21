@@ -137,6 +137,7 @@ export async function showAuthorWorkspace(
   const runSavedQuery = document.querySelector<HTMLButtonElement>("#author-run-saved-query")!;
   const saveComposite = document.querySelector<HTMLButtonElement>("#author-save-composite-query")!;
   const savedSelect = saveQueryForm.elements.namedItem("query_id") as HTMLSelectElement;
+  const focusHint = document.querySelector<HTMLElement>("#author-search-focus")!;
   const pathForm = document.querySelector<HTMLFormElement>("#author-path-form")!;
   const participantEventsForm = document.querySelector<HTMLFormElement>("#author-participant-events-form")!;
   const compositeForm = document.querySelector<HTMLFormElement>("#author-composite-form")!;
@@ -188,6 +189,7 @@ export async function showAuthorWorkspace(
   let saving = false;
   let selectedEvent: Event | undefined;
   let people: Option[] = [];
+  let focusedPerson: Option | undefined;
   let savedQueries: SavedQuery[] = [];
   let personNames = new Map<string, string>();
   const name = (id: string) => personNames.get(id) ?? "Unavailable person";
@@ -213,8 +215,12 @@ export async function showAuthorWorkspace(
     const limited = Boolean(snapshot?.scene_limited);
     editorForms.hidden = limited;
     discoveryPanel.hidden = limited;
-    pathForm.hidden = limited;
-    participantEventsForm.hidden = limited;
+    pathForm.hidden = limited && !focusedPerson;
+    participantEventsForm.hidden = limited && !focusedPerson;
+    focusHint.hidden = !limited;
+    focusHint.textContent = focusedPerson
+      ? "Exploring " + focusedPerson.label + " · " + focusedPerson.id
+      : "Choose a person from search results to explore their connections and recorded events.";
     refreshView.disabled = saving || !worldSelect.value;
     const day = snapshot?.day;
     const availability = [
@@ -238,9 +244,10 @@ export async function showAuthorWorkspace(
     saveQueryForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = blocked;
     saveComposite.disabled = blocked;
     runSavedQuery.disabled = !snapshot || !savedSelect.value || saving;
-    pathForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = !snapshot || !people.length || saving;
+    pathForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled =
+      !snapshot || !(limited ? focusedPerson : people.length) || saving;
     participantEventsForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled =
-      !snapshot || !people.length || saving;
+      !snapshot || !(limited ? focusedPerson : people.length) || saving;
   }
 
   const definitionFor = (category: Definition["category"], label: string) =>
@@ -473,6 +480,7 @@ export async function showAuthorWorkspace(
     const worldId = worldSelect.value;
     const previous = snapshot;
     snapshot = undefined;
+    focusedPerson = undefined;
     syncButtons();
     content.hidden = !worldId;
     if (!worldId) {
@@ -623,6 +631,21 @@ export async function showAuthorWorkspace(
             const text = document.createElement("span");
             text.textContent = description;
             item.append(text);
+          }
+          if (snapshot.scene_limited && row.kind === "person") {
+            const focus = document.createElement("button");
+            focus.type = "button";
+            focus.textContent = "Explore this person";
+            focus.setAttribute("aria-label", "Explore " + row.label + " " + row.id);
+            focus.addEventListener("click", () => {
+              if (sequence !== querySequence || !snapshot?.scene_limited || saving) return;
+              focusedPerson = { id: row.id, label: row.label };
+              options(field<HTMLSelectElement>(pathForm, "start"), [focusedPerson]);
+              options(field<HTMLSelectElement>(participantEventsForm, "participant"), [focusedPerson]);
+              syncButtons();
+              field(pathForm, "kind").focus();
+            });
+            item.append(focus);
           }
           const references = document.createElement("button");
           references.type = "button";
@@ -921,7 +944,7 @@ export async function showAuthorWorkspace(
 
   participantEventsForm.addEventListener("submit", (event) => {
     event.preventDefault();
-    if (!snapshot || snapshot.scene_limited || saving) return;
+    if (!snapshot || (snapshot.scene_limited && !focusedPerson) || saving) return;
     const request = {
       world_id: snapshot.world.id,
       day: snapshot.day,
@@ -936,7 +959,7 @@ export async function showAuthorWorkspace(
 
   pathForm.addEventListener("submit", (event) => {
     event.preventDefault();
-    if (!snapshot || snapshot.scene_limited || saving) return;
+    if (!snapshot || (snapshot.scene_limited && !focusedPerson) || saving) return;
     const request = {
       world_id: snapshot.world.id,
       day: snapshot.day,
