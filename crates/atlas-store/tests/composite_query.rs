@@ -307,9 +307,10 @@ fn indexed_compounds_preserve_exact_results_beyond_snapshot_budget() -> Result<(
     let source = ObjectRef::new(world.id);
     let event = ObjectRef::new(world.id);
     let claim = ObjectRef::new(world.id);
-    let claim_record = |statement: &str| {
+    let excluded = ObjectRef::new(world.id);
+    let claim_record = |label: &str, statement: &str| {
         record(
-            "Witness notes",
+            label,
             Some(10),
             ObjectData::Claim {
                 subject: event,
@@ -347,12 +348,20 @@ fn indexed_compounds_preserve_exact_results_beyond_snapshot_budget() -> Result<(
                 None,
             ),
         ),
-        Change::Create(claim, claim_record("The sealed ledger was found.")),
+        Change::Create(
+            claim,
+            claim_record("Witness notes", "The sealed ledger was found."),
+        ),
+        Change::Create(
+            excluded,
+            claim_record("A excluded witness notes", "The sealed ledger was found."),
+        ),
     ];
     let first = store.apply(&command(&world, world.revision, changes))?;
     let conjunction = query(
         QueryFilter::And(vec![
             QueryFilter::ClaimFullTextPhrase("sealed ledger".into()),
+            QueryFilter::FullTextPhrase("witness notes".into()),
             QueryFilter::Kind(ObjectKindFilter::Claim),
             QueryFilter::HasSource(source),
             QueryFilter::Not(Box::new(QueryFilter::LabelContains("excluded".into()))),
@@ -367,12 +376,17 @@ fn indexed_compounds_preserve_exact_results_beyond_snapshot_budget() -> Result<(
         100,
     );
     let negated = query(
-        QueryFilter::Not(Box::new(QueryFilter::FullTextPhrase("obsidian navigator".into()))),
+        QueryFilter::Not(Box::new(QueryFilter::FullTextPhrase(
+            "obsidian navigator".into(),
+        ))),
         100,
     );
     assert_eq!(
-        store.execute_query(&negated, view(&world, first, 20))?.rows.len(),
-        3
+        store
+            .execute_query(&negated, view(&world, first, 20))?
+            .rows
+            .len(),
+        4
     );
     let mut changes = Vec::new();
     for number in 0..2_010 {
@@ -391,16 +405,25 @@ fn indexed_compounds_preserve_exact_results_beyond_snapshot_budget() -> Result<(
         store.objects_at(view(&world, large, 20), 2_000),
         Err(Error::QueryBudgetExceeded)
     ));
-    assert_eq!(
-        store.execute_query(&conjunction, view(&world, large, 20))?.rows[0].object,
-        claim
-    );
+    let result = store.execute_query(
+        &QuerySpec {
+            limit: 1,
+            ..conjunction.clone()
+        },
+        view(&world, large, 20),
+    )?;
+    assert_eq!(result.rows.len(), 1);
+    assert_eq!(result.rows[0].object, claim);
+    assert!(!result.truncated);
     let union = store.execute_query(&disjunction, view(&world, large, 20))?;
     assert_eq!(union.rows.len(), 2);
     assert!(union.rows.iter().any(|row| row.object == person));
     assert!(union.rows.iter().any(|row| row.object == claim));
     assert!(
-        store.execute_query(&conjunction, view(&world, large, 9))?.rows.is_empty()
+        store
+            .execute_query(&conjunction, view(&world, large, 9))?
+            .rows
+            .is_empty()
     );
     assert!(matches!(
         store.execute_query(&negated, view(&world, large, 20)),
@@ -409,13 +432,22 @@ fn indexed_compounds_preserve_exact_results_beyond_snapshot_budget() -> Result<(
     let corrected = store.apply(&command(
         &world,
         large,
-        vec![Change::Correct(claim, claim_record("The document was destroyed."))],
+        vec![Change::Correct(
+            claim,
+            claim_record("Witness notes", "The document was destroyed."),
+        )],
     ))?;
     assert!(
-        store.execute_query(&conjunction, view(&world, corrected, 20))?.rows.is_empty()
+        store
+            .execute_query(&conjunction, view(&world, corrected, 20))?
+            .rows
+            .is_empty()
     );
     assert_eq!(
-        store.execute_query(&conjunction, view(&world, large, 20))?.rows[0].object,
+        store
+            .execute_query(&conjunction, view(&world, large, 20))?
+            .rows[0]
+            .object,
         claim
     );
     assert!(matches!(
