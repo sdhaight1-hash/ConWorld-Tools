@@ -6,13 +6,14 @@ use std::time::Duration;
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use uuid::Uuid;
 
+use crate::discovery::{MentionCandidate, MentionDisposition, ReviewMention, matching_spans};
 use crate::query::{
     QUERY_SCHEMA_VERSION, QueryFilter, QuerySpec, SaveNamedLabelQuery, SavedLabelQuery,
 };
 use crate::*;
 
 pub(crate) const APPLICATION_ID: i64 = 0x4357_4c44; // CWLD
-pub(crate) const SCHEMA_VERSION: i64 = 9;
+pub(crate) const SCHEMA_VERSION: i64 = 10;
 
 pub struct Store {
     conn: Connection,
@@ -69,6 +70,9 @@ impl Store {
         }
         if version < 9 {
             tx.execute_batch(include_str!("../migrations/0009.sql"))?;
+        }
+        if version < 10 {
+            tx.execute_batch(include_str!("../migrations/0010.sql"))?;
             verify_foreign_keys(&tx)?;
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
@@ -756,6 +760,227 @@ impl Store {
         }
         tx.commit()?;
         Ok(AuthorRevision(revision))
+    }
+
+    /// Author-only explicit decision about a candidate's precise source version
+    /// and character boundaries. Re-resolve both ends *inside* the write transaction
+    /// before appending an author audit revision.
+    pub fn review_mention(&mut self, review: ReviewMention) -> Result<AuthorRevision, Error> {
+        require_author(review.view.scope)?;
+        let view = review.view;
+        if review.source.object.world != view.world || review.target.world != view.world {
+            return Err(Error::WrongWorld);
+        }
+        if review.expected != view.revision {
+            return Err(Error::InvalidRevision);
+        }
+        if review.start_byte >= review.end_byte {
+            return Err(Error::InvalidInput("mention byte range"));
+        }
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let world = load_world(&tx, view.world)?;
+        // The review table currently stores main-branch author decisions only.
+        // Without branch lineage on decisions, accepting a fork review could
+        // silently make the same source reference appear in its parent.
+        if view.branch != world.main {
+            return Err(Error::CapabilityDenied);
+        }
+        if view.revision < AuthorRevision(0) || view.revision > world.revision {
+            return Err(Error::InvalidRevision);
+        }
+        let source = resolve_object(
+            &tx,
+            review.source.object,
+            view.branch,
+            view.revision,
+            view.day,
+        )?
+        .ok_or(Error::NotFound)?;
+        if source.reference() != review.source {
+            return Err(Error::InvalidInput("stale mention source version"));
+        }
+        let ObjectData::Claim { statement, .. } = &source.record.data else {
+            return Err(Error::WrongKind);
+        };
+        if statement.len() > 10_000 {
+            return Err(Error::QueryBudgetExceeded);
+        }
+        let target = resolve_object(&tx, review.target, view.branch, view.revision, view.day)?
+            .ok_or(Error::NotFound)?;
+        if !matches!(target.record.data, ObjectData::Person) {
+            return Err(Error::WrongKind);
+        }
+        if !matching_spans(statement, &target.record.label)
+            .contains(&(review.start_byte, review.end_byte))
+        {
+            return Err(Error::InvalidInput(
+                "mention does not match selected person",
+            ));
+        }
+        let revision = append_revision(
+            &tx,
+            &world,
+            world.main,
+            review.expected,
+            review.command_id,
+            ("Local author", "Review historical mention candidate"),
+        )?;
+        tx.execute(
+            "INSERT INTO mention_reviews
+             (world_id, source_id, source_branch_id, source_state_revision,
+              source_revision, target_id, start_byte, end_byte, decision, revision)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                view.world.0.as_bytes(),
+                review.source.object.id.0.as_bytes(),
+                review.source.branch.0.as_bytes(),
+                review.source.state_revision.0,
+                review.source.recorded_at.0,
+                review.target.id.0.as_bytes(),
+                review.start_byte as i64,
+                review.end_byte as i64,
+                match review.decision {
+                    MentionDisposition::Approved => "approved",
+                    MentionDisposition::Dismissed => "dismissed",
+                },
+                revision,
+            ],
+        )?;
+        tx.commit()?;
+        Ok(AuthorRevision(revision))
+    }
+
+    /// Show only decisions known at the requested author revision. The
+    /// candidate scanner already verified the source and person are visible.
+    pub(crate) fn mention_disposition_at(
+        &self,
+        view: ViewContext,
+        candidate: &MentionCandidate,
+    ) -> Result<Option<MentionDisposition>, Error> {
+        require_author(view.scope)?;
+        // Until review decisions are branch-aware, never project main-line
+        // approvals into an alternate historical branch.
+        if view.branch != load_world(&self.conn, view.world)?.main {
+            return Ok(None);
+        }
+        let decision: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT decision FROM mention_reviews
+             WHERE world_id = ?1 AND source_id = ?2 AND source_branch_id = ?3
+               AND source_state_revision = ?4 AND source_revision = ?5
+               AND target_id = ?6 AND start_byte = ?7 AND end_byte = ?8
+               AND revision <= ?9
+             ORDER BY revision DESC LIMIT 1",
+                params![
+                    view.world.0.as_bytes(),
+                    candidate.source.object.id.0.as_bytes(),
+                    candidate.source.branch.0.as_bytes(),
+                    candidate.source.state_revision.0,
+                    candidate.source.recorded_at.0,
+                    candidate.target.id.0.as_bytes(),
+                    candidate.start_byte as i64,
+                    candidate.end_byte as i64,
+                    view.revision.0,
+                ],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(match decision.as_deref() {
+            Some("approved") => Some(MentionDisposition::Approved),
+            Some("dismissed") => Some(MentionDisposition::Dismissed),
+            _ => None,
+        })
+    }
+
+    /// Resolve approved *links*, not inferred relationships, into the existing
+    /// author-only Backlinks query. Recheck source version and both objects'
+    /// visibility before permitting a reference into the historical result.
+    pub(crate) fn approved_mention_sources_at(
+        &self,
+        view: ViewContext,
+        target: ObjectRef,
+    ) -> Result<HashSet<ObjectRef>, Error> {
+        require_author(view.scope)?;
+        if target.world != view.world {
+            return Err(Error::WrongWorld);
+        }
+        if view.branch != load_world(&self.conn, view.world)?.main {
+            return Ok(HashSet::new());
+        }
+        let tx = self.conn.unchecked_transaction()?;
+        if resolve_object(&tx, target, view.branch, view.revision, view.day)?.is_none() {
+            return Ok(HashSet::new());
+        }
+        const REVIEW_BUDGET: i64 = 10_000;
+        let reviews = {
+            let mut statement = tx.prepare(
+                "SELECT source_id, source_branch_id, source_state_revision, source_revision,
+                        start_byte, end_byte, decision
+                 FROM mention_reviews
+                 WHERE world_id = ?1 AND target_id = ?2 AND revision <= ?3
+                 ORDER BY source_id, source_branch_id, source_state_revision,
+                          source_revision, start_byte, end_byte, revision DESC
+                 LIMIT ?4",
+            )?;
+            statement
+                .query_map(
+                    params![
+                        view.world.0.as_bytes(),
+                        target.id.0.as_bytes(),
+                        view.revision.0,
+                        REVIEW_BUDGET + 1
+                    ],
+                    |row| {
+                        Ok((
+                            row.get::<_, [u8; 16]>(0)?,
+                            row.get::<_, [u8; 16]>(1)?,
+                            row.get::<_, i64>(2)?,
+                            row.get::<_, i64>(3)?,
+                            row.get::<_, i64>(4)?,
+                            row.get::<_, i64>(5)?,
+                            row.get::<_, String>(6)?,
+                        ))
+                    },
+                )?
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        if reviews.len() > REVIEW_BUDGET as usize {
+            return Err(Error::QueryBudgetExceeded);
+        }
+        let mut seen = HashSet::new();
+        let mut linked = HashSet::new();
+        for (source_id, branch_id, state_revision, recorded_at, start, end, decision) in reviews {
+            if !seen.insert((
+                source_id,
+                branch_id,
+                state_revision,
+                recorded_at,
+                start,
+                end,
+            )) {
+                continue;
+            }
+            if decision != "approved" {
+                continue;
+            }
+            let source = ObjectRef {
+                world: view.world,
+                id: ObjectId(Uuid::from_bytes(source_id)),
+            };
+            if let Some(version) =
+                resolve_object(&tx, source, view.branch, view.revision, view.day)?
+                && version.source_branch.0.as_bytes() == &branch_id
+                && version.state_revision.0 == state_revision
+                && version.recorded_at.0 == recorded_at
+            {
+                linked.insert(source);
+            }
+        }
+        tx.commit()?;
+        Ok(linked)
     }
 
     pub fn get_object(

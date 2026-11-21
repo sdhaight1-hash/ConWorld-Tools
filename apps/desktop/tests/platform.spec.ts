@@ -542,10 +542,12 @@ test("native mention discovery lists distinct collision identities and never acc
             return { revision: args.revision ?? 2, truncated: false, rows: [
               { source_id: "claim", source_revision: 2, source_label: "Witness diary",
                 statement: "Eleanor Vale met the Guild.", target_id: "person-a",
-                target_label: "Eleanor Vale", start_byte: 0, end_byte: 12, collisions: 2 },
+                target_label: "Eleanor Vale", start_byte: 0, end_byte: 12, collisions: 2,
+                source_branch: "main", source_state_revision: 2, disposition: null },
               { source_id: "claim", source_revision: 2, source_label: "Witness diary",
                 statement: "Eleanor Vale met the Guild.", target_id: "person-b",
-                target_label: "Eleanor Vale", start_byte: 0, end_byte: 12, collisions: 2 },
+                target_label: "Eleanor Vale", start_byte: 0, end_byte: 12, collisions: 2,
+                source_branch: "main", source_state_revision: 2, disposition: null },
             ] };
           }
           throw new Error("Unexpected mock native command: " + command);
@@ -571,4 +573,78 @@ test("native mention discovery lists distinct collision identities and never acc
   await revision.blur();
   await expect(results).toHaveCount(0);
   await expect(page.locator("#author-discovery-status")).toContainText("Choose Find possible mentions");
+});
+
+
+test("native author can approve and dismiss one historical reference without creating a relationship", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "world", name: "Reviewed world", revision: 2 };
+    const calls: unknown[] = [];
+    let disposition: string | null = null;
+    Object.assign(window, {
+      isTauri: true,
+      __reviewCalls: calls,
+      __TAURI_INTERNALS__: {
+        invoke: async (command: string, args: Record<string, unknown>) => {
+          if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+          if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+          if (command === "workspace_worlds") return [world];
+          if (command === "workspace_saved_queries") return [];
+          if (command === "workspace_snapshot") return {
+            world, day: args.day, view_revision: args.revision ?? world.revision,
+            people: [{ id: "a", label: "Eleanor Vale" }, { id: "b", label: "Eleanor Vale" }],
+            relationships: [], events: [], definitions: [],
+          };
+          if (command === "workspace_discover_mentions") return {
+            revision: args.revision ?? world.revision, truncated: false, rows: [
+              { source_id: "claim", source_branch: "main", source_state_revision: 2,
+                source_revision: 2, source_label: "Diary", statement: "Eleanor Vale spoke.",
+                target_id: "a", target_label: "Eleanor Vale", start_byte: 0, end_byte: 12,
+                collisions: 2, disposition: (args.revision ?? world.revision) < 3 ? null : disposition },
+              { source_id: "claim", source_branch: "main", source_state_revision: 2,
+                source_revision: 2, source_label: "Diary", statement: "Eleanor Vale spoke.",
+                target_id: "b", target_label: "Eleanor Vale", start_byte: 0, end_byte: 12,
+                collisions: 2, disposition: null },
+            ],
+          };
+          if (command === "workspace_review_mention") {
+            const request = args.request as { decision: string; expected_revision: number };
+            calls.push({ command, request });
+            if (request.expected_revision !== world.revision) throw new Error("stale author revision");
+            disposition = request.decision;
+            world.revision++;
+            return world.revision;
+          }
+          throw new Error("Unexpected native call " + command);
+        },
+      },
+    });
+  });
+  await page.goto("/");
+  const trigger = page.getByRole("button", { name: "Find possible mentions" });
+  await trigger.click();
+  const results = page.locator("#author-discovery-results li");
+  await expect(results).toHaveCount(2);
+  await results.nth(0).getByRole("button", { name: "Approve link" }).click();
+  await expect(results.nth(0)).toContainText("Approved hyperlink only");
+  await expect(results.nth(1)).toContainText("Candidate only");
+  await results.nth(0).getByRole("button", { name: "Dismiss candidate" }).click();
+  await expect(results.nth(0)).toContainText("Dismissed candidate");
+  const calls = await page.evaluate(() => (window as unknown as { __reviewCalls: unknown[] }).__reviewCalls);
+  expect(calls).toMatchObject([
+    { command: "workspace_review_mention", request: {
+      world_id: "world", day: 0, expected_revision: 2, source_id: "claim", source_branch: "main",
+      source_state_revision: 2, source_revision: 2, target_id: "a",
+      start_byte: 0, end_byte: 12, decision: "approved",
+    }},
+    { command: "workspace_review_mention", request: {
+      world_id: "world", day: 0, expected_revision: 3, target_id: "a", decision: "dismissed",
+    }},
+  ]);
+  const archived = page.locator("#author-revision");
+  await archived.fill("2");
+  await archived.blur();
+  await trigger.click();
+  await expect(results.nth(0)).toContainText("Candidate only");
+  await expect(results.nth(0).getByRole("button", { name: "Approve link" })).toHaveCount(0);
 });

@@ -9,6 +9,7 @@ fn main() {
             "workspace_snapshot",
             "workspace_search",
             "workspace_discover_mentions",
+            "workspace_review_mention",
             "workspace_saved_queries",
             "workspace_save_query",
             "workspace_query_path",

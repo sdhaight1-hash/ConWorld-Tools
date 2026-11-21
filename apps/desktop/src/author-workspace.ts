@@ -25,8 +25,9 @@ type EvidenceStatement = { statement: string; source: string | null; audience: s
 type SearchResult = { revision: number; truncated: boolean; rows: { id: string; label: string; kind: string }[] };
 type SavedQuery = { id: string; name: string; mode: "contains" | "exact" | "fulltext"; term: string; limit: number; recorded_at: number };
 type MentionDiscovery = { revision: number; truncated: boolean; rows: {
-  source_id: string; source_revision: number; source_label: string; statement: string;
-  target_id: string; target_label: string; start_byte: number; end_byte: number; collisions: number;
+  source_id: string; source_branch: string; source_state_revision: number; source_revision: number;
+  source_label: string; statement: string; target_id: string; target_label: string;
+  start_byte: number; end_byte: number; collisions: number; disposition: "approved" | "dismissed" | null;
 }[] };
 type Snapshot = {
   world: World; day: number; view_revision: number;
@@ -586,6 +587,38 @@ export async function showAuthorWorkspace(
     })();
   }
 
+  function reviewCandidate(candidate: MentionDiscovery["rows"][number], decision: "approved" | "dismissed") {
+    if (!snapshot || saving || selectedRevision() !== null) return;
+    const request = {
+      world_id: snapshot.world.id,
+      day: snapshot.day,
+      expected_revision: snapshot.world.revision,
+      source_id: candidate.source_id,
+      source_branch: candidate.source_branch,
+      source_state_revision: candidate.source_state_revision,
+      source_revision: candidate.source_revision,
+      target_id: candidate.target_id,
+      start_byte: candidate.start_byte,
+      end_byte: candidate.end_byte,
+      decision,
+    };
+    void (async () => {
+      try {
+        saving = true;
+        syncButtons();
+        await invoke<number>("workspace_review_mention", { request });
+        saving = false;
+        await refresh();
+        discoverButton.click();
+      } catch (error) {
+        discoveryStatus.textContent = "Unable to review mention: " + String(error);
+      } finally {
+        saving = false;
+        syncButtons();
+      }
+    })();
+  }
+
   discoverButton.addEventListener("click", () => {
     if (!snapshot || saving) return;
     const worldId = snapshot.world.id;
@@ -615,8 +648,22 @@ export async function showAuthorWorkspace(
           excerpt.textContent = candidate.statement;
           const caution = document.createElement("p");
           caution.className = "hint";
-          caution.textContent = "Candidate only — no hyperlink, membership, or relationship recorded.";
+          caution.textContent = candidate.disposition === "approved"
+            ? "Approved hyperlink only — no membership or relationship inferred."
+            : candidate.disposition === "dismissed"
+              ? "Dismissed candidate — no hyperlink recorded."
+              : "Candidate only — no hyperlink, membership, or relationship recorded.";
           item.append(name, provenance, excerpt, caution);
+          if (selectedRevision() === null) {
+            for (const decision of ["approved", "dismissed"] as const) {
+              const review = document.createElement("button");
+              review.type = "button";
+              review.textContent = decision === "approved" ? "Approve link" : "Dismiss candidate";
+              review.disabled = candidate.disposition === decision || saving;
+              review.addEventListener("click", () => reviewCandidate(candidate, decision));
+              item.append(review);
+            }
+          }
           if (visiblePeople.has(candidate.target_id)) {
             const inspect = document.createElement("button");
             inspect.type = "button";

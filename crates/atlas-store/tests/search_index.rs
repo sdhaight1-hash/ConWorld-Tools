@@ -211,7 +211,8 @@ fn fts_index_rebuild_backup_and_v7_migration_preserve_historical_results() -> Re
     // the FTS index without rewriting the canonical author history.
     let conn = rusqlite::Connection::open(&path)?;
     conn.execute_batch(
-        "DROP TABLE saved_query_versions;
+        "DROP TABLE mention_reviews;
+         DROP TABLE saved_query_versions;
          DROP TABLE saved_queries;
          DROP TRIGGER object_versions_search_ai;
          DROP TRIGGER object_versions_search_au;

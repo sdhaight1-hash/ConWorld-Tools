@@ -106,12 +106,18 @@ impl Store {
             }
             QueryFilter::Backlinks(target) => {
                 same_world(*target, view)?;
+                let approved = if visible.contains(target) {
+                    self.approved_mention_sources_at(view, *target)?
+                } else {
+                    HashSet::new()
+                };
                 objects
                     .into_iter()
                     .filter(|item| {
                         visible.contains(target)
                             && (item.record.source == Some(*target)
-                                || refers_to(&item.record.data, *target))
+                                || refers_to(&item.record.data, *target)
+                                || approved.contains(&item.object))
                     })
                     .collect()
             }
