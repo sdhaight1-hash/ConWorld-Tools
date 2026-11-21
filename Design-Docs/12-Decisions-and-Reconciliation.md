@@ -83,3 +83,7 @@ Any change to an accepted decision must have an ADR with context, alternatives, 
 ## Verification limits
 
 The predecessor packages included a foundational SQLite smoke test. It does **not** prove Rust, WebGPU, Tauri, search, publishing or DNA have been implemented. The new repository began empty, and these files are **specifications**, not executable products. No acceptance scenario should be marked passed until implemented and actually run.
+
+## 2026-11-21 implementation reconciliation
+
+The [consolidated development record](Consolidation-2026-11-21.md) links the accepted partial implementation ADRs and test evidence. No normative architecture decision is superseded here: shared historical store, explicit author acceptance, stable identities and Rust projection policy remain authoritative. ADR-004, ADR-005, ADR-008 and ADR-010 are still open at full scope (templates, complete reader-safe queries, character/branch visibility, hotspot and caption indexing, performance and refactor semantics). Schema 26 and its author/reader boundaries are a verified implementation baseline, not completion of these ADR contracts.

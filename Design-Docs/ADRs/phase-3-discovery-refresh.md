@@ -1,6 +1,6 @@
 # Phase 3 — Dependency-driven mention preview refresh
 
-Status: draft stacked on #44; tracks #4. No schema change.
+Status: merged into main in PR #45; exact development head `2741a156` verified by [persistence CI](https://github.com/sdhaight1-hash/ConWorld-Tools/actions/runs/44940409953) and [desktop CI](https://github.com/sdhaight1-hash/ConWorld-Tools/actions/runs/44940479406) on Linux and Windows. Scoped implementation; roadmap acceptance remains open.
 
 The existing cancellable native discovery entry point consumes the revision-delta plan through a single Store-local preview slot. It stores at most 100 complete author candidates, including zero rows, with exact world/branch/day/revision/scope, optional focus and result limit. No client-supplied cached rows or persistent materialized claim corpus. Both matching and delta evaluation run under the same deadline and SQLite progress handler.
 
@@ -8,4 +8,6 @@ On same selection and a compatible historical delta, remove all previous candida
 
 The native IPC already calls the controlled discovery entry point and therefore automatically benefits on repeated scans and immediate post-review refreshes. The UI still clears stale rows when switching context; no background refresh, no public cache, no speculative shared-cache framework. This is the first concrete dependency consumer; Canvas component dependency scheduling remains later work.
 
-Regression compares controlled refresh results to uncached canonical scans after review and source correction, checks reverse history, truncation, focused unrelated changes, rename, scope denial, cancellation and rebuild parity. CI required.
+Regression compares controlled refresh results to uncached canonical scans after review and source correction, checks reverse history, truncation, focused unrelated changes, rename, scope denial, cancellation and rebuild parity. Exact-head CI passed.
+
+Consolidation: see [unified baseline and remaining gates](../Consolidation-2026-11-21.md). Earlier pending-development statements in this record describe the implementation chronology, not the current CI status.

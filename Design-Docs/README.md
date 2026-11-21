@@ -45,9 +45,11 @@
 - [Roadmap Phase 8 — Synthetic DNA & Population History](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/9)
 - [Roadmap Phase 9 — Release Hardening, Export & Optional NPC Integration](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/10)
 
-All ten issues start **open** and link to their relevant design contracts and acceptance gates. The planned phase number is independent of the GitHub issue number.
+The ten original issues link to their relevant design contracts and acceptance gates. Phases 0–2 are closed; Phases 3–9 remain open. The planned phase number is independent of the GitHub issue number.
 
 ## Current repository state
+
+- [Consolidation and integration record — 2026-11-21](Consolidation-2026-11-21.md): all ten stacked PRs merged, shared schema 26, exact CI evidence and outstanding gates.
 
 - [Repository-wide engineering audit — 2026-11-21](Repository-Audit-2026-11-21.md): pinned main and staged baselines, source/CI review, screenshot compliance, findings and prioritized next work.
 
