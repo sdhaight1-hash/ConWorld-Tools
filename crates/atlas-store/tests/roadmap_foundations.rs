@@ -1317,9 +1317,8 @@ fn authored_links_follow_publication_and_historical_backlinks() -> Result<(), Er
         ),
     };
     let control = QueryControl::new(std::time::Duration::from_secs(10))?;
-    let find = |store: &Store, context, limit| {
-        store.entry_backlinks(context, beatrice, limit, &control)
-    };
+    let find =
+        |store: &Store, context, limit| store.entry_backlinks(context, beatrice, limit, &control);
     author.revision = store.save_entry_layout(author, &source, true, Uuid::new_v4())?;
     assert!(find(&store, public(author), 1)?.matches.is_empty());
     let display = store.display_entry(public(author), alice)?.unwrap();

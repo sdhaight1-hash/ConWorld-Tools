@@ -1,8 +1,8 @@
 //! Main-branch authored layouts and explicit, revocable publication.
 use super::*;
 use crate::layout::{
-    DisplayContent, DisplayElement, EntryBacklink, EntryBacklinks, EntryTextSearch,
-    LayoutDocument, PublicPageMatch, PublicPageSearch,
+    DisplayContent, DisplayElement, EntryBacklink, EntryBacklinks, EntryTextSearch, LayoutDocument,
+    PublicPageMatch, PublicPageSearch,
 };
 
 impl Store {
@@ -136,18 +136,15 @@ impl Store {
         }
         if view.scope == Scope::Author {
             self.validate_query_view(view)?;
-            return Ok(resolve_object(
-                &self.conn,
-                target,
-                view.branch,
-                view.revision,
-                view.day,
-            )?
-            .is_some());
+            return Ok(
+                resolve_object(&self.conn, target, view.branch, view.revision, view.day)?.is_some(),
+            );
         }
-        Ok(read_layout_at(&self.conn, view, target)?.is_some_and(|(document, _)| {
-            crate::access::can_view(view.scope, document.root.audience)
-        }))
+        Ok(
+            read_layout_at(&self.conn, view, target)?.is_some_and(|(document, _)| {
+                crate::access::can_view(view.scope, document.root.audience)
+            }),
+        )
     }
 
     /// Explicit presentation references, not semantic graph edges.
@@ -182,7 +179,11 @@ impl Store {
                  ORDER BY l.entry_id",
             )?;
             let ids = stmt.query_map(
-                params![view.world.0.as_bytes(), target.id.0.as_bytes(), view.revision.0],
+                params![
+                    view.world.0.as_bytes(),
+                    target.id.0.as_bytes(),
+                    view.revision.0
+                ],
                 |row| row.get::<_, [u8; 16]>(0),
             )?;
             for id in ids {
