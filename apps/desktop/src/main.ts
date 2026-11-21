@@ -122,6 +122,7 @@ function showScene(scene: Scene, benchmark: boolean) {
   const reset = document.querySelector<HTMLButtonElement>("#reset-zoom")!;
   const nodes = new Map<string, Scene["nodes"][number]>();
   const buttons = new Map<string, HTMLButtonElement>();
+  const graphLabels = new Map<string, string>();
   let active = "";
   let zoom = 100;
   const layers = document.querySelector<HTMLElement>("#graph-layers")!;
@@ -228,9 +229,20 @@ function showScene(scene: Scene, benchmark: boolean) {
       context.strokeStyle = "#13272d";
       context.lineWidth = 4;
       const y = node.y + (benchmark ? 16 : 28);
-      const labelWidth = savedWorld ? 132 : undefined;
-      context.strokeText(node.label, node.x, y, labelWidth);
-      context.fillText(node.label, node.x, y, labelWidth);
+      let label = graphLabels.get(node.id);
+      if (label === undefined) {
+        label = node.label;
+        if (savedWorld && context.measureText(label).width > 139) {
+          const characters = Array.from(label);
+          do {
+            characters.pop();
+            label = characters.join("") + "…";
+          } while (context.measureText(label).width > 139);
+        }
+        graphLabels.set(node.id, label);
+      }
+      context.strokeText(label, node.x, y);
+      context.fillText(label, node.x, y);
     }
   }
 
@@ -252,11 +264,11 @@ function showScene(scene: Scene, benchmark: boolean) {
       if (savedWorld) {
         const link = document.createElement("button");
         link.type = "button";
-        link.textContent = label;
+        const neighbor = edge.source === id ? to : from;
+        link.textContent = `${edge.label} · ${neighbor.label}`;
         link.addEventListener("click", () => {
-          const neighbor = edge.source === id ? edge.target : edge.source;
-          select(neighbor);
-          buttons.get(neighbor)?.focus();
+          select(neighbor.id);
+          buttons.get(neighbor.id)?.focus();
         });
         item.append(link);
       } else {
@@ -288,6 +300,7 @@ function showScene(scene: Scene, benchmark: boolean) {
     }
     nodes.clear();
     buttons.clear();
+    graphLabels.clear();
     list.replaceChildren();
     for (const node of scene.nodes) {
       nodes.set(node.id, node);

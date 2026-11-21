@@ -13,6 +13,7 @@
     "allow-workspace-snapshot",
     "allow-workspace-create-person",
     "allow-workspace-create-relationship",
+    "allow-workspace-record-relationship-state",
     "allow-workspace-record-event"
   ]
 }
