@@ -12,8 +12,8 @@ use crate::discovery::{
     matching_spans,
 };
 use crate::query::{
-    PredicateInput, QUERY_SCHEMA_VERSION, QueryControl, QueryFilter, QuerySpec, SaveNamedLabelQuery,
-    SavedLabelQuery, validate_predicate,
+    PredicateInput, QUERY_SCHEMA_VERSION, QueryControl, QueryFilter, QuerySpec,
+    SaveNamedLabelQuery, SavedLabelQuery, validate_predicate,
 };
 use crate::*;
 

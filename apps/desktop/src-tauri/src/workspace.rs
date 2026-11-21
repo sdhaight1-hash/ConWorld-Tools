@@ -11,8 +11,8 @@ use atlas_store::{
     VersionRef, ViewContext, World, WorldDay, WorldId,
     discovery::{MentionDisposition, ReviewMention, SavePersonAlias},
     query::{
-        Direction, PredicateInput, QUERY_SCHEMA_VERSION, QueryControl, QueryCursor, QueryFilter, QuerySpec,
-        SaveNamedLabelQuery,
+        Direction, PredicateInput, QUERY_SCHEMA_VERSION, QueryControl, QueryCursor, QueryFilter,
+        QuerySpec, SaveNamedLabelQuery,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -494,27 +494,36 @@ impl AuthorWorkspace {
     }
 
     fn begin_query(&self, request: Uuid) -> Result<QueryControl, String> {
-        let mut jobs = self.query_jobs.lock().map_err(|_| "Query job lock poisoned")?;
+        let mut jobs = self
+            .query_jobs
+            .lock()
+            .map_err(|_| "Query job lock poisoned")?;
         if jobs.cancelled.contains(&request) {
             return Err("query cancelled".into());
         }
         if jobs.active.len() >= 8 || jobs.active.contains_key(&request) {
             return Err("Too many active or duplicate query requests".into());
         }
-        let control = QueryControl::new(Duration::from_secs(10))
-            .map_err(|error| error.to_string())?;
+        let control =
+            QueryControl::new(Duration::from_secs(10)).map_err(|error| error.to_string())?;
         jobs.active.insert(request, control.clone());
         Ok(control)
     }
 
     fn finish_query(&self, request: Uuid) -> Result<(), String> {
-        let mut jobs = self.query_jobs.lock().map_err(|_| "Query job lock poisoned")?;
+        let mut jobs = self
+            .query_jobs
+            .lock()
+            .map_err(|_| "Query job lock poisoned")?;
         jobs.active.remove(&request);
         Ok(())
     }
 
     fn cancel_query(&self, request: Uuid) -> Result<(), String> {
-        let mut jobs = self.query_jobs.lock().map_err(|_| "Query job lock poisoned")?;
+        let mut jobs = self
+            .query_jobs
+            .lock()
+            .map_err(|_| "Query job lock poisoned")?;
         if let Some(control) = jobs.active.get(&request) {
             control.cancel();
         } else if !jobs.cancelled.contains(&request) {
@@ -881,7 +890,14 @@ impl AuthorWorkspace {
             let result = store
                 .execute_query_controlled(&spec, view, control)
                 .map_err(|error| error.to_string())?;
-            return Self::search_summary(&store, view, result.rows, result.truncated, None, control);
+            return Self::search_summary(
+                &store,
+                view,
+                result.rows,
+                result.truncated,
+                None,
+                control,
+            );
         }
         let page = store
             .execute_query_page_controlled(&spec, view, None, control)
@@ -893,7 +909,8 @@ impl AuthorWorkspace {
             cursor,
         });
         let token = next.as_ref().map(|item| item.token.to_string());
-        let summary = Self::search_summary(&store, view, page.rows, token.is_some(), token, control)?;
+        let summary =
+            Self::search_summary(&store, view, page.rows, token.is_some(), token, control)?;
         control.check().map_err(|error| error.to_string())?;
         *continuation = next;
         Ok(summary)
@@ -920,7 +937,12 @@ impl AuthorWorkspace {
             })
             .ok_or("Search page expired; run the search again.")?;
         let page = store
-            .execute_query_page_controlled(&current.spec, current.view, Some(&current.cursor), control)
+            .execute_query_page_controlled(
+                &current.spec,
+                current.view,
+                Some(&current.cursor),
+                control,
+            )
             .map_err(|error| error.to_string())?;
         let view = current.view;
         let next = page.next_cursor.map(|cursor| SearchContinuation {
@@ -930,7 +952,8 @@ impl AuthorWorkspace {
             cursor,
         });
         let token = next.as_ref().map(|item| item.token.to_string());
-        let summary = Self::search_summary(&store, view, page.rows, token.is_some(), token, control)?;
+        let summary =
+            Self::search_summary(&store, view, page.rows, token.is_some(), token, control)?;
         control.check().map_err(|error| error.to_string())?;
         *continuation = next;
         Ok(summary)
@@ -2058,7 +2081,10 @@ mod tests {
         let cb = workspace.begin_query(b)?;
         let lock = workspace.lock()?;
         workspace.cancel_query(a)?;
-        assert!(matches!(ca.check(), Err(atlas_store::Error::QueryCancelled)));
+        assert!(matches!(
+            ca.check(),
+            Err(atlas_store::Error::QueryCancelled)
+        ));
         cb.check()?;
         drop(lock);
         workspace.finish_query(a)?;
@@ -2107,21 +2133,47 @@ mod tests {
         assert!(latest.people.is_empty());
         assert!(latest.events.is_empty());
         assert_eq!(latest.view_revision, 2);
-        let found = workspace.search(&world.id, 0, Some(2), ("fulltext", "Obsidian"), 10, &test_control())?;
+        let found = workspace.search(
+            &world.id,
+            0,
+            Some(2),
+            ("fulltext", "Obsidian"),
+            10,
+            &test_control(),
+        )?;
         assert_eq!(found.revision, latest.view_revision);
         assert_eq!(found.rows.len(), 1);
         assert_eq!(found.rows[0].id, focus.id.0.to_string());
-        let first = workspace.search(&world.id, 0, Some(2), ("fulltext", "Inhabitant"), 2, &test_control())?;
+        let first = workspace.search(
+            &world.id,
+            0,
+            Some(2),
+            ("fulltext", "Inhabitant"),
+            2,
+            &test_control(),
+        )?;
         assert_eq!(first.rows.len(), 2);
         let token = first.next_cursor.as_deref().unwrap();
-        assert!(workspace.next_page(&world.id, 1, 2, token, &test_control()).is_err());
+        assert!(
+            workspace
+                .next_page(&world.id, 1, 2, token, &test_control())
+                .is_err()
+        );
         let second = workspace.next_page(&world.id, 0, 2, token, &test_control())?;
         assert_eq!(second.rows.len(), 2);
         assert_ne!(second.rows[0].id, first.rows[0].id);
-        assert!(workspace.next_page(&world.id, 0, 2, token, &test_control()).is_err());
+        assert!(
+            workspace
+                .next_page(&world.id, 0, 2, token, &test_control())
+                .is_err()
+        );
         let next = second.next_cursor.as_deref().unwrap();
         let historical = workspace.snapshot(&world.id, 0, Some(1))?;
-        assert!(workspace.next_page(&world.id, 0, 2, next, &test_control()).is_err());
+        assert!(
+            workspace
+                .next_page(&world.id, 0, 2, next, &test_control())
+                .is_err()
+        );
         assert!(!historical.scene_limited);
         assert_eq!(historical.people.len(), 1);
         assert!(workspace.snapshot(&world.id, 0, Some(3)).is_err());
@@ -2519,28 +2571,56 @@ mod tests {
         workspace.create_person(&world.id, "Alice Vale")?;
         workspace.create_person(&world.id, "Alice Vale")?;
         workspace.create_person(&world.id, "Beatrice Thorne")?;
-        let matches = workspace.search(&world.id, 0, None, ("exact", " alice vale "), 20, &test_control())?;
+        let matches = workspace.search(
+            &world.id,
+            0,
+            None,
+            ("exact", " alice vale "),
+            20,
+            &test_control(),
+        )?;
         assert_eq!(matches.revision, 3);
         assert_eq!(matches.rows.len(), 2);
         assert_ne!(matches.rows[0].id, matches.rows[1].id);
         assert!(matches.rows.iter().all(|row| row.kind == "person"));
         assert_eq!(
             workspace
-                .search(&world.id, 0, Some(1), ("contains", "alice"), 20, &test_control())?
+                .search(
+                    &world.id,
+                    0,
+                    Some(1),
+                    ("contains", "alice"),
+                    20,
+                    &test_control()
+                )?
                 .rows
                 .len(),
             1
         );
         assert_eq!(
             workspace
-                .search(&world.id, 0, Some(0), ("contains", "alice"), 20, &test_control())?
+                .search(
+                    &world.id,
+                    0,
+                    Some(0),
+                    ("contains", "alice"),
+                    20,
+                    &test_control()
+                )?
                 .rows
                 .len(),
             0
         );
         assert!(
             workspace
-                .search(&world.id, 0, None, ("unexpected", "alice"), 20, &test_control())
+                .search(
+                    &world.id,
+                    0,
+                    None,
+                    ("unexpected", "alice"),
+                    20,
+                    &test_control()
+                )
                 .is_err()
         );
         assert!(
@@ -2550,7 +2630,14 @@ mod tests {
         );
         assert!(
             workspace
-                .search(&world.id, 0, None, ("contains", "alice"), 0, &test_control())
+                .search(
+                    &world.id,
+                    0,
+                    None,
+                    ("contains", "alice"),
+                    0,
+                    &test_control()
+                )
                 .is_err()
         );
         let beatrice = workspace
@@ -2569,13 +2656,26 @@ mod tests {
             tags: String::new(),
             day: 0,
         })?;
-        let references =
-            workspace.search(&world.id, 0, None, ("backlinks", &matches.rows[0].id), 20, &test_control())?;
+        let references = workspace.search(
+            &world.id,
+            0,
+            None,
+            ("backlinks", &matches.rows[0].id),
+            20,
+            &test_control(),
+        )?;
         assert_eq!(references.rows.len(), 1);
         assert_eq!(references.rows[0].kind, "relationship");
         assert!(
             workspace
-                .search(&world.id, 0, None, ("backlinks", "not-a-uuid"), 20, &test_control())
+                .search(
+                    &world.id,
+                    0,
+                    None,
+                    ("backlinks", "not-a-uuid"),
+                    20,
+                    &test_control()
+                )
                 .is_err()
         );
         Ok(())
@@ -2625,54 +2725,81 @@ mod tests {
         assert_eq!(ids, HashSet::from([person("Beatrice"), person("Cara")]));
         assert!(!found.truncated);
 
-        let one_hop = workspace.query_path(PathQueryInput {
-            max_depth: 1,
-            ..request.clone()
-        }, &test_control())?;
+        let one_hop = workspace.query_path(
+            PathQueryInput {
+                max_depth: 1,
+                ..request.clone()
+            },
+            &test_control(),
+        )?;
         assert_eq!(one_hop.rows.len(), 1);
-        let limited = workspace.query_path(PathQueryInput {
-            max_visited: 2,
-            ..request.clone()
-        }, &test_control())?;
+        let limited = workspace.query_path(
+            PathQueryInput {
+                max_visited: 2,
+                ..request.clone()
+            },
+            &test_control(),
+        )?;
         assert_eq!(limited.rows.len(), 1);
         assert!(limited.truncated);
 
-        let earlier = workspace.query_path(PathQueryInput {
-            day: 9,
-            ..request.clone()
-        }, &test_control())?;
+        let earlier = workspace.query_path(
+            PathQueryInput {
+                day: 9,
+                ..request.clone()
+            },
+            &test_control(),
+        )?;
         assert!(earlier.rows.is_empty());
-        let archived = workspace.query_path(PathQueryInput {
-            revision: Some(3),
-            ..request.clone()
-        }, &test_control())?;
+        let archived = workspace.query_path(
+            PathQueryInput {
+                revision: Some(3),
+                ..request.clone()
+            },
+            &test_control(),
+        )?;
         assert!(archived.rows.is_empty());
-        let reverse = workspace.query_path(PathQueryInput {
-            start_id: person("Cara"),
-            direction: "incoming".into(),
-            ..request.clone()
-        }, &test_control())?;
+        let reverse = workspace.query_path(
+            PathQueryInput {
+                start_id: person("Cara"),
+                direction: "incoming".into(),
+                ..request.clone()
+            },
+            &test_control(),
+        )?;
         assert_eq!(reverse.rows.len(), 2);
 
-        let invalid_direction = workspace.query_path(PathQueryInput {
-            direction: "sideways".into(),
-            ..request.clone()
-        }, &test_control());
+        let invalid_direction = workspace.query_path(
+            PathQueryInput {
+                direction: "sideways".into(),
+                ..request.clone()
+            },
+            &test_control(),
+        );
         assert!(invalid_direction.is_err());
-        let invalid_depth = workspace.query_path(PathQueryInput {
-            max_depth: 0,
-            ..request.clone()
-        }, &test_control());
+        let invalid_depth = workspace.query_path(
+            PathQueryInput {
+                max_depth: 0,
+                ..request.clone()
+            },
+            &test_control(),
+        );
         assert!(invalid_depth.is_err());
-        let invalid_visited = workspace.query_path(PathQueryInput {
-            max_visited: 0,
-            ..request.clone()
-        }, &test_control());
+        let invalid_visited = workspace.query_path(
+            PathQueryInput {
+                max_visited: 0,
+                ..request.clone()
+            },
+            &test_control(),
+        );
         assert!(invalid_visited.is_err());
-        let invalid_start = workspace.query_path(PathQueryInput {
-            start_id: "not-a-uuid".into(),
-            ..request
-        }, &test_control());
+        let invalid_start = workspace.query_path(
+            PathQueryInput {
+                start_id: "not-a-uuid".into(),
+                ..request
+            },
+            &test_control(),
+        );
         assert!(invalid_start.is_err());
         Ok(())
     }

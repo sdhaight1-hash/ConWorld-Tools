@@ -411,9 +411,16 @@ fn controlled_reads_cancel_expire_and_release_the_connection() -> Result<(), Err
         filter: QueryFilter::FullTextPhrase(" ".into()),
         ..spec.clone()
     };
-    assert!(store.execute_query_controlled(&invalid, context, &working).is_err());
+    assert!(
+        store
+            .execute_query_controlled(&invalid, context, &working)
+            .is_err()
+    );
     assert_eq!(
-        store.execute_query_page_controlled(&spec, context, None, &working)?.rows[0].object,
+        store
+            .execute_query_page_controlled(&spec, context, None, &working)?
+            .rows[0]
+            .object,
         one
     );
     let corrected = store.apply(&command(
@@ -421,7 +428,12 @@ fn controlled_reads_cancel_expire_and_release_the_connection() -> Result<(), Err
         revision,
         vec![Change::Correct(one, person("New name"))],
     ))?;
-    assert!(store.execute_query(&spec, view(&world, corrected, 20))?.rows.is_empty());
+    assert!(
+        store
+            .execute_query(&spec, view(&world, corrected, 20))?
+            .rows
+            .is_empty()
+    );
     assert_eq!(store.execute_query(&spec, context)?.rows[0].object, one);
     store.verify_foreign_keys(Scope::Author)?;
     Ok(())
