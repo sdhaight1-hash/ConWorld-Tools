@@ -79,6 +79,12 @@ To restore a compatible SQLite backup to a new database file, run `atlas-desktop
 
 The [cross-phase development record](Design-Docs/Cross-Phase-Entry-Verification.md) covers scoped publication, historical queries, genealogy, event impact, fictional segment comparison and recovery.
 
+### Family history
+
+Select a person in the native author workspace and choose **Family history**. **Record a parent** saves the parent, the relationship type (biological, adoptive or legal), the effective day range and the author's basis for accepting it. The end day is exclusive. Both people show the link. A withdrawal corrects the author record while preserving what earlier author revisions showed.
+
+**Compare fictional inheritance** uses the selected day, author revision and model seed. Both people need two accepted biological parents for the current fictional model. The output lists shared immediate contributors and dimensionless intervals. Family history currently uses the main author-history branch. See the [kinship implementation and verification record](Design-Docs/ADRs/phase-5-dated-parentage.md).
+
 ### Development screenshots and video evidence
 
 The [**Development-Screenshots**](Development-Screenshots/) directory is the project's chronological archive of **real screenshots and screen recordings** captured during development, debugging, testing, and visual reviews. Its [Dev-Screenshots.md guide](Development-Screenshots/Dev-Screenshots.md) defines the filename convention, documentation requirements, and media index.

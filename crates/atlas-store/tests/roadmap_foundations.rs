@@ -639,3 +639,127 @@ fn focused_family_and_event_reads_survive_a_large_unrelated_population() -> Resu
     assert_eq!(impact.events, vec![id(&world, 7)]);
     Ok(())
 }
+
+#[test]
+fn stored_parentage_pins_days_revisions_and_rejects_future_cycles() -> Result<(), Error> {
+    use ParentageKind::*;
+    use atlas_store::genealogy::RecordParentage;
+    let dir = tempfile::tempdir()?;
+    let db = dir.path().join("family.sqlite");
+    let mut store = Store::open(&db)?;
+    let world = seed(&mut store)?;
+    let ctx = |rev, day| ViewContext {
+        revision: AuthorRevision(rev),
+        ..view(&world, day)
+    };
+    let link = |parent, child, kind, start, end: Option<i64>| RecordParentage {
+        parent: id(&world, parent),
+        child: id(&world, child),
+        kind,
+        starts_at: WorldDay(start),
+        ends_before: end.map(WorldDay),
+        command_id: Uuid::new_v4(),
+        rationale: "Household register",
+    };
+    let first = store.record_parentage(ctx(1, 0), link(1, 2, Biological, 0, Some(20)))?;
+    store.record_parentage(ctx(2, 0), link(2, 3, Adoptive, 10, Some(30)))?;
+    assert!(matches!(
+        store.record_parentage(ctx(3, 0), link(3, 1, Legal, 5, Some(15))),
+        Err(Error::InvalidInput(_))
+    ));
+    assert!(matches!(
+        store.record_parentage(ctx(3, 0), link(1, 2, Biological, 5, None)),
+        Err(Error::InvalidInput(_))
+    ));
+    assert!(matches!(
+        store.record_parentage(ctx(1, 0), link(3, 1, Legal, 20, None)),
+        Err(Error::RevisionConflict { .. })
+    ));
+    store.record_parentage(ctx(3, 0), link(3, 1, Legal, 20, None))?;
+    assert_eq!(store.family_links(ctx(4, 19), id(&world, 2))?.len(), 2);
+    assert_eq!(store.family_links(ctx(4, 20), id(&world, 2))?.len(), 1);
+    assert!(matches!(
+        store.withdraw_parentage(
+            ctx(4, 0),
+            id(&world, 13),
+            first,
+            Uuid::new_v4(),
+            "Other person"
+        ),
+        Err(Error::NotFound)
+    ));
+    store.withdraw_parentage(
+        ctx(4, 0),
+        id(&world, 2),
+        first,
+        Uuid::new_v4(),
+        "Register corrected",
+    )?;
+    drop(store);
+    let store = Store::open(&db)?;
+    let before = store.family_links(ctx(4, 0), id(&world, 2))?;
+    assert_eq!(before[0].rationale, "Household register");
+    assert_eq!(before[0].parent, id(&world, 1));
+    assert!(store.family_links(ctx(5, 0), id(&world, 2))?.is_empty());
+    assert!(matches!(
+        store.family_links(
+            ViewContext {
+                scope: Scope::Public,
+                ..ctx(5, 0)
+            },
+            id(&world, 2)
+        ),
+        Err(Error::CapabilityDenied)
+    ));
+    Ok(())
+}
+
+#[test]
+fn fictional_comparison_uses_saved_biological_links_at_the_selected_revision() -> Result<(), Error>
+{
+    use atlas_store::genealogy::RecordParentage;
+    let mut store = Store::open(":memory:")?;
+    let world = seed(&mut store)?;
+    let mut context = view(&world, 1);
+    let mut last = Uuid::nil();
+    for (parent, child, kind) in [
+        (1, 3, ParentageKind::Biological),
+        (2, 3, ParentageKind::Biological),
+        (1, 12, ParentageKind::Biological),
+        (2, 12, ParentageKind::Biological),
+        (13, 12, ParentageKind::Legal),
+    ] {
+        let recorded = store.record_parentage(
+            context,
+            RecordParentage {
+                parent: id(&world, parent),
+                child: id(&world, child),
+                kind,
+                starts_at: WorldDay(1),
+                ends_before: None,
+                rationale: "Register",
+                command_id: Uuid::new_v4(),
+            },
+        )?;
+        if kind == ParentageKind::Biological {
+            last = recorded;
+        }
+        context.revision.0 += 1;
+    }
+    let compare = |s: &Store, v| s.family_match_at(v, id(&world, 3), id(&world, 12), 481);
+    let segments = compare(&store, context)?;
+    assert!(!segments.is_empty());
+    store.withdraw_parentage(context, id(&world, 12), last, Uuid::new_v4(), "Correction")?;
+    assert!(
+        compare(
+            &store,
+            ViewContext {
+                revision: AuthorRevision(context.revision.0 + 1),
+                ..context
+            }
+        )
+        .is_err()
+    );
+    assert_eq!(compare(&store, context)?, segments);
+    Ok(())
+}

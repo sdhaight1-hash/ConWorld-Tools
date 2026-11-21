@@ -7,7 +7,7 @@ use crate::{
 pub const MODEL_VERSION: u16 = 1;
 pub const MODEL_LENGTH: u32 = 100_000;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
 pub struct SyntheticSegment {
     pub start: u32,
     pub end: u32,
@@ -95,4 +95,38 @@ pub fn shared_segments(
         }
     }
     Ok(shared)
+}
+
+impl crate::Store {
+    /// Compare accepted biological parents from the same historical author view.
+    pub fn family_match_at(
+        &self,
+        view: crate::ViewContext,
+        first: ObjectRef,
+        second: ObjectRef,
+        seed: u64,
+    ) -> Result<Vec<SyntheticSegment>, Error> {
+        if first == second {
+            return Err(Error::InvalidInput("select two distinct people"));
+        }
+        let mut parents = Vec::new();
+        for child in [first, second] {
+            for link in self.family_links(view, child)? {
+                if link.child == child && link.kind == ParentageKind::Biological {
+                    parents.push(crate::genealogy::Parentage {
+                        parent: link.parent,
+                        child,
+                        kind: link.kind,
+                        accepted: true,
+                        valid: crate::ValidInterval {
+                            start: Some(crate::WorldDay(link.starts_at)),
+                            end_exclusive: link.ends_before.map(crate::WorldDay),
+                        },
+                    });
+                }
+            }
+        }
+        let pedigree = Pedigree::at(view.world, view.day, &parents)?;
+        shared_segments(&pedigree, first, second, seed, MODEL_VERSION)
+    }
 }

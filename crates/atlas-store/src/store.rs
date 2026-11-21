@@ -19,8 +19,9 @@ use crate::*;
 
 pub(crate) const APPLICATION_ID: i64 = 0x4357_4c44; // CWLD
 mod entries;
+mod family;
 
-pub(crate) const SCHEMA_VERSION: i64 = 22;
+pub(crate) const SCHEMA_VERSION: i64 = 23;
 
 // Candidate queries bind world (?1), focus/phrase (?2), author revision (?3),
 // limit (?4) and branch (?5). Follow only immutable inherited revisions.
@@ -171,6 +172,9 @@ impl Store {
         }
         if version < 22 {
             tx.execute_batch(include_str!("../migrations/0022.sql"))?;
+        }
+        if version < 23 {
+            tx.execute_batch(include_str!("../migrations/0023.sql"))?;
         }
         if version < SCHEMA_VERSION {
             verify_foreign_keys(&tx)?;

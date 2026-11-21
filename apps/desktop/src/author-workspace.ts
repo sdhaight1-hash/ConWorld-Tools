@@ -1,3 +1,4 @@
+import { openFamilyHistory } from "./family-history";
 import { openEntryEditor } from "./entry-editor";
 import { invoke } from "@tauri-apps/api/core";
 import type { Scene } from "./main";
@@ -439,6 +440,11 @@ export async function showAuthorWorkspace(
     }
     const current = snapshot;
     if (current && people.some(person => person.id === id)) {
+      button("Family history", () => {
+        panel.replaceChildren();
+        void openFamilyHistory(panel, { world_id: current.world.id, person_id: id, day: current.day, revision: current.view_revision },
+          people, !revisionInput.value.trim(), async () => { await refresh(); selectNode(id); });
+      });
       button("Open character page", () => {
         panel.replaceChildren();
         void openEntryEditor(panel, current.world.id, id, current.day, current.view_revision,
