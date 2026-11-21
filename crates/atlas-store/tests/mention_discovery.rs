@@ -458,12 +458,24 @@ fn indexed_names_ignore_large_unmatched_dictionary_and_preserve_exact_spans() ->
         Change::Create(ann, record("Ann", ObjectData::Person)),
         Change::Create(unicode, record("Élodie", ObjectData::Person)),
         Change::Create(short, record("Q", ObjectData::Person)),
-        Change::Create(event, record("Meeting", ObjectData::HistoricalEvent {
-            occurrence: EventDate::Exact(WorldDay(0)),
-        })),
-        Change::Create(source, record("Diary", ObjectData::Source {
-            citation: "Folio 1".into(),
-        })),
+        Change::Create(
+            event,
+            record(
+                "Meeting",
+                ObjectData::HistoricalEvent {
+                    occurrence: EventDate::Exact(WorldDay(0)),
+                },
+            ),
+        ),
+        Change::Create(
+            source,
+            record(
+                "Diary",
+                ObjectData::Source {
+                    citation: "Folio 1".into(),
+                },
+            ),
+        ),
     ];
     for number in 0..10_001 {
         changes.push(Change::Create(
@@ -489,41 +501,81 @@ fn indexed_names_ignore_large_unmatched_dictionary_and_preserve_exact_spans() ->
     let written = store.apply(&command(
         &world,
         alias.recorded_at,
-        vec![Change::Create(claim, Record {
-            source: Some(source),
-            ..record("Entry", ObjectData::Claim {
-                subject: event,
-                predicate: "reported".into(),
-                statement: text.into(),
-                audience: ClaimAudience::Author,
-            })
-        })],
+        vec![Change::Create(
+            claim,
+            Record {
+                source: Some(source),
+                ..record(
+                    "Entry",
+                    ObjectData::Claim {
+                        subject: event,
+                        predicate: "reported".into(),
+                        statement: text.into(),
+                        audience: ClaimAudience::Author,
+                    },
+                )
+            },
+        )],
     ))?;
     let context = view(&world, written, 0);
-    let rows = store.discover_mentions_for_source(context, claim, 100)?.rows;
+    let rows = store
+        .discover_mentions_for_source(context, claim, 100)?
+        .rows;
     assert_eq!(rows.len(), 4);
     assert_eq!(rows.iter().filter(|row| row.collisions == 2).count(), 2);
-    assert!(rows.iter().any(|row| row.target == ann && &text[row.start_byte..row.end_byte] == "ANN"));
-    assert!(rows.iter().any(|row| row.target == unicode && &text[row.start_byte..row.end_byte] == "Élodie"));
-    assert!(rows.iter().any(|row| row.target == short && &text[row.start_byte..row.end_byte] == "q"));
-    assert_eq!(store.discover_mentions(view(&world, written, 10), 100)?.rows.len(), 3);
+    assert!(
+        rows.iter()
+            .any(|row| row.target == ann && &text[row.start_byte..row.end_byte] == "ANN")
+    );
+    assert!(
+        rows.iter()
+            .any(|row| row.target == unicode && &text[row.start_byte..row.end_byte] == "Élodie")
+    );
+    assert!(
+        rows.iter()
+            .any(|row| row.target == short && &text[row.start_byte..row.end_byte] == "q")
+    );
+    assert_eq!(
+        store
+            .discover_mentions(view(&world, written, 10), 100)?
+            .rows
+            .len(),
+        3
+    );
     let corrected = store.apply(&command(
         &world,
         written,
         vec![Change::Correct(ann, record("Anna", ObjectData::Person))],
     ))?;
-    let current = store.discover_mentions(view(&world, corrected, 0), 100)?.rows;
+    let current = store
+        .discover_mentions(view(&world, corrected, 0), 100)?
+        .rows;
     assert_eq!(current.len(), 3);
     assert!(!current.iter().any(|row| row.target == ann));
-    assert_eq!(store.discover_mentions_for_source(context, claim, 100)?.rows, rows);
+    assert_eq!(
+        store
+            .discover_mentions_for_source(context, claim, 100)?
+            .rows,
+        rows
+    );
     store.rebuild_search_index(Scope::Author)?;
-    assert_eq!(store.discover_mentions_for_source(context, claim, 100)?.rows, rows);
+    assert_eq!(
+        store
+            .discover_mentions_for_source(context, claim, 100)?
+            .rows,
+        rows
+    );
     drop(store);
     let conn = rusqlite::Connection::open(&path)?;
     conn.execute_batch("DROP INDEX discovery_person_prefix_idx; DROP INDEX discovery_alias_prefix_idx; PRAGMA user_version = 20;")?;
     drop(conn);
     let store = Store::open(&path)?;
-    assert_eq!(store.discover_mentions_for_source(context, claim, 100)?.rows, rows);
+    assert_eq!(
+        store
+            .discover_mentions_for_source(context, claim, 100)?
+            .rows,
+        rows
+    );
     store.verify_foreign_keys(Scope::Author)?;
     Ok(())
 }

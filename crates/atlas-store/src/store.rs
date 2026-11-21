@@ -351,7 +351,9 @@ impl Store {
             [],
         )?;
         rebuild_alias_name_index(&tx)?;
-        tx.execute_batch("REINDEX discovery_person_prefix_idx; REINDEX discovery_alias_prefix_idx;")?;
+        tx.execute_batch(
+            "REINDEX discovery_person_prefix_idx; REINDEX discovery_alias_prefix_idx;",
+        )?;
         tx.commit()?;
         Ok(())
     }
@@ -1467,9 +1469,9 @@ impl Store {
                 };
                 let person = match resolved.entry(object) {
                     std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
-                    std::collections::hash_map::Entry::Vacant(entry) => {
-                        entry.insert(resolve_object(&tx, object, view.branch, view.revision, view.day)?)
-                    }
+                    std::collections::hash_map::Entry::Vacant(entry) => entry.insert(
+                        resolve_object(&tx, object, view.branch, view.revision, view.day)?,
+                    ),
                 };
                 if let Some(person) = person
                     && matches!(person.record.data, ObjectData::Person)
