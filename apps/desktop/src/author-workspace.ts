@@ -26,12 +26,12 @@ type SearchResult = { revision: number; truncated: boolean; rows: {
   id: string; label: string; kind: string;
   statement?: string | null; source_citation?: string | null;
 }[] };
-type Predicate = { op: "contains" | "exact" | "full_text" | "claim_full_text"; text: string } |
+type Predicate = { op: "contains" | "exact" | "exact_alias" | "full_text" | "claim_full_text"; text: string } |
   { op: "object_kind"; kind: string } |
   { op: "has_source"; source_id: string } |
   { op: "and" | "or"; filters: Predicate[] } |
   { op: "not"; filter: Predicate };
-type SavedQuery = { id: string; name: string; mode: "contains" | "exact" | "fulltext" | "claimtext" | "composite";
+type SavedQuery = { id: string; name: string; mode: "contains" | "exact" | "alias" | "fulltext" | "claimtext" | "composite";
   term: string; predicate?: Predicate | null; limit: number; recorded_at: number };
 type MentionDiscovery = { revision: number; truncated: boolean; rows: {
   source_id: string; source_branch: string; source_state_revision: number; source_revision: number;
@@ -824,11 +824,13 @@ export async function showAuthorWorkspace(
   function compositePredicate(): Predicate | null {
     const filters: Predicate[] = [];
     const text = value(compositeForm, "name").trim();
+    const alias = value(compositeForm, "alias").trim();
     const labelPhrase = value(compositeForm, "label_phrase").trim();
     const claimPhrase = value(compositeForm, "claim_phrase").trim();
     const kind = value(compositeForm, "kind");
     const source = value(compositeForm, "source").trim();
     if (text) filters.push({ op: "contains", text });
+    if (alias) filters.push({ op: "exact_alias", text: alias });
     if (labelPhrase) filters.push({ op: "full_text", text: labelPhrase });
     if (claimPhrase) filters.push({ op: "claim_full_text", text: claimPhrase });
     if (kind) filters.push({ op: "object_kind", kind });

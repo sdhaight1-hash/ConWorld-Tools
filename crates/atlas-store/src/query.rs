@@ -21,6 +21,8 @@ pub struct QuerySpec {
 pub enum QueryFilter {
     LabelContains(String),
     ExactLabel(String),
+    /// Exact active author alias, returning all matching canonical people.
+    ExactAlias(String),
     /// Literal token phrase over versioned object labels, indexed with FTS5.
     FullTextPhrase(String),
     /// Literal token phrase in versioned, source-backed claim statements.
@@ -70,6 +72,7 @@ pub enum ObjectKindFilter {
 pub enum PredicateInput {
     Contains { text: String },
     Exact { text: String },
+    ExactAlias { text: String },
     FullText { text: String },
     ClaimFullText { text: String },
     ObjectKind { kind: ObjectKindFilter },
@@ -95,6 +98,7 @@ impl PredicateInput {
         Ok(match self {
             Self::Contains { text } => QueryFilter::LabelContains(text),
             Self::Exact { text } => QueryFilter::ExactLabel(text),
+            Self::ExactAlias { text } => QueryFilter::ExactAlias(text),
             Self::FullText { text } => QueryFilter::FullTextPhrase(text),
             Self::ClaimFullText { text } => QueryFilter::ClaimFullTextPhrase(text),
             Self::ObjectKind { kind } => QueryFilter::Kind(kind),
@@ -137,6 +141,7 @@ impl PredicateInput {
         Ok(match filter {
             QueryFilter::LabelContains(text) => Self::Contains { text: text.clone() },
             QueryFilter::ExactLabel(text) => Self::Exact { text: text.clone() },
+            QueryFilter::ExactAlias(text) => Self::ExactAlias { text: text.clone() },
             QueryFilter::FullTextPhrase(text) => Self::FullText { text: text.clone() },
             QueryFilter::ClaimFullTextPhrase(text) => Self::ClaimFullText { text: text.clone() },
             QueryFilter::Kind(kind) => Self::ObjectKind { kind: *kind },
@@ -246,6 +251,9 @@ impl Store {
             });
         }
         match &spec.filter {
+            QueryFilter::ExactAlias(label) => {
+                return self.indexed_alias_at(label, view, spec.limit);
+            }
             QueryFilter::FullTextPhrase(phrase) => {
                 return self.indexed_phrase_at(phrase, view, spec.limit);
             }
@@ -272,7 +280,9 @@ impl Store {
         let objects = self.objects_at(view, 2_000)?;
         let visible: HashSet<_> = objects.iter().map(|version| version.object).collect();
         let mut rows: Vec<_> = match &spec.filter {
-            QueryFilter::FullTextPhrase(_) | QueryFilter::ClaimFullTextPhrase(_) => {
+            QueryFilter::ExactAlias(_)
+            | QueryFilter::FullTextPhrase(_)
+            | QueryFilter::ClaimFullTextPhrase(_) => {
                 unreachable!("handled by the indexed FTS5 query path")
             }
             QueryFilter::Kind(_)
@@ -353,6 +363,7 @@ pub(crate) fn validate_predicate(
     match filter {
         QueryFilter::LabelContains(label)
         | QueryFilter::ExactLabel(label)
+        | QueryFilter::ExactAlias(label)
         | QueryFilter::FullTextPhrase(label)
         | QueryFilter::ClaimFullTextPhrase(label) => {
             search_label(label)?;
@@ -380,13 +391,29 @@ pub(crate) fn validate_predicate(
     Ok(())
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+enum IndexedTextKind {
+    Label,
+    Claim,
+    Alias,
+}
+
+fn indexed_text_kind(filter: &QueryFilter) -> IndexedTextKind {
+    match filter {
+        QueryFilter::FullTextPhrase(_) => IndexedTextKind::Label,
+        QueryFilter::ClaimFullTextPhrase(_) => IndexedTextKind::Claim,
+        QueryFilter::ExactAlias(_) => IndexedTextKind::Alias,
+        _ => unreachable!("not an indexed text predicate"),
+    }
+}
+
 /// Indexed leaves produce exact historical identity sets. A positive indexed
 /// conjunct bounds an AND; an OR is bounded only if every arm is bounded.
 /// NOT never supplies a candidate universe. All leaves are collected before
 /// evaluating predicates, so short-circuiting cannot conceal failing reads.
 #[derive(Default)]
 struct PredicatePlan<'a> {
-    indexed: HashMap<(bool, &'a str), HashSet<ObjectRef>>,
+    indexed: HashMap<(IndexedTextKind, &'a str), HashSet<ObjectRef>>,
     rows: HashMap<ObjectRef, Version>,
     sources: HashSet<ObjectRef>,
     matched: usize,
@@ -401,16 +428,19 @@ impl<'a> PredicatePlan<'a> {
     ) -> Result<Option<HashSet<ObjectRef>>, Error> {
         const INDEX_BUDGET: usize = 10_000;
         match filter {
-            QueryFilter::FullTextPhrase(text) | QueryFilter::ClaimFullTextPhrase(text) => {
-                let claims_only = matches!(filter, QueryFilter::ClaimFullTextPhrase(_));
-                let key = (claims_only, text.as_str());
+            QueryFilter::FullTextPhrase(text)
+            | QueryFilter::ClaimFullTextPhrase(text)
+            | QueryFilter::ExactAlias(text) => {
+                let key = (indexed_text_kind(filter), text.as_str());
                 if let Some(ids) = self.indexed.get(&key) {
                     return Ok(Some(ids.clone()));
                 }
-                let result = if claims_only {
-                    store.indexed_claim_phrase_at(text, view, INDEX_BUDGET)?
-                } else {
-                    store.indexed_phrase_at(text, view, INDEX_BUDGET)?
+                let result = match key.0 {
+                    IndexedTextKind::Label => store.indexed_phrase_at(text, view, INDEX_BUDGET)?,
+                    IndexedTextKind::Claim => {
+                        store.indexed_claim_phrase_at(text, view, INDEX_BUDGET)?
+                    }
+                    IndexedTextKind::Alias => store.indexed_alias_at(text, view, INDEX_BUDGET)?,
                 };
                 self.matched += result.rows.len();
                 if result.truncated || self.matched > INDEX_BUDGET {
@@ -497,10 +527,11 @@ fn predicate_matches(filter: &QueryFilter, version: &Version, plan: &PredicatePl
                 | (ObjectData::Source { .. }, ObjectKindFilter::Source)
                 | (ObjectData::Claim { .. }, ObjectKindFilter::Claim)
         ),
-        QueryFilter::FullTextPhrase(text) | QueryFilter::ClaimFullTextPhrase(text) => {
-            let claims_only = matches!(filter, QueryFilter::ClaimFullTextPhrase(_));
+        QueryFilter::FullTextPhrase(text)
+        | QueryFilter::ClaimFullTextPhrase(text)
+        | QueryFilter::ExactAlias(text) => {
             plan.indexed
-                .get(&(claims_only, text.as_str()))
+                .get(&(indexed_text_kind(filter), text.as_str()))
                 .is_some_and(|ids| ids.contains(&version.object))
         }
         QueryFilter::HasSource(source) => {

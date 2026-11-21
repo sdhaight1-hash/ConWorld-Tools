@@ -87,6 +87,7 @@
                 <select name="mode">
                   <option value="contains">Contains text</option>
                   <option value="exact">Exact name (show duplicates)</option>
+                  <option value="alias">Exact historical alias (show all identities)</option>
                   <option value="fulltext">Full-text label phrase (indexed)</option>
                   <option value="claimtext">Full-text sourced claim statement (indexed, author only)</option>
                 </select>
@@ -126,6 +127,7 @@
               <fieldset>
                 <legend>Combine historical object filters</legend>
                 <label>Label contains <input name="name" maxlength="800" placeholder="Optional label text" /></label>
+                <label>Exact historical alias <input name="alias" maxlength="200" placeholder="Optional alternative name" /></label>
                 <label>Indexed label phrase <input name="label_phrase" maxlength="800" placeholder="Optional literal phrase" /></label>
                 <label>Indexed claim phrase <input name="claim_phrase" maxlength="800" placeholder="Optional sourced statement phrase" /></label>
                 <label>Object kind
