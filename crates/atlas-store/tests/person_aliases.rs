@@ -1,7 +1,7 @@
 //! Phase 3 versioned person aliases participate in candidate discovery and exact historical lookup.
 use atlas_store::{
     discovery::{MentionDisposition, ReviewMention, SavePersonAlias},
-    query::{QUERY_SCHEMA_VERSION, QueryFilter, QuerySpec},
+    query::{ObjectKindFilter, QUERY_SCHEMA_VERSION, QueryFilter, QuerySpec, SaveNamedLabelQuery},
     *,
 };
 use tempfile::tempdir;
@@ -520,6 +520,30 @@ fn indexed_aliases_preserve_collisions_and_historical_versions() -> Result<(), E
     )?;
     assert_eq!(ids(&store, next.recorded_at, 20)?, vec![bob]);
     assert_eq!(ids(&store, b.recorded_at, 20)?, vec![alice, bob]);
+    let composite = QuerySpec {
+        filter: QueryFilter::And(vec![
+            QueryFilter::ExactAlias("Étoile".into()),
+            QueryFilter::Kind(ObjectKindFilter::Person),
+            QueryFilter::Not(Box::new(QueryFilter::ExactLabel("Alice".into()))),
+        ]),
+        ..spec.clone()
+    };
+    let saved = store.save_named_label_query(SaveNamedLabelQuery {
+        world_id: world.id,
+        expected: next.recorded_at,
+        query_id: None,
+        name: "Other Étoile",
+        spec: &composite,
+        command_id: Uuid::new_v4(),
+        scope: Scope::Author,
+    })?;
+    assert_eq!(
+        store
+            .execute_query(&composite, view(&world, b.recorded_at, 20))?
+            .rows[0]
+            .object,
+        bob
+    );
     store.rebuild_search_index(Scope::Author)?;
     assert_eq!(ids(&store, b.recorded_at, 20)?, vec![alice, bob]);
     assert!(matches!(
@@ -539,6 +563,16 @@ fn indexed_aliases_preserve_collisions_and_historical_versions() -> Result<(), E
     let reopened = Store::open(&db)?;
     assert_eq!(ids(&reopened, b.recorded_at, 20)?, vec![alice, bob]);
     assert_eq!(ids(&reopened, next.recorded_at, 20)?, vec![bob]);
+    let definitions = reopened.saved_label_queries(world.id, saved.recorded_at, Scope::Author)?;
+    assert_eq!(definitions[0].id, saved.id);
+    assert_eq!(definitions[0].spec, composite);
+    assert_eq!(
+        reopened
+            .execute_query(&definitions[0].spec, view(&world, saved.recorded_at, 20))?
+            .rows[0]
+            .object,
+        bob
+    );
     reopened.verify_foreign_keys(Scope::Author)?;
     Ok(())
 }
