@@ -3,7 +3,7 @@
 //! Proposals have no write authority: text similarity is not a relationship,
 //! membership, parentage, or proven historical fact.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashSet};
 
 use uuid::Uuid;
 
@@ -169,27 +169,6 @@ impl Store {
                 truncated: false,
             });
         }
-        let people = self.discovery_versions_at(view, "person")?;
-        let person_by_id: HashMap<_, _> = people
-            .iter()
-            .map(|person| (person.object, person))
-            .collect();
-
-        // The current alias registry is main-branch author metadata, and
-        // explicitly returns no values on an alternate historical branch.
-        let aliases = self.person_aliases(view)?;
-        let mut names = Vec::new();
-        for person in &people {
-            names.push((person, person.record.label.as_str()));
-        }
-        for alias in &aliases {
-            if alias.matches_day(view.day)
-                && let Some(person) = person_by_id.get(&alias.person)
-            {
-                names.push((*person, alias.label.as_str()));
-            }
-        }
-
         const MAX_COMPARISONS: usize = 100_000;
         const MAX_CANDIDATES: usize = 2_000;
         let mut comparisons = 0_usize;
@@ -202,25 +181,26 @@ impl Store {
             if statement.len() > 10_000 {
                 return Err(Error::QueryBudgetExceeded);
             }
+            let names = self.discovery_names_at(view, &mention_prefixes(statement))?;
             let mut seen = HashSet::new();
-            for (person, matching_label) in &names {
+            for (person, target_label, matching_label) in names {
                 self.check_query_control()?;
                 comparisons += 1;
                 if comparisons > MAX_COMPARISONS {
                     return Err(Error::QueryBudgetExceeded);
                 }
-                for (start_byte, end_byte) in matching_spans(statement, matching_label) {
+                for (start_byte, end_byte) in matching_spans(statement, &matching_label) {
                     // Count distinct identities and spans, not duplicate authored aliases.
-                    if !seen.insert((person.object, start_byte, end_byte)) {
+                    if !seen.insert((person, start_byte, end_byte)) {
                         continue;
                     }
                     rows.push(MentionCandidate {
                         source: claim.reference(),
                         source_label: claim.record.label.clone(),
                         statement: statement.to_string(),
-                        target: person.object,
-                        target_label: person.record.label.clone(),
-                        matched_label: (*matching_label).into(),
+                        target: person,
+                        target_label: target_label.clone(),
+                        matched_label: matching_label.clone(),
                         start_byte,
                         end_byte,
                         collisions: 1,
@@ -270,6 +250,31 @@ impl Store {
             truncated,
         })
     }
+}
+
+/// Conservative keys for SQLite's ASCII-lowercased, three-character
+/// expression index. Include shorter prefixes for one/two-character names,
+/// punctuation and whitespace. SQLite substr on TEXT stops at NUL; include
+/// an empty key for a NUL at a starting boundary. Exact matching below still
+/// decides case, boundaries and byte offsets.
+fn mention_prefixes(text: &str) -> BTreeSet<String> {
+    let mut keys = BTreeSet::new();
+    let mut previous = None;
+    for (start, character) in text.char_indices() {
+        if previous.is_none_or(|c: char| !c.is_alphanumeric() && c != '_') {
+            let mut prefix = String::new();
+            for c in text[start..].chars().take(3) {
+                if c == '\0' {
+                    keys.insert(prefix.clone());
+                    break;
+                }
+                prefix.push(c.to_ascii_lowercase());
+                keys.insert(prefix.clone());
+            }
+        }
+        previous = Some(character);
+    }
+    keys
 }
 
 /// Byte-stable source spans. ASCII case differences are matched without
