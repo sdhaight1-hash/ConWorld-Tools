@@ -18,7 +18,7 @@ use crate::query::{
 use crate::*;
 
 pub(crate) const APPLICATION_ID: i64 = 0x4357_4c44; // CWLD
-pub(crate) const SCHEMA_VERSION: i64 = 20;
+pub(crate) const SCHEMA_VERSION: i64 = 21;
 
 // Candidate queries bind world (?1), focus/phrase (?2), author revision (?3),
 // limit (?4) and branch (?5). Follow only immutable inherited revisions.
@@ -162,6 +162,9 @@ impl Store {
         }
         if version < 20 {
             tx.execute_batch(include_str!("../migrations/0020.sql"))?;
+        }
+        if version < 21 {
+            tx.execute_batch(include_str!("../migrations/0021.sql"))?;
         }
         if version < SCHEMA_VERSION {
             verify_foreign_keys(&tx)?;
@@ -348,6 +351,9 @@ impl Store {
             [],
         )?;
         rebuild_alias_name_index(&tx)?;
+        tx.execute_batch(
+            "REINDEX discovery_person_prefix_idx; REINDEX discovery_alias_prefix_idx;",
+        )?;
         tx.commit()?;
         Ok(())
     }
@@ -1390,6 +1396,93 @@ impl Store {
         }
         tx.commit()?;
         Ok(rows)
+    }
+
+    /// Use versioned name-prefix candidate indexes, then resolve the exact
+    /// historical person. Alias rows are main-branch metadata only.
+    pub(crate) fn discovery_names_at(
+        &self,
+        view: ViewContext,
+        prefixes: &std::collections::BTreeSet<String>,
+    ) -> Result<Vec<(ObjectRef, String, String)>, Error> {
+        require_author(view.scope)?;
+        self.validate_query_view(view)?;
+        if prefixes.is_empty() {
+            return Ok(Vec::new());
+        }
+        let tx = self.conn.unchecked_transaction()?;
+        let world = load_world(&tx, view.world)?;
+        let keys = serde_json::to_string(prefixes)
+            .map_err(|_| Error::InvalidInput("discovery prefixes"))?;
+        const BUDGET: usize = 10_000;
+        let sql = format!(
+            "{QUERY_LINEAGE}
+             SELECT DISTINCT v.object_id, NULL AS alias_label, NULL AS alias_id
+             FROM json_each(?2) p
+             CROSS JOIN object_versions v
+             JOIN lineage l ON l.branch_id = v.branch_id
+             WHERE v.world_id = ?1 AND v.kind = 'person'
+               AND lower(substr(v.label, 1, 3)) = p.value
+               AND v.revision <= ?3 AND v.revision <= l.max_revision
+             UNION ALL
+             SELECT a.person_id, v.label, v.alias_id
+             FROM json_each(?2) p
+             CROSS JOIN person_alias_versions v
+             JOIN person_aliases a ON a.world_id = v.world_id AND a.id = v.alias_id
+             WHERE ?7 AND v.world_id = ?1
+               AND lower(substr(v.label, 1, 3)) = p.value
+               AND v.revision <= ?3 AND v.active = 1
+               AND (v.starts_at IS NULL OR v.starts_at <= ?6)
+               AND (v.ends_before IS NULL OR v.ends_before > ?6)
+               AND NOT EXISTS (
+                   SELECT 1 FROM person_alias_versions newer
+                   WHERE newer.world_id = v.world_id AND newer.alias_id = v.alias_id
+                     AND newer.revision > v.revision AND newer.revision <= ?3
+               )
+             ORDER BY 3, 1 LIMIT ?4"
+        );
+        let mut resolved = HashMap::new();
+        let mut names = Vec::new();
+        {
+            let mut statement = tx.prepare(&sql)?;
+            let candidates = statement.query_map(
+                params![
+                    view.world.0.as_bytes(),
+                    keys,
+                    view.revision.0,
+                    BUDGET as i64 + 1,
+                    view.branch.0.as_bytes(),
+                    view.day.0,
+                    view.branch == world.main,
+                ],
+                |row| Ok((row.get::<_, [u8; 16]>(0)?, row.get::<_, Option<String>>(1)?)),
+            )?;
+            for (index, candidate) in candidates.enumerate() {
+                self.check_query_control()?;
+                if index == BUDGET {
+                    return Err(Error::QueryBudgetExceeded);
+                }
+                let (id, alias) = candidate?;
+                let object = ObjectRef {
+                    world: view.world,
+                    id: ObjectId(Uuid::from_bytes(id)),
+                };
+                let person = match resolved.entry(object) {
+                    std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+                    std::collections::hash_map::Entry::Vacant(entry) => entry.insert(
+                        resolve_object(&tx, object, view.branch, view.revision, view.day)?,
+                    ),
+                };
+                if let Some(person) = person
+                    && matches!(person.record.data, ObjectData::Person)
+                {
+                    let label = person.record.label.clone();
+                    names.push((object, label.clone(), alias.unwrap_or(label)));
+                }
+            }
+        }
+        tx.commit()?;
+        Ok(names)
     }
 
     /// Conservative dependency invalidation; only same-day main-line forward

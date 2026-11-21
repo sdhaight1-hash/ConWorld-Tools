@@ -1404,6 +1404,13 @@ test("oversized world discovers one exact claim and cancels stale discovery", as
   await resolve(second);
   await expect(page.locator("#author-discovery-results")).toContainText("2 possible identity/identities");
   await expect(page.locator("#author-discovery-status")).toContainText("claim: Diary entry");
+  if (process.env.ATLAS_CAPTURE_PHASE3 === "1") {
+    const timestamp = new Date().toISOString().slice(0, 19).replace("T", "_").replaceAll(":", "-") + "Z";
+    await page.locator("#author-mention-discovery").screenshot({
+      path: "../../Development-Screenshots/" + timestamp + "_phase-03_discovery_focused-claim_01.png",
+      animations: "disabled",
+    });
+  }
   await page.getByRole("button", { name: "Refresh historical view" }).click();
   await expect(page.locator("#author-discovery-results li")).toHaveCount(0);
   await expect(cancel).toBeHidden();
