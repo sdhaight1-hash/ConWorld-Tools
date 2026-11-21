@@ -123,6 +123,7 @@ export async function showAuthorWorkspace(
   const savedSelect = saveQueryForm.elements.namedItem("query_id") as HTMLSelectElement;
   const pathForm = document.querySelector<HTMLFormElement>("#author-path-form")!;
   const participantEventsForm = document.querySelector<HTMLFormElement>("#author-participant-events-form")!;
+  const compositeForm = document.querySelector<HTMLFormElement>("#author-composite-form")!;
   const queryResults = document.querySelector<HTMLUListElement>("#author-query-results")!;
   const discoverButton = document.querySelector<HTMLButtonElement>("#author-discover-mentions")!;
   const discoveryStatus = document.querySelector<HTMLElement>("#author-discovery-status")!;
@@ -208,6 +209,7 @@ export async function showAuthorWorkspace(
     for (const control of [worldSelect, dayInput, revisionInput]) control.disabled = saving;
     worldForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = saving;
     queryForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = !snapshot || saving;
+    compositeForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = !snapshot || saving;
     discoverButton.disabled = !snapshot || saving;
     saveQueryForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = blocked;
     runSavedQuery.disabled = !snapshot || !savedSelect.value || saving;
@@ -770,6 +772,42 @@ export async function showAuthorWorkspace(
         syncButtons();
       }
     })();
+  });
+
+  compositeForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (!snapshot || saving) return;
+    type Predicate = { op: "contains"; text: string } |
+      { op: "object_kind"; kind: string } |
+      { op: "has_source"; source_id: string } |
+      { op: "and" | "or"; filters: Predicate[] } |
+      { op: "not"; filter: Predicate };
+    const filters: Predicate[] = [];
+    const text = value(compositeForm, "name").trim();
+    const kind = value(compositeForm, "kind");
+    const source = value(compositeForm, "source").trim();
+    if (text) filters.push({ op: "contains", text });
+    if (kind) filters.push({ op: "object_kind", kind });
+    if (source) filters.push({ op: "has_source", source_id: source });
+    if (!filters.length) {
+      queryStatus.textContent = "Select at least one historical object filter.";
+      return;
+    }
+    let predicate: Predicate = filters.length === 1 ? filters[0] : {
+      op: value(compositeForm, "combine") as "and" | "or", filters,
+    };
+    if (field<HTMLInputElement>(compositeForm, "negate").checked) {
+      predicate = { op: "not", filter: predicate };
+    }
+    const request = {
+      world_id: snapshot.world.id,
+      day: snapshot.day,
+      revision: selectedRevision(),
+      predicate,
+      limit: 100,
+    };
+    runQuery("Evaluating bounded historical predicates…",
+      () => invoke<SearchResult>("workspace_composite_query", { request }));
   });
 
   participantEventsForm.addEventListener("submit", (event) => {
