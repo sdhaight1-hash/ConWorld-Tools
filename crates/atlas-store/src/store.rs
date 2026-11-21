@@ -781,6 +781,12 @@ impl Store {
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let world = load_world(&tx, view.world)?;
+        // The review table currently stores main-branch author decisions only.
+        // Without branch lineage on decisions, accepting a fork review could
+        // silently make the same source reference appear in its parent.
+        if view.branch != world.main {
+            return Err(Error::CapabilityDenied);
+        }
         if view.revision < AuthorRevision(0) || view.revision > world.revision {
             return Err(Error::InvalidRevision);
         }
@@ -854,6 +860,11 @@ impl Store {
         candidate: &MentionCandidate,
     ) -> Result<Option<MentionDisposition>, Error> {
         require_author(view.scope)?;
+        // Until review decisions are branch-aware, never project main-line
+        // approvals into an alternate historical branch.
+        if view.branch != load_world(&self.conn, view.world)?.main {
+            return Ok(None);
+        }
         let decision: Option<String> = self
             .conn
             .query_row(
@@ -895,6 +906,9 @@ impl Store {
         require_author(view.scope)?;
         if target.world != view.world {
             return Err(Error::WrongWorld);
+        }
+        if view.branch != load_world(&self.conn, view.world)?.main {
+            return Ok(HashSet::new());
         }
         let tx = self.conn.unchecked_transaction()?;
         if resolve_object(&tx, target, view.branch, view.revision, view.day)?.is_none() {
