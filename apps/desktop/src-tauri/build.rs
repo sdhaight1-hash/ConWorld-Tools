@@ -8,6 +8,7 @@ fn main() {
             "workspace_create_world",
             "workspace_snapshot",
             "workspace_search",
+            "workspace_next_search_page",
             "workspace_discover_mentions",
             "workspace_review_mention",
             "workspace_save_person_alias",

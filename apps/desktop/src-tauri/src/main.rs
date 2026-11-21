@@ -180,6 +180,7 @@ fn main() {
             workspace::workspace_create_world,
             workspace::workspace_snapshot,
             workspace::workspace_search,
+            workspace::workspace_next_search_page,
             workspace::workspace_discover_mentions,
             workspace::workspace_review_mention,
             workspace::workspace_save_person_alias,

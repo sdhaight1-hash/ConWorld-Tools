@@ -1119,3 +1119,59 @@ test("oversized worlds preserve pinned indexed search while disabling incomplete
     { command: "workspace_saved_queries", args: { revision: 1 } },
   ]);
 });
+
+test("historical result pages use opaque native tokens and reset on refresh", async ({ page }) => {
+  await page.addInitScript(() => {
+    const calls: unknown[] = [];
+    Object.assign(window, {
+      isTauri: true,
+      __pageCalls: calls,
+      __TAURI_INTERNALS__: {
+        invoke: async (command: string, args: Record<string, unknown>) => {
+          if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+          if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+          const world = { id: "archive", name: "Archive", revision: 7 };
+          if (command === "workspace_worlds") return [world];
+          if (command === "workspace_snapshot") return {
+            world, day: args.day, view_revision: args.revision ?? 7, scene_limited: true,
+            people: [], relationships: [], events: [], definitions: [], aliases: [],
+          };
+          if (command === "workspace_saved_queries") return [];
+          calls.push({ command, args });
+          if (command === "workspace_search") return {
+            revision: args.revision, truncated: true, next_cursor: "opaque-first",
+            rows: [{ id: "one", label: "Identical name", kind: "person" }],
+          };
+          if (command === "workspace_next_search_page") return {
+            revision: args.revision, truncated: false, next_cursor: null,
+            rows: [{ id: "two", label: "Identical name", kind: "person" }],
+          };
+          throw new Error("Unexpected native command: " + command);
+        },
+      },
+    });
+  });
+  await page.goto("/");
+  await expect(page.locator("#author-status")).toContainText("Search-only mode");
+  const form = page.locator("#author-query-form");
+  await form.getByLabel("Find name").fill("Identical");
+  const search = form.getByRole("button", { name: "Search history" });
+  const next = page.getByRole("button", { name: "Next results page" });
+  await search.click();
+  await expect(page.locator("#author-query-status")).toContainText("page 1");
+  await expect(next).toBeVisible();
+  await next.click();
+  await expect(page.locator("#author-query-status")).toContainText("page 2");
+  await expect(page.locator("#author-query-results")).toContainText("Identical name · person · two");
+  await expect(next).toBeHidden();
+  await search.click();
+  await expect(next).toBeVisible();
+  await page.getByRole("button", { name: "Refresh historical view" }).click();
+  await expect(next).toBeHidden();
+  const calls = await page.evaluate(() => (window as unknown as { __pageCalls: unknown[] }).__pageCalls);
+  expect(calls).toMatchObject([
+    { command: "workspace_search", args: { worldId: "archive", revision: 7 } },
+    { command: "workspace_next_search_page", args: { worldId: "archive", day: 0, revision: 7, token: "opaque-first" } },
+    { command: "workspace_search", args: { worldId: "archive", revision: 7 } },
+  ]);
+});

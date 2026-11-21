@@ -12,6 +12,7 @@
     "allow-workspace-create-world",
     "allow-workspace-snapshot",
     "allow-workspace-search",
+    "allow-workspace-next-search-page",
     "allow-workspace-discover-mentions",
     "allow-workspace-review-mention",
     "allow-workspace-save-person-alias",
