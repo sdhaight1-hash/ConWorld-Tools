@@ -648,3 +648,75 @@ test("native author can approve and dismiss one historical reference without cre
   await expect(results.nth(0)).toContainText("Candidate only");
   await expect(results.nth(0).getByRole("button", { name: "Approve link" })).toHaveCount(0);
 });
+
+
+test("native indexed claim search shows author-only statement provenance and replays saved mode", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "world", name: "Document archive", revision: 2 };
+    const saved: { id: string; name: string; mode: string; term: string; limit: number; recorded_at: number }[] = [];
+    const calls: unknown[] = [];
+    Object.assign(window, {
+      isTauri: true,
+      __claimSearchCalls: calls,
+      __TAURI_INTERNALS__: {
+        invoke: async (command: string, args: Record<string, unknown>) => {
+          if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+          if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+          if (command === "workspace_worlds") return [world];
+          if (command === "workspace_saved_queries") {
+            return saved.filter((item) => item.recorded_at <= (args.revision ?? world.revision));
+          }
+          if (command === "workspace_snapshot") return {
+            world: { ...world }, day: args.day, view_revision: args.revision ?? world.revision,
+            people: [], relationships: [], events: [], definitions: [],
+          };
+          if (command === "workspace_search") {
+            calls.push({ operation: "search", ...args });
+            return { revision: args.revision ?? world.revision, truncated: false, rows: [
+              { id: "claim-1", label: "Court testimony", kind: "claim",
+                statement: "The obsidian ledger was concealed in the Guild archive.",
+                source_citation: "Archive folio 24" },
+            ] };
+          }
+          if (command === "workspace_save_query") {
+            const request = args.request as { expected_revision: number; name: string; mode: string; term: string; limit: number };
+            if (world.revision !== request.expected_revision) throw new Error("stale revision");
+            calls.push({ operation: "save", ...request });
+            world.revision++;
+            saved.push({ id: "saved-claim", name: request.name, mode: request.mode, term: request.term,
+              limit: request.limit, recorded_at: world.revision });
+            return "saved-claim";
+          }
+          throw new Error("Unexpected mock-native command: " + command);
+        },
+      },
+    });
+  });
+  await page.goto("/");
+  const search = page.locator("#author-query-form");
+  await search.getByLabel("Find name").fill("obsidian ledger");
+  await search.getByLabel("Match names").selectOption("claimtext");
+  await search.getByRole("button", { name: "Search history" }).click();
+  const result = page.locator("#author-query-results li");
+  await expect(result).toHaveCount(1);
+  await expect(result.locator("blockquote")).toContainText("obsidian ledger was concealed");
+  await expect(result).toContainText("Source citation: Archive folio 24");
+  await expect(result.getByRole("button", { name: "Find references" })).toBeVisible();
+  const savedForm = page.locator("#author-save-query-form");
+  await savedForm.getByLabel("Saved search name").fill("Ledger in statements");
+  await savedForm.getByRole("button", { name: "Save search definition" }).click();
+  await expect(savedForm.locator('select[name="query_id"]')).toHaveValue("saved-claim");
+  await savedForm.getByRole("button", { name: "Run saved search" }).click();
+  await expect(result.locator("blockquote")).toContainText("obsidian ledger");
+  const calls = await page.evaluate(() => (window as unknown as { __claimSearchCalls: unknown[] }).__claimSearchCalls);
+  expect(calls).toMatchObject([
+    { operation: "search", worldId: "world", day: 0, revision: null, mode: "claimtext", term: "obsidian ledger", limit: 100 },
+    { operation: "save", expected_revision: 2, mode: "claimtext", term: "obsidian ledger" },
+    { operation: "search", mode: "claimtext", term: "obsidian ledger" },
+  ]);
+  const revision = page.locator("#author-revision");
+  await revision.fill("2");
+  await revision.blur();
+  await expect(result).toHaveCount(0);
+  await expect(savedForm.getByRole("button", { name: "Save search definition" })).toBeDisabled();
+});
