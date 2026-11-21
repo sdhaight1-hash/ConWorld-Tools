@@ -1177,7 +1177,9 @@ fn saved_canvas_binding_pins_definition_and_replays_live_author_history() -> Res
     author.revision = store.save_entry_layout(author, &doc, true, Uuid::new_v4())?;
     let pinned = author;
     let rows = |store: &Store, context| -> Result<Vec<(ObjectRef, String)>, Error> {
-        let page = store.display_entry(context, entry)?.ok_or(Error::NotFound)?;
+        let page = store
+            .display_entry(context, entry)?
+            .ok_or(Error::NotFound)?;
         let DisplayContent::Stack(children) = page.content else {
             panic!("expected layout")
         };
