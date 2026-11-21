@@ -160,6 +160,12 @@ impl Store {
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let world = load_world(&tx, request.world)?;
+        if request.expected != world.revision {
+            return Err(Error::RevisionConflict {
+                expected: request.expected,
+                actual: world.revision,
+            });
+        }
         let person = resolve_object(
             &tx,
             request.person,
