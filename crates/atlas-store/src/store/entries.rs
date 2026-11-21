@@ -55,6 +55,7 @@ impl Store {
                 published
             ],
         )?;
+        replace_public_page_index(&tx, document, published, revision)?;
         tx.commit()?;
         Ok(AuthorRevision(revision))
     }
@@ -119,17 +120,24 @@ impl Store {
             if view.revision != world.revision {
                 return Err(Error::InvalidRevision);
             }
-            // Apply latest-version and release filters before considering pages.
-            // Hidden roots and drafts cannot contribute to the visible page budget.
-            let mut stmt = tx.prepare(
-                "SELECT v.entry_id FROM entry_layout_versions v
-                 WHERE v.world_id=?1 AND v.revision<=?2
-                   AND v.published=1 AND json_extract(v.document,'$.root.audience')='Public'
-                   AND v.revision=(SELECT MAX(h.revision) FROM entry_layout_versions h
-                       WHERE h.world_id=v.world_id AND h.entry_id=v.entry_id AND h.revision<=?2)
-                 ORDER BY v.entry_id",
-            )?;
-            let ids = stmt.query_map(params![view.world.0.as_bytes(), view.revision.0], |row| {
+            // Narrow only on released public text. Short terms retain the
+            // bounded fallback, since the trigram tokenizer cannot match them.
+            let phrase = if needle.chars().count() >= 3 && !needle.contains('\0') {
+                Some(format!("\"{}\"", needle.replace('"', "\"\"")))
+            } else {
+                None
+            };
+            let sql = if phrase.is_some() {
+                "SELECT d.entry_id FROM public_page_search_fts
+                 JOIN public_page_search_documents d ON d.doc_id=public_page_search_fts.rowid
+                 WHERE d.world_id=?1 AND public_page_search_fts MATCH ?2
+                 ORDER BY d.entry_id"
+            } else {
+                "SELECT entry_id FROM public_page_search_documents
+                 WHERE world_id=?1 AND ?2 IS NULL ORDER BY entry_id"
+            };
+            let mut stmt = tx.prepare(sql)?;
+            let ids = stmt.query_map(params![view.world.0.as_bytes(), phrase], |row| {
                 row.get::<_, [u8; 16]>(0)
             })?;
             let mut result = PublicPageSearch {
@@ -258,4 +266,60 @@ fn find_text_blocks(page: DisplayElement, needle: &str, limit: usize) -> EntryTe
         }
     }
     result
+}
+
+// Derived documents never store author-only or character-only blocks.
+// Replacing the previous document and changing publication share one transaction.
+fn replace_public_page_index(
+    conn: &Connection,
+    document: &LayoutDocument,
+    published: bool,
+    revision: i64,
+) -> Result<(), Error> {
+    conn.execute(
+        "DELETE FROM public_page_search_documents WHERE world_id=?1 AND entry_id=?2",
+        params![document.entry.world.0.as_bytes(), document.entry.id.0.as_bytes()],
+    )?;
+    if published && let Some(text) = document.public_index_text()? {
+        conn.execute(
+            "INSERT INTO public_page_search_documents(world_id,entry_id,revision,search_text)
+             VALUES (?1,?2,?3,?4)",
+            params![
+                document.entry.world.0.as_bytes(),
+                document.entry.id.0.as_bytes(),
+                revision,
+                text
+            ],
+        )?;
+    }
+    Ok(())
+}
+
+pub(super) fn rebuild_public_page_index(conn: &Connection) -> Result<(), Error> {
+    conn.execute("DELETE FROM public_page_search_documents", [])?;
+    let mut stmt = conn.prepare(
+        "SELECT v.world_id,v.entry_id,v.revision,v.document
+         FROM entry_layout_versions v WHERE v.published=1
+         AND v.revision=(SELECT MAX(h.revision) FROM entry_layout_versions h
+             WHERE h.world_id=v.world_id AND h.entry_id=v.entry_id)
+         ORDER BY v.world_id,v.entry_id",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            Uuid::from_bytes(row.get(0)?),
+            Uuid::from_bytes(row.get(1)?),
+            row.get::<_, i64>(2)?,
+            row.get::<_, String>(3)?,
+        ))
+    })?;
+    for row in rows {
+        let (world, entry, revision, json) = row?;
+        let document: LayoutDocument = serde_json::from_str(&json)
+            .map_err(|_| Error::Integrity("invalid stored entry layout".into()))?;
+        if document.entry.world.0 != world || document.entry.id.0 != entry {
+            return Err(Error::Integrity("layout entry mismatch".into()));
+        }
+        replace_public_page_index(conn, &document, true, revision)?;
+    }
+    Ok(())
 }

@@ -973,3 +973,104 @@ fn global_public_find_excludes_unreleased_and_historical_private_content() -> Re
     ));
     Ok(())
 }
+
+#[test]
+fn public_index_is_selective_rebuilt_and_revoked_atomically() -> Result<(), Error> {
+    use atlas_store::query::QueryControl;
+    use std::time::Duration;
+
+    let dir = tempfile::tempdir()?;
+    let path = dir.path().join("public-index.sqlite");
+    let mut store = Store::open(&path)?;
+    let world = seed(&mut store)?;
+    let mut author = view(&world, 13);
+    let people: Vec<_> = (0..513).map(|_| ObjectRef::new(world.id)).collect();
+    author.revision = store.apply(&Command {
+        world: world.id,
+        branch: world.main,
+        expected: author.revision,
+        id: Uuid::new_v4(),
+        scope: Scope::Author,
+        author: "Fixture".into(),
+        rationale: "Large publication corpus".into(),
+        changes: people
+            .iter()
+            .map(|person| {
+                Change::Create(
+                    *person,
+                    Record {
+                        label: "Unlisted author label".into(),
+                        valid: ValidInterval::default(),
+                        source: None,
+                        data: ObjectData::Person,
+                    },
+                )
+            })
+            .collect(),
+    })?;
+    let page = |entry, text: &str| LayoutDocument {
+        entry,
+        schema_version: LAYOUT_SCHEMA_VERSION,
+        root: LayoutElement {
+            id: ElementId(Uuid::new_v4()),
+            audience: ClaimAudience::Public,
+            content: ElementContent::Stack(vec![
+                LayoutElement {
+                    id: ElementId(Uuid::new_v4()),
+                    audience: ClaimAudience::Public,
+                    content: ElementContent::Text(text.into()),
+                },
+                LayoutElement {
+                    id: ElementId(Uuid::new_v4()),
+                    audience: ClaimAudience::Author,
+                    content: ElementContent::Text("Confidential needle".into()),
+                },
+            ]),
+        },
+    };
+    for person in &people {
+        author.revision =
+            store.save_entry_layout(author, &page(*person, "Routine notice"), true, Uuid::new_v4())?;
+    }
+    let target = page(id(&world, 1), "A rare Étoile \"quoted\" entry");
+    author.revision = store.save_entry_layout(author, &target, true, Uuid::new_v4())?;
+    let public = |author| ViewContext {
+        scope: Scope::Public,
+        ..author
+    };
+    let find = |store: &Store, author, text| {
+        let control = QueryControl::new(Duration::from_secs(10))?;
+        store.search_public_pages(public(author), text, 50, &control)
+    };
+    let expected = find(&store, author, "ÉTOILE \"quoted\"")?;
+    assert_eq!(expected.matches.len(), 1);
+    assert_eq!(expected.matches[0].entry, target.entry);
+    assert!(!expected.truncated);
+    assert!(find(&store, author, "Confidential needle")?.matches.is_empty());
+    assert!(find(&store, author, "Unlisted author label")?.matches.is_empty());
+    store.rebuild_search_index(Scope::Author)?;
+    assert_eq!(find(&store, author, "étoile \"quoted\"")?, expected);
+    drop(store);
+
+    // Recreate schema 23 and verify migration rebuilds only latest released text.
+    let conn = rusqlite::Connection::open(&path)?;
+    conn.execute_batch(
+        "DROP TRIGGER public_page_search_ai;
+         DROP TRIGGER public_page_search_ad;
+         DROP TABLE public_page_search_fts;
+         DROP TABLE public_page_search_documents;
+         PRAGMA user_version=23;",
+    )?;
+    drop(conn);
+    let mut store = Store::open(&path)?;
+    assert_eq!(find(&store, author, "étoile \"quoted\"")?, expected);
+    let backup = dir.path().join("backup.sqlite");
+    store.backup_to(&backup, Scope::Author)?;
+    let copied = Store::open(&backup)?;
+    assert_eq!(find(&copied, author, "étoile \"quoted\"")?, expected);
+    author.revision = store.save_entry_layout(author, &target, false, Uuid::new_v4())?;
+    assert!(find(&store, author, "étoile")?.matches.is_empty());
+    store.rebuild_search_index(Scope::Author)?;
+    assert!(find(&store, author, "étoile")?.matches.is_empty());
+    Ok(())
+}

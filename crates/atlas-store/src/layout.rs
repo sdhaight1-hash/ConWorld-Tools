@@ -132,6 +132,34 @@ impl LayoutDocument {
         Ok(())
     }
 
+    /// Use the same public subtree gate and literal text as the Display projection.
+    /// This is only a conservative candidate index; canonical reads still authorize results.
+    pub(crate) fn public_index_text(&self) -> Result<Option<String>, Error> {
+        self.validate()?;
+        self.validate_publication()?;
+        if !can_view(Scope::Public, self.root.audience) {
+            return Ok(None);
+        }
+        let mut text = String::new();
+        let mut pending = vec![&self.root];
+        while let Some(element) = pending.pop() {
+            if !can_view(Scope::Public, element.audience) {
+                continue;
+            }
+            match &element.content {
+                ElementContent::Stack(children) => pending.extend(children.iter().rev()),
+                ElementContent::Text(block) => {
+                    // SQLite tokenization may stop at NUL; normalize it only in
+                    // candidates. Queries containing NUL use the exact fallback.
+                    text.push_str(&block.to_lowercase().replace('\0', " "));
+                    text.push('\n');
+                }
+                ElementContent::Query(_) => return Err(Error::CapabilityDenied),
+            }
+        }
+        Ok(Some(text))
+    }
+
     pub fn reparent(&mut self, id: ElementId, target: ElementId) -> Result<(), Error> {
         self.validate()?;
         let mut updated = self.clone();

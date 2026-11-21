@@ -21,7 +21,7 @@ pub(crate) const APPLICATION_ID: i64 = 0x4357_4c44; // CWLD
 mod entries;
 mod family;
 
-pub(crate) const SCHEMA_VERSION: i64 = 23;
+pub(crate) const SCHEMA_VERSION: i64 = 24;
 
 // Candidate queries bind world (?1), focus/phrase (?2), author revision (?3),
 // limit (?4) and branch (?5). Follow only immutable inherited revisions.
@@ -175,6 +175,10 @@ impl Store {
         }
         if version < 23 {
             tx.execute_batch(include_str!("../migrations/0023.sql"))?;
+        }
+        if version < 24 {
+            tx.execute_batch(include_str!("../migrations/0024.sql"))?;
+            entries::rebuild_public_page_index(&tx)?;
         }
         if version < SCHEMA_VERSION {
             verify_foreign_keys(&tx)?;
@@ -362,6 +366,7 @@ impl Store {
             [],
         )?;
         rebuild_alias_name_index(&tx)?;
+        entries::rebuild_public_page_index(&tx)?;
         tx.execute_batch(
             "REINDEX discovery_person_prefix_idx; REINDEX discovery_alias_prefix_idx;",
         )?;
