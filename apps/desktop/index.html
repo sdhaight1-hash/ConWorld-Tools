@@ -42,6 +42,23 @@
           </div>
         </aside>
       </section>
+      <section id="history" class="history" aria-label="Northbridge relationship history" hidden>
+        <div class="toolbar">
+          <div>
+            <h2>Relationship evolution</h2>
+            <p class="hint">Rust/SQLite-backed Northbridge demonstration, not yet an editing interface.</p>
+          </div>
+          <label for="history-year">Historical snapshot
+            <select id="history-year">
+              <option value="0">1898 · Friendship</option>
+              <option value="3652">1908 · Letter disclosed</option>
+              <option value="5844">1914 · Uneasy alliance</option>
+            </select>
+          </label>
+        </div>
+        <div id="history-relations" class="history-grid" aria-live="polite"></div>
+        <div id="history-cause" class="history-cause" role="status"></div>
+      </section>
     </main>
     <script type="module" src="/src/main.ts"></script>
   </body>

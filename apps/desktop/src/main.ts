@@ -5,6 +5,9 @@ import { benchmarkHeight, benchmarkTriangles, benchmarkWidth, createGpuGraph, ma
 
 export type Scene = typeof northbridge;
 type PlatformScene = { target: string; smoke: boolean; scene: Scene };
+type BondSnapshot = { subject: string; target: string; kind: string; trust: number | null; tags: string[] };
+type EventSnapshot = { event: string; actor: string; witness: string; action: string; intent: string; outcome: string; source: string };
+type HistorySnapshot = { day: number; relationships: BondSnapshot[]; cause: EventSnapshot | null };
 type WebGpuStatus = "available" | "api_unavailable" | "adapter_unavailable" | "probe_failed" | "timed_out";
 
 const webGpuLabels: Record<WebGpuStatus, string> = {
@@ -34,6 +37,7 @@ async function start() {
     link.href = location.pathname;
   }
   const graph = showScene(benchmark ? makeBenchmark() : response.scene, benchmark);
+  const historyVerified = await showHistory();
   const webgpu = await probeWebGpu();
   if (graph) renderer.textContent = `Canvas2D · ${webGpuLabels[webgpu]}`;
   if (benchmark && graph && webgpu === "available") void graph.tryGpu();
@@ -47,9 +51,53 @@ async function start() {
         (item) => item.textContent === "Beatrice Thorne · Member of · Merchant Guild",
       );
     const canvas2dVerified = graph?.visibleNode("beatrice") ?? false;
-    const observation = { scene_verified: sceneVerified, canvas2d_verified: canvas2dVerified, webgpu };
+    const observation = { scene_verified: sceneVerified, canvas2d_verified: canvas2dVerified, history_verified: historyVerified, webgpu };
     await invoke("complete_platform_smoke", { observation });
   }
+}
+
+async function showHistory(): Promise<boolean> {
+  if (!isTauri()) return false;
+  const section = document.querySelector<HTMLElement>("#history")!;
+  const select = document.querySelector<HTMLSelectElement>("#history-year")!;
+  const relations = document.querySelector<HTMLElement>("#history-relations")!;
+  const cause = document.querySelector<HTMLElement>("#history-cause")!;
+  section.hidden = false;
+  async function refresh(): Promise<boolean> {
+    try {
+      const snapshot = await invoke<HistorySnapshot>("northbridge_history", { day: Number(select.value) });
+      relations.replaceChildren(...snapshot.relationships.map((bond) => {
+        const card = document.createElement("article");
+        const heading = document.createElement("h3");
+        const state = document.createElement("p");
+        const tags = document.createElement("p");
+        heading.textContent = `${bond.subject} → ${bond.target}`;
+        state.textContent = `${bond.kind} · trust: ${bond.trust ?? "not scored"}`;
+        tags.textContent = `Tags: ${bond.tags.join(", ") || "none"}`;
+        card.append(heading, state, tags);
+        return card;
+      }));
+      cause.textContent = snapshot.cause
+        ? `${snapshot.cause.event}: ${snapshot.cause.actor} (${snapshot.cause.action}; ${snapshot.cause.outcome}). Intent: ${snapshot.cause.intent}. Witness: ${snapshot.cause.witness}. Source: ${snapshot.cause.source}.`
+        : "No documented relationship-changing event at this date.";
+      return snapshot.relationships.length >= 2;
+    } catch (error) {
+      cause.textContent = `History unavailable: ${String(error)}`;
+      return false;
+    }
+  }
+  select.addEventListener("change", () => void refresh());
+  const original = await refresh();
+  if (!original) return false;
+  // The platform smoke also verifies the event-attributed history path.
+  if (!new URLSearchParams(location.search).has("benchmark")) {
+    select.value = "3652";
+    const changed = await refresh();
+    if (!changed || !cause.textContent?.includes("Northbridge folio 14")) return false;
+    select.value = "0";
+    await refresh();
+  }
+  return true;
 }
 
 function showScene(scene: Scene, benchmark: boolean) {

@@ -1,6 +1,6 @@
 fn main() {
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
-        tauri_build::AppManifest::new().commands(&["platform_scene", "complete_platform_smoke"]),
+        tauri_build::AppManifest::new().commands(&["platform_scene", "complete_platform_smoke", "northbridge_history"]),
     ))
     .expect("failed to build the desktop shell configuration");
 }
