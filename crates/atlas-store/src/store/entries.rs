@@ -155,13 +155,13 @@ impl Store {
                 }
                 let remaining = limit - result.matches.len();
                 let found = find_text_blocks(page, &needle, remaining);
-                result.matches.extend(found.matches.into_iter().map(|(element, text)| {
-                    PublicPageMatch {
+                for (element, text) in found.matches {
+                    result.matches.push(PublicPageMatch {
                         entry,
                         element,
                         text,
-                    }
-                }));
+                    });
+                }
                 if found.truncated {
                     result.truncated = true;
                     break;
