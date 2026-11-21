@@ -1,6 +1,11 @@
 //! Phase 3 typed reads over a single authorized historical snapshot.
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 use crate::{
@@ -221,6 +226,40 @@ pub struct QueryPage {
     pub next_cursor: Option<QueryCursor>,
 }
 
+/// One cooperative read cancellation/deadline, shared with the requesting host.
+/// It cannot cancel writes or mutate the historical query context.
+#[derive(Clone, Debug)]
+pub struct QueryControl {
+    cancelled: Arc<AtomicBool>,
+    deadline: Instant,
+}
+
+impl QueryControl {
+    pub fn new(timeout: Duration) -> Result<Self, Error> {
+        let deadline = Instant::now()
+            .checked_add(timeout)
+            .ok_or(Error::InvalidInput("query deadline"))?;
+        Ok(Self {
+            cancelled: Arc::new(AtomicBool::new(false)),
+            deadline,
+        })
+    }
+
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Relaxed);
+    }
+
+    pub fn check(&self) -> Result<(), Error> {
+        if self.cancelled.load(Ordering::Relaxed) {
+            return Err(Error::QueryCancelled);
+        }
+        if Instant::now() >= self.deadline {
+            return Err(Error::QueryDeadlineExceeded);
+        }
+        Ok(())
+    }
+}
+
 fn validate_query_request(spec: &QuerySpec, view: ViewContext) -> Result<(), Error> {
     if view.scope != Scope::Author {
         return Err(Error::CapabilityDenied);
@@ -235,6 +274,29 @@ impl Store {
     pub fn execute_query(&self, spec: &QuerySpec, view: ViewContext) -> Result<QueryResult, Error> {
         validate_query_request(spec, view)?;
         self.execute_bounded_query(spec, view)
+    }
+
+    /// Execute a read with a cooperative deadline and cancellation token.
+    pub fn execute_query_controlled(
+        &self,
+        spec: &QuerySpec,
+        view: ViewContext,
+        control: &QueryControl,
+    ) -> Result<QueryResult, Error> {
+        validate_query_request(spec, view)?;
+        self.with_query_control(control, |store| store.execute_query(spec, view))
+    }
+
+    /// Execute one complete bounded page with the same cancellation rules.
+    pub fn execute_query_page_controlled(
+        &self,
+        spec: &QuerySpec,
+        view: ViewContext,
+        after: Option<&QueryCursor>,
+        control: &QueryControl,
+    ) -> Result<QueryPage, Error> {
+        validate_query_request(spec, view)?;
+        self.with_query_control(control, |store| store.execute_query_page(spec, view, after))
     }
 
     /// Page only complete, bounded author queries. Reevaluate the immutable
@@ -319,10 +381,13 @@ impl Store {
                     .collect(),
                 None => self.objects_at(view, 2_000)?,
             };
-            let mut rows: Vec<_> = objects
-                .into_iter()
-                .filter(|item| predicate_matches(&spec.filter, item, &plan))
-                .collect();
+            let mut rows = Vec::new();
+            for item in objects {
+                self.check_query_control()?;
+                if predicate_matches(&spec.filter, &item, &plan) {
+                    rows.push(item);
+                }
+            }
             rows.sort_by(|a, b| {
                 a.record
                     .label
@@ -382,17 +447,15 @@ impl Store {
             QueryFilter::LabelContains(text) | QueryFilter::ExactLabel(text) => {
                 let needle = search_label(text)?;
                 let exact = matches!(spec.filter, QueryFilter::ExactLabel(_));
-                objects
-                    .into_iter()
-                    .filter(|item| {
-                        let label = item.record.label.to_lowercase();
-                        if exact {
-                            label == needle
-                        } else {
-                            label.contains(&needle)
-                        }
-                    })
-                    .collect()
+                let mut matches = Vec::new();
+                for item in objects {
+                    self.check_query_control()?;
+                    let label = item.record.label.to_lowercase();
+                    if (exact && label == needle) || (!exact && label.contains(&needle)) {
+                        matches.push(item);
+                    }
+                }
+                matches
             }
             QueryFilter::Backlinks(_) => unreachable!("handled by indexed backlinks"),
             QueryFilter::EventRole { .. } | QueryFilter::ParticipantEvents { .. } => {
@@ -499,6 +562,7 @@ impl<'a> PredicatePlan<'a> {
         filter: &'a QueryFilter,
         view: ViewContext,
     ) -> Result<Option<HashSet<ObjectRef>>, Error> {
+        store.check_query_control()?;
         const INDEX_BUDGET: usize = 10_000;
         match filter {
             QueryFilter::FullTextPhrase(text)

@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::{self, OpenOptions};
 use std::path::Path;
@@ -11,7 +12,7 @@ use crate::discovery::{
     matching_spans,
 };
 use crate::query::{
-    PredicateInput, QUERY_SCHEMA_VERSION, QueryFilter, QuerySpec, SaveNamedLabelQuery,
+    PredicateInput, QUERY_SCHEMA_VERSION, QueryControl, QueryFilter, QuerySpec, SaveNamedLabelQuery,
     SavedLabelQuery, validate_predicate,
 };
 use crate::*;
@@ -21,9 +22,51 @@ pub(crate) const SCHEMA_VERSION: i64 = 18;
 
 pub struct Store {
     conn: Connection,
+    query_control: RefCell<Option<QueryControl>>,
+}
+
+// Always remove the connection-local callback, including on error or unwind.
+struct QueryControlGuard<'a> {
+    store: &'a Store,
+}
+
+impl Drop for QueryControlGuard<'_> {
+    fn drop(&mut self) {
+        self.store.conn.progress_handler(0, None::<fn() -> bool>);
+        *self.store.query_control.borrow_mut() = None;
+    }
 }
 
 impl Store {
+    pub(crate) fn check_query_control(&self) -> Result<(), Error> {
+        if let Some(control) = self.query_control.borrow().as_ref() {
+            control.check()?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn with_query_control<T>(
+        &self,
+        control: &QueryControl,
+        read: impl FnOnce(&Self) -> Result<T, Error>,
+    ) -> Result<T, Error> {
+        control.check()?;
+        if self.query_control.borrow().is_some() {
+            return Err(Error::InvalidInput("nested controlled query"));
+        }
+        *self.query_control.borrow_mut() = Some(control.clone());
+        let guard = QueryControlGuard { store: self };
+        let progress = control.clone();
+        self.conn
+            .progress_handler(1_000, Some(move || progress.check().is_err()));
+        let result = read(self);
+        drop(guard);
+        // Translate an interrupted SQLite read into the specific typed error.
+        // Even a completed read must not return stale or expired results.
+        control.check()?;
+        result
+    }
+
     pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
         let mut conn = Connection::open(path)?;
         conn.busy_timeout(Duration::from_secs(5))?;
@@ -108,7 +151,10 @@ impl Store {
         }
         tx.commit()?;
         conn.pragma_update(None, "foreign_keys", true)?;
-        Ok(Self { conn })
+        Ok(Self {
+            conn,
+            query_control: RefCell::new(None),
+        })
     }
 
     /// Reject unknown branches (including forks not yet created at the selected
@@ -338,6 +384,7 @@ impl Store {
                 return Err(Error::QueryBudgetExceeded);
             }
             for id in candidates {
+                self.check_query_control()?;
                 let person = ObjectRef {
                     world: view.world,
                     id: ObjectId(Uuid::from_bytes(id)),
@@ -431,6 +478,7 @@ impl Store {
         let mut rows = Vec::new();
         let mut events = HashSet::new();
         for id in candidates {
+            self.check_query_control()?;
             let object = ObjectRef {
                 world: view.world,
                 id: ObjectId(Uuid::from_bytes(id)),
@@ -559,6 +607,7 @@ impl Store {
         let mut rows = Vec::new();
         let mut truncated = false;
         'walk: while let Some((node, depth)) = queue.pop_front() {
+            self.check_query_control()?;
             if depth == *max_depth {
                 continue;
             }
@@ -582,6 +631,7 @@ impl Store {
             remaining -= candidates.len();
             let mut neighbors = HashSet::new();
             for id in candidates {
+                self.check_query_control()?;
                 let object = ObjectRef {
                     world: view.world,
                     id: ObjectId(Uuid::from_bytes(id)),
@@ -612,6 +662,7 @@ impl Store {
             let mut neighbors: Vec<_> = neighbors.into_iter().collect();
             neighbors.sort_unstable_by_key(|item| item.id.0);
             for next in neighbors {
+                self.check_query_control()?;
                 if visited.contains(&next) {
                     continue;
                 }
@@ -730,6 +781,7 @@ impl Store {
         }
         let mut rows = Vec::new();
         for source in ids {
+            self.check_query_control()?;
             if let Some(version) =
                 resolve_object(&tx, source, view.branch, view.revision, view.day)?
                 && (version.record.source == Some(target)
@@ -839,6 +891,7 @@ impl Store {
         }
         let mut candidates: HashMap<ObjectId, HashSet<(BranchId, i64, i64)>> = HashMap::new();
         for (object, branch, state_revision, revision) in matches {
+            self.check_query_control()?;
             candidates
                 .entry(object)
                 .or_default()
@@ -846,6 +899,7 @@ impl Store {
         }
         let mut rows = Vec::new();
         for (id, matching_versions) in candidates {
+            self.check_query_control()?;
             let object = ObjectRef {
                 world: view.world,
                 id,
@@ -1138,6 +1192,7 @@ impl Store {
                     row.get::<_, [u8; 16]>(0)
                 })?;
             for (scanned, id) in candidates.enumerate() {
+                self.check_query_control()?;
                 if scanned == SCAN_BUDGET as usize {
                     return Err(Error::QueryBudgetExceeded);
                 }
@@ -1674,6 +1729,7 @@ impl Store {
         let mut seen = HashSet::new();
         let mut linked = HashSet::new();
         for (source_id, branch_id, state_revision, recorded_at, start, end, decision) in reviews {
+            self.check_query_control()?;
             if !seen.insert((
                 source_id,
                 branch_id,

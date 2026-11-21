@@ -1,6 +1,6 @@
 //! Phase 3 FTS5: a rebuildable, version-aware author search index.
 use atlas_store::{
-    query::{QUERY_SCHEMA_VERSION, QueryFilter, QuerySpec},
+    query::{QUERY_SCHEMA_VERSION, QueryControl, QueryFilter, QuerySpec},
     *,
 };
 use tempfile::tempdir;
@@ -363,5 +363,66 @@ fn query_pages_bind_exact_context_and_preserve_duplicate_labels() -> Result<(), 
     )?;
     assert_eq!(last.rows.len(), 24);
     assert!(last.next_cursor.is_none());
+    Ok(())
+}
+
+#[test]
+fn controlled_reads_cancel_expire_and_release_the_connection() -> Result<(), Error> {
+    use std::time::Duration;
+
+    let mut store = Store::open(":memory:")?;
+    let world = store.create_world("Controlled search", Scope::Author)?;
+    let one = ObjectRef::new(world.id);
+    let revision = store.apply(&command(
+        &world,
+        world.revision,
+        vec![Change::Create(one, person("Navigator"))],
+    ))?;
+    let context = view(&world, revision, 20);
+    let spec = phrase("Navigator");
+    let cancelled = QueryControl::new(Duration::from_secs(5))?;
+    cancelled.clone().cancel();
+    assert!(matches!(
+        store.execute_query_controlled(&spec, context, &cancelled),
+        Err(Error::QueryCancelled)
+    ));
+    assert!(matches!(
+        store.execute_query_page_controlled(&spec, context, None, &cancelled),
+        Err(Error::QueryCancelled)
+    ));
+    let expired = QueryControl::new(Duration::ZERO)?;
+    assert!(matches!(
+        store.execute_query_controlled(&spec, context, &expired),
+        Err(Error::QueryDeadlineExceeded)
+    ));
+    assert!(matches!(
+        store.execute_query_controlled(
+            &spec,
+            ViewContext {
+                scope: Scope::Public,
+                ..context
+            },
+            &cancelled
+        ),
+        Err(Error::CapabilityDenied)
+    ));
+    let working = QueryControl::new(Duration::from_secs(5))?;
+    let invalid = QuerySpec {
+        filter: QueryFilter::FullTextPhrase(" ".into()),
+        ..spec.clone()
+    };
+    assert!(store.execute_query_controlled(&invalid, context, &working).is_err());
+    assert_eq!(
+        store.execute_query_page_controlled(&spec, context, None, &working)?.rows[0].object,
+        one
+    );
+    let corrected = store.apply(&command(
+        &world,
+        revision,
+        vec![Change::Correct(one, person("New name"))],
+    ))?;
+    assert!(store.execute_query(&spec, view(&world, corrected, 20))?.rows.is_empty());
+    assert_eq!(store.execute_query(&spec, context)?.rows[0].object, one);
+    store.verify_foreign_keys(Scope::Author)?;
     Ok(())
 }
