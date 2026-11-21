@@ -87,7 +87,9 @@ fn complete_platform_smoke(
     });
     println!("ATLAS_PLATFORM_SMOKE {report}");
     app.exit(i32::from(
-        !observation.scene_verified || !observation.canvas2d_verified || !observation.history_verified,
+        !observation.scene_verified
+            || !observation.canvas2d_verified
+            || !observation.history_verified,
     ));
     Ok(())
 }
