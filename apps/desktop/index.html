@@ -166,6 +166,17 @@
               <label>Name <input name="name" maxlength="200" required /></label>
               <button type="submit">Add person</button>
             </form>
+            <form id="author-person-alias" class="editor-form">
+              <h3>Person names and aliases</h3>
+              <p class="hint">Name variants are author metadata, not evidence or relationships. They improve candidate matching on the main historical branch.</p>
+              <label>Saved alias <select name="alias_id"><option value="">New alias</option></select></label>
+              <label>Person <select name="person_id" aria-label="Person" required></select></label>
+              <label>Alternative name <input name="label" maxlength="200" required placeholder="Nickname, title, or other name" /></label>
+              <label>Valid from day (optional) <input name="starts_at" type="number" step="1" /></label>
+              <label>Valid before day (optional) <input name="ends_before" type="number" step="1" /></label>
+              <label><input name="active" type="checkbox" checked /> Enable this alias</label>
+              <button type="submit">Save person alias</button>
+            </form>
             <form id="author-create-relationship" class="editor-form">
               <h3>Create directed relationship</h3>
               <label>From <select name="subject" required></select></label>

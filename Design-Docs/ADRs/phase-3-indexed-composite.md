@@ -4,7 +4,7 @@
 
 ## Decision
 
-Extend the shared Rust-owned strictly tagged predicate wire schema with literal label and claim-statement full-text leaves. The existing SQLite FTS5 functions supply **resolved historical versions**, not raw index hits, under a pinned world/branch/day/author revision. The existing versioned saved composite JSON envelope stores the leaves without a migration; legacy predicates retain their meaning. No SQL string is supplied by the caller.
+Extend the shared Rust-owned strictly tagged predicate wire schema with literal label and claim-statement full-text leaves. The existing SQLite FTS5 functions supply **resolved historical versions**, not raw index hits, under a pinned world/branch/day/author revision. The existing versioned saved composite JSON envelope stores the leaves without a DDL migration; legacy predicates retain their meaning. Storage compatibility version 15 is a deliberate read guard: pre-15 binaries cannot decode the new operators, so the transaction updates `user_version` even though no tables change. No SQL string is supplied by the caller.
 
 Algorithm:
 - Validate the entire AST (depth, width, node count, reference worlds and text length) before evaluation.

@@ -288,6 +288,39 @@ fn compound_validation_is_upfront_bounded_and_not_bypassable_by_boolean_short_ci
         branch: BranchId(Uuid::new_v4()),
         ..current
     };
+    assert!(matches!(
+        store.objects_at(unknown, 100),
+        Err(Error::NotFound)
+    ));
+    let fork = store.fork(&ForkCommand {
+        world: world.id,
+        parent: world.main,
+        day: WorldDay(0),
+        expected: world.revision,
+        id: Uuid::new_v4(),
+        author: "Predicate tests".into(),
+        rationale: "Validate empty snapshot coordinates".into(),
+        scope: Scope::Author,
+    })?;
+    let before_fork = ViewContext {
+        branch: fork.id,
+        ..current
+    };
+    assert!(matches!(
+        store.objects_at(before_fork, 100),
+        Err(Error::NotFound)
+    ));
+    assert!(
+        store
+            .objects_at(
+                ViewContext {
+                    revision: fork.created_revision,
+                    ..before_fork
+                },
+                100
+            )?
+            .is_empty()
+    );
     assert!(
         store
             .execute_query(

@@ -182,6 +182,7 @@ fn main() {
             workspace::workspace_search,
             workspace::workspace_discover_mentions,
             workspace::workspace_review_mention,
+            workspace::workspace_save_person_alias,
             workspace::workspace_saved_queries,
             workspace::workspace_save_query,
             workspace::workspace_query_path,
