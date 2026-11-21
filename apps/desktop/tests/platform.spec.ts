@@ -995,6 +995,11 @@ test("native author creates and disables a historical alias without inferring a 
   await form.getByRole("button", { name: "Save person alias" }).click();
   await page.getByRole("button", { name: "Find possible mentions" }).click();
   await expect(page.locator("#author-discovery-results li")).toHaveCount(0);
+  await expect(form.locator('select[name="alias_id"]')).toHaveValue("");
+  await expect(form.getByLabel("Alternative name")).toHaveValue("");
+  await expect(form.getByLabel("Valid from day (optional)")).toHaveValue("");
+  await expect(form.getByLabel("Valid before day (optional)")).toHaveValue("");
+  await expect(form.getByLabel("Enable this alias")).toBeChecked();
   const calls = await page.evaluate(() => (window as unknown as { __aliasCalls: unknown[] }).__aliasCalls);
   expect(calls).toMatchObject([
     { operation: "save", expected_revision: 2, alias_id: null, person_id: "alice",
