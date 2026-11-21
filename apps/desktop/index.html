@@ -72,6 +72,7 @@
           <label for="author-revision">Author revision (read-only when selected)
             <input id="author-revision" type="number" min="0" step="1" placeholder="Latest" />
           </label>
+          <button type="button" id="author-refresh-view">Refresh historical view</button>
         </div>
         <form id="author-create-world" class="editor-row">
           <label>New world <input name="name" maxlength="200" required placeholder="World name" /></label>
@@ -102,6 +103,7 @@
               <button type="button" id="author-run-saved-query">Run saved search</button>
               <button type="button" id="author-save-composite-query">Save combined query</button>
             </form>
+            <p id="author-search-focus" class="hint" role="status" hidden></p>
             <form id="author-path-form" class="query-form query-path-form">
               <label>Start person <select name="start" required></select></label>
               <label>Relationship kind <input name="kind" list="relationship-kinds" maxlength="200" value="friendship" required /></label>
