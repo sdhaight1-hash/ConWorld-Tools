@@ -168,7 +168,10 @@ fn compound_predicates_obey_kind_source_boolean_and_historical_scope() -> Result
         ..view(&world, second, 10)
     };
     assert!(matches!(
-        store.execute_query(&query(QueryFilter::Kind(ObjectKindFilter::Person), 100), before_creation),
+        store.execute_query(
+            &query(QueryFilter::Kind(ObjectKindFilter::Person), 100),
+            before_creation
+        ),
         Err(Error::NotFound)
     ));
     let corrected = store.apply(&command(
