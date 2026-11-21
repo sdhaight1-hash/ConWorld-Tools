@@ -26,7 +26,13 @@ type SearchResult = { revision: number; truncated: boolean; rows: {
   id: string; label: string; kind: string;
   statement?: string | null; source_citation?: string | null;
 }[] };
-type SavedQuery = { id: string; name: string; mode: "contains" | "exact" | "fulltext" | "claimtext"; term: string; limit: number; recorded_at: number };
+type Predicate = { op: "contains" | "exact"; text: string } |
+  { op: "object_kind"; kind: string } |
+  { op: "has_source"; source_id: string } |
+  { op: "and" | "or"; filters: Predicate[] } |
+  { op: "not"; filter: Predicate };
+type SavedQuery = { id: string; name: string; mode: "contains" | "exact" | "fulltext" | "claimtext" | "composite";
+  term: string; predicate?: Predicate | null; limit: number; recorded_at: number };
 type MentionDiscovery = { revision: number; truncated: boolean; rows: {
   source_id: string; source_branch: string; source_state_revision: number; source_revision: number;
   source_label: string; statement: string; target_id: string; target_label: string;
@@ -120,6 +126,7 @@ export async function showAuthorWorkspace(
   const queryForm = document.querySelector<HTMLFormElement>("#author-query-form")!;
   const saveQueryForm = document.querySelector<HTMLFormElement>("#author-save-query-form")!;
   const runSavedQuery = document.querySelector<HTMLButtonElement>("#author-run-saved-query")!;
+  const saveComposite = document.querySelector<HTMLButtonElement>("#author-save-composite-query")!;
   const savedSelect = saveQueryForm.elements.namedItem("query_id") as HTMLSelectElement;
   const pathForm = document.querySelector<HTMLFormElement>("#author-path-form")!;
   const participantEventsForm = document.querySelector<HTMLFormElement>("#author-participant-events-form")!;
@@ -212,6 +219,7 @@ export async function showAuthorWorkspace(
     compositeForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = !snapshot || saving;
     discoverButton.disabled = !snapshot || saving;
     saveQueryForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = blocked;
+    saveComposite.disabled = blocked;
     runSavedQuery.disabled = !snapshot || !savedSelect.value || saving;
     pathForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = !snapshot || !people.length || saving;
     participantEventsForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled =
@@ -722,8 +730,10 @@ export async function showAuthorWorkspace(
     const query = savedQueries.find((item) => item.id === savedSelect.value);
     if (query) {
       field<HTMLInputElement>(saveQueryForm, "name").value = query.name;
-      field<HTMLInputElement>(queryForm, "term").value = query.term;
-      field<HTMLSelectElement>(queryForm, "mode").value = query.mode;
+      if (query.mode !== "composite") {
+        field<HTMLInputElement>(queryForm, "term").value = query.term;
+        field<HTMLSelectElement>(queryForm, "mode").value = query.mode;
+      }
     }
     syncButtons();
   });
@@ -731,9 +741,25 @@ export async function showAuthorWorkspace(
   runSavedQuery.addEventListener("click", () => {
     const query = savedQueries.find((item) => item.id === savedSelect.value);
     if (!query) return;
-    field<HTMLInputElement>(queryForm, "term").value = query.term;
-    field<HTMLSelectElement>(queryForm, "mode").value = query.mode;
-    runSearch(query.mode, query.term, query.limit);
+    if (query.mode === "composite") {
+      if (!query.predicate || !snapshot) {
+        queryStatus.textContent = "Saved composite predicate is unavailable.";
+        return;
+      }
+      const request = {
+        world_id: snapshot.world.id,
+        day: snapshot.day,
+        revision: selectedRevision(),
+        predicate: query.predicate,
+        limit: query.limit,
+      };
+      runQuery("Replaying saved historical predicates…",
+        () => invoke<SearchResult>("workspace_composite_query", { request }));
+    } else {
+      field<HTMLInputElement>(queryForm, "term").value = query.term;
+      field<HTMLSelectElement>(queryForm, "mode").value = query.mode;
+      runSearch(query.mode, query.term, query.limit);
+    }
   });
 
   saveQueryForm.addEventListener("submit", (event) => {
@@ -774,14 +800,7 @@ export async function showAuthorWorkspace(
     })();
   });
 
-  compositeForm.addEventListener("submit", (event) => {
-    event.preventDefault();
-    if (!snapshot || saving) return;
-    type Predicate = { op: "contains"; text: string } |
-      { op: "object_kind"; kind: string } |
-      { op: "has_source"; source_id: string } |
-      { op: "and" | "or"; filters: Predicate[] } |
-      { op: "not"; filter: Predicate };
+  function compositePredicate(): Predicate | null {
     const filters: Predicate[] = [];
     const text = value(compositeForm, "name").trim();
     const kind = value(compositeForm, "kind");
@@ -789,15 +808,23 @@ export async function showAuthorWorkspace(
     if (text) filters.push({ op: "contains", text });
     if (kind) filters.push({ op: "object_kind", kind });
     if (source) filters.push({ op: "has_source", source_id: source });
-    if (!filters.length) {
-      queryStatus.textContent = "Select at least one historical object filter.";
-      return;
-    }
+    if (!filters.length) return null;
     let predicate: Predicate = filters.length === 1 ? filters[0] : {
       op: value(compositeForm, "combine") as "and" | "or", filters,
     };
     if (field<HTMLInputElement>(compositeForm, "negate").checked) {
       predicate = { op: "not", filter: predicate };
+    }
+    return predicate;
+  }
+
+  compositeForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (!snapshot || saving) return;
+    const predicate = compositePredicate();
+    if (!predicate) {
+      queryStatus.textContent = "Select at least one historical object filter.";
+      return;
     }
     const request = {
       world_id: snapshot.world.id,
@@ -808,6 +835,45 @@ export async function showAuthorWorkspace(
     };
     runQuery("Evaluating bounded historical predicates…",
       () => invoke<SearchResult>("workspace_composite_query", { request }));
+  });
+
+  saveComposite.addEventListener("click", () => {
+    if (!snapshot || saving) return;
+    if (selectedRevision() !== null) {
+      queryStatus.textContent = "Historical author revisions are read-only.";
+      return;
+    }
+    const predicate = compositePredicate();
+    const queryName = value(saveQueryForm, "name").trim();
+    if (!predicate || !queryName) {
+      queryStatus.textContent = "Enter a saved search name and select a combined filter.";
+      return;
+    }
+    const request = {
+      world_id: snapshot.world.id,
+      expected_revision: snapshot.world.revision,
+      query_id: savedSelect.value || null,
+      name: queryName,
+      mode: "composite",
+      term: "",
+      predicate,
+      limit: 100,
+    };
+    void (async () => {
+      try {
+        saving = true;
+        syncButtons();
+        const savedId = await invoke<string>("workspace_save_query", { request });
+        await refresh();
+        savedSelect.value = savedId;
+        queryStatus.textContent = "Saved combined query definition to author history.";
+      } catch (error) {
+        queryStatus.textContent = "Unable to save combined query: " + String(error);
+      } finally {
+        saving = false;
+        syncButtons();
+      }
+    })();
   });
 
   participantEventsForm.addEventListener("submit", (event) => {
