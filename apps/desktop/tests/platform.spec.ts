@@ -265,3 +265,61 @@ test("saved world graph follows the author view and submits a specific causing a
   await expect(graph.locator("#nodes button[data-node=letter]")).toHaveCount(0);
   await expect(editor.getByRole("button", { name: "Save event" })).toBeDisabled();
 });
+
+
+test("native historical search keeps ambiguous identities and navigates the real graph view", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "world", name: "Search world", revision: 3 };
+    const people = [
+      { id: "alice-a", label: "Alice Vale" },
+      { id: "alice-b", label: "Alice Vale" },
+      { id: "beatrice", label: "Beatrice Thorne" },
+    ];
+    const calls: unknown[] = [];
+    Object.assign(window, {
+      isTauri: true,
+      __searchCalls: calls,
+      __TAURI_INTERNALS__: {
+        invoke: async (command: string, args: Record<string, unknown>) => {
+          if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+          if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+          if (command === "workspace_worlds") return [world];
+          if (command === "workspace_snapshot") return {
+            world, day: args.day, view_revision: args.revision ?? 3,
+            people, relationships: [], events: [], definitions: [],
+          };
+          if (command === "workspace_search") {
+            calls.push(args);
+            return { revision: args.revision ?? 3, truncated: false,
+              rows: args.mode === "backlinks" ? [{ id: "bond-1", label: "Friendship", kind: "relationship" }] :
+                people.slice(0, args.revision === 1 ? 1 : 2).map(person => ({ ...person, kind: "person" })) };
+          }
+          throw new Error("Unexpected mock command: " + command);
+        },
+      },
+    });
+  });
+  await page.goto("/");
+  const form = page.locator("#author-query-form");
+  await form.getByLabel("Find name").fill("Alice Vale");
+  await form.getByLabel("Match names").selectOption("exact");
+  await form.getByRole("button", { name: "Search history" }).click();
+  const results = page.locator("#author-query-results");
+  await expect(results.getByRole("button", { name: /^Alice Vale ·/ })).toHaveCount(2);
+  await results.getByRole("button", { name: /^Alice Vale ·.*alice-b$/ }).click();
+  await expect(page.locator('#nodes button[data-node="alice-b"]')).toHaveAttribute("aria-pressed", "true");
+  const revision = page.locator("#author-revision");
+  await revision.fill("1");
+  await revision.blur();
+  await expect(results.getByRole("button", { name: /^Alice Vale ·/ })).toHaveCount(0);
+  await form.getByRole("button", { name: "Search history" }).click();
+  await expect(results.getByRole("button", { name: /^Alice Vale ·/ })).toHaveCount(1);
+  await results.getByRole("button", { name: "Find references to Alice Vale alice-a" }).click();
+  await expect(results.getByText(/Friendship · relationship · bond-1/)).toBeVisible();
+  const calls = await page.evaluate(() => (window as unknown as { __searchCalls: unknown[] }).__searchCalls);
+  expect(calls).toMatchObject([
+    { worldId: "world", day: 0, revision: null, mode: "exact", term: "Alice Vale", limit: 100 },
+    { worldId: "world", day: 0, revision: 1, mode: "exact", term: "Alice Vale", limit: 100 },
+    { worldId: "world", day: 0, revision: 1, mode: "backlinks", term: "alice-a", limit: 100 },
+  ]);
+});

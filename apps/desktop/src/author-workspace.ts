@@ -22,6 +22,7 @@ type Event = {
 type Definition = { id: string; label: string; category: "relationship" | "tag" | "role";
   description: string; reverse_label: string | null; symmetric: boolean };
 type EvidenceStatement = { statement: string; source: string | null; audience: string | null; reader_id: string | null };
+type SearchResult = { revision: number; truncated: boolean; rows: { id: string; label: string; kind: string }[] };
 type Snapshot = {
   world: World; day: number; view_revision: number;
   people: Person[]; relationships: Relationship[]; events: Event[]; definitions: Definition[];
@@ -107,6 +108,9 @@ export async function showAuthorWorkspace(
   const content = document.querySelector<HTMLElement>("#author-world-content")!;
   const info = document.querySelector<HTMLElement>("#author-world-info")!;
   const status = document.querySelector<HTMLElement>("#author-status")!;
+  const queryForm = document.querySelector<HTMLFormElement>("#author-query-form")!;
+  const queryResults = document.querySelector<HTMLUListElement>("#author-query-results")!;
+  const queryStatus = document.querySelector<HTMLElement>("#author-query-status")!;
   const graph = document.querySelector<HTMLElement>("#workspace")!;
   const history = document.querySelector<HTMLElement>("#history")!;
   const heading = document.querySelector("h1")!;
@@ -144,6 +148,7 @@ export async function showAuthorWorkspace(
   const score = (form: HTMLFormElement) => value(form, "trust") === "" ? null : Number(value(form, "trust"));
   let snapshot: Snapshot | undefined;
   let requestSequence = 0;
+  let querySequence = 0;
   let saving = false;
   let selectedEvent: Event | undefined;
   let people: Option[] = [];
@@ -183,6 +188,7 @@ export async function showAuthorWorkspace(
     }
     for (const control of [worldSelect, dayInput, revisionInput]) control.disabled = saving;
     worldForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = saving;
+    queryForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = !snapshot || saving;
   }
 
   const definitionFor = (category: Definition["category"], label: string) =>
@@ -406,6 +412,9 @@ export async function showAuthorWorkspace(
 
   async function refresh() {
     const sequence = ++requestSequence;
+    ++querySequence;
+    queryResults.replaceChildren();
+    queryStatus.textContent = "Search the selected world, historical day, and author revision.";
     const worldId = worldSelect.value;
     const previous = snapshot;
     snapshot = undefined;
@@ -502,6 +511,60 @@ export async function showAuthorWorkspace(
       ? "Read-only author revision. Clear the author revision field to resume editing."
       : "World loaded. Edits are saved locally.";
   }
+
+  function runSearch(mode: string, term: string) {
+    if (!snapshot || saving) return;
+    const sequence = ++querySequence;
+    const worldId = snapshot.world.id;
+    const day = snapshot.day;
+    const revision = selectedRevision();
+    queryResults.replaceChildren();
+    queryStatus.textContent = mode === "backlinks" ? "Finding incoming references…" : "Searching historical records…";
+    void (async () => {
+      try {
+        const result = await invoke<SearchResult>("workspace_search", { worldId, day, revision, mode, term, limit: 100 });
+        if (sequence !== querySequence) return;
+        const graphIds = new Set([
+          ...snapshot!.people.map((item) => item.id),
+          ...snapshot!.relationships.map((item) => item.id),
+          ...snapshot!.events.map((item) => item.id),
+        ]);
+        for (const row of result.rows) {
+          const item = document.createElement("li");
+          const description = row.label + " · " + row.kind.replaceAll("_", " ") + " · " + row.id;
+          if (graphIds.has(row.id)) {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.textContent = description;
+            button.addEventListener("click", () => selectNode(row.id));
+            item.append(button);
+          } else {
+            const text = document.createElement("span");
+            text.textContent = description;
+            item.append(text);
+          }
+          const references = document.createElement("button");
+          references.type = "button";
+          references.className = "query-references";
+          references.textContent = "Find references";
+          references.setAttribute("aria-label", "Find references to " + row.label + " " + row.id);
+          references.addEventListener("click", () => runSearch("backlinks", row.id));
+          item.append(references);
+          queryResults.append(item);
+        }
+        queryStatus.textContent = result.rows.length + " match(es) at author revision " + result.revision +
+          (result.truncated ? " · more results exist; narrow the search." : "");
+      } catch (error) {
+        if (sequence === querySequence) queryStatus.textContent = "Search failed: " + String(error);
+      }
+    })();
+  }
+
+  queryForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    runSearch(field<HTMLSelectElement>(queryForm, "mode").value,
+      field<HTMLInputElement>(queryForm, "term").value.trim());
+  });
 
   async function refreshWorlds(preferred = worldSelect.value) {
     const worlds = await invoke<World[]>("workspace_worlds");
