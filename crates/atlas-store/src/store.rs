@@ -916,21 +916,50 @@ fn latest_state(
 fn validate_stable_links(old: &ObjectData, new: &ObjectData) -> Result<(), Error> {
     let changed = match (old, new) {
         (
-            ObjectData::Relationship { subject: a, target: b, kind: k, .. },
-            ObjectData::Relationship { subject: next_a, target: next_b, kind: next_k, .. },
+            ObjectData::Relationship {
+                subject: a,
+                target: b,
+                kind: k,
+                ..
+            },
+            ObjectData::Relationship {
+                subject: next_a,
+                target: next_b,
+                kind: next_k,
+                ..
+            },
         ) => a != next_a || b != next_b || k != next_k,
         (
-            ObjectData::EventInvolvement { event: a, participant: b, .. },
-            ObjectData::EventInvolvement { event: next_a, participant: next_b, .. },
+            ObjectData::EventInvolvement {
+                event: a,
+                participant: b,
+                ..
+            },
+            ObjectData::EventInvolvement {
+                event: next_a,
+                participant: next_b,
+                ..
+            },
         ) => a != next_a || b != next_b,
         (
-            ObjectData::ActorAction { event: a, actor: b, .. },
-            ObjectData::ActorAction { event: next_a, actor: next_b, .. },
+            ObjectData::ActorAction {
+                event: a, actor: b, ..
+            },
+            ObjectData::ActorAction {
+                event: next_a,
+                actor: next_b,
+                ..
+            },
         ) => a != next_a || b != next_b,
         _ => false,
     };
-    if changed { Err(Error::InvalidInput("stable relationship or event actor identity")) }
-    else { Ok(()) }
+    if changed {
+        Err(Error::InvalidInput(
+            "stable relationship or event actor identity",
+        ))
+    } else {
+        Ok(())
+    }
 }
 
 fn require_visible(
@@ -941,27 +970,46 @@ fn require_visible(
     revision: i64,
     day: WorldDay,
 ) -> Result<Version, Error> {
-    if reference.world != world { return Err(Error::WrongWorld); }
+    if reference.world != world {
+        return Err(Error::WrongWorld);
+    }
     resolve_object(conn, reference, branch, AuthorRevision(revision), day)?.ok_or(Error::NotFound)
 }
 
 fn require_person(
-    conn: &Connection, world: WorldId, reference: ObjectRef,
-    branch: BranchId, revision: i64, day: WorldDay,
+    conn: &Connection,
+    world: WorldId,
+    reference: ObjectRef,
+    branch: BranchId,
+    revision: i64,
+    day: WorldDay,
 ) -> Result<(), Error> {
-    match require_visible(conn, world, reference, branch, revision, day)?.record.data {
+    match require_visible(conn, world, reference, branch, revision, day)?
+        .record
+        .data
+    {
         ObjectData::Person => Ok(()),
         _ => Err(Error::WrongKind),
     }
 }
 
 fn require_event(
-    conn: &Connection, world: WorldId, reference: ObjectRef,
-    branch: BranchId, revision: i64, day: WorldDay,
+    conn: &Connection,
+    world: WorldId,
+    reference: ObjectRef,
+    branch: BranchId,
+    revision: i64,
+    day: WorldDay,
 ) -> Result<(), Error> {
-    match require_visible(conn, world, reference, branch, revision, day)?.record.data {
+    match require_visible(conn, world, reference, branch, revision, day)?
+        .record
+        .data
+    {
         ObjectData::HistoricalEvent { occurrence }
-            if occurrence.exact_day().is_some_and(|at| at <= day) => Ok(()),
+            if occurrence.exact_day().is_some_and(|at| at <= day) =>
+        {
+            Ok(())
+        }
         ObjectData::HistoricalEvent { .. } => Err(Error::InvalidOccurrence),
         _ => Err(Error::WrongKind),
     }
@@ -983,9 +1031,17 @@ fn write_version(
     }
     let (kind, occurrence, citation) = match &record.data {
         ObjectData::Person => ("person", &EventDate::Unknown, None),
-        ObjectData::Relationship { subject, target, kind, trust, tags } => {
+        ObjectData::Relationship {
+            subject,
+            target,
+            kind,
+            trust,
+            tags,
+        } => {
             let day = record.valid.start.ok_or(Error::InvalidInterval)?;
-            if subject == target { return Err(Error::InvalidInput("self-relationship")); }
+            if subject == target {
+                return Err(Error::InvalidInput("self-relationship"));
+            }
             validate_text(kind, "relationship kind")?;
             if trust.is_some_and(|value| value > 100) {
                 return Err(Error::InvalidInput("trust must be between 0 and 100"));
@@ -1001,13 +1057,22 @@ fn write_version(
             require_person(tx, object.world, *target, branch, revision, day)?;
             ("relationship", &EventDate::Unknown, None)
         }
-        ObjectData::EventInvolvement { event, participant, .. } => {
+        ObjectData::EventInvolvement {
+            event, participant, ..
+        } => {
             let day = record.valid.start.ok_or(Error::InvalidInterval)?;
             require_event(tx, object.world, *event, branch, revision, day)?;
             require_person(tx, object.world, *participant, branch, revision, day)?;
             ("event_involvement", &EventDate::Unknown, None)
         }
-        ObjectData::ActorAction { event, actor, target, action, intent, .. } => {
+        ObjectData::ActorAction {
+            event,
+            actor,
+            target,
+            action,
+            intent,
+            ..
+        } => {
             let day = record.valid.start.ok_or(Error::InvalidInterval)?;
             validate_text(action, "action kind")?;
             validate_text(intent, "action intention")?;
@@ -1017,7 +1082,7 @@ fn write_version(
                 require_visible(tx, object.world, *target, branch, revision, day)?;
             }
             ("actor_action", &EventDate::Unknown, None)
-        },
+        }
         ObjectData::Claim {
             subject,
             predicate,
@@ -1141,7 +1206,14 @@ fn write_version(
             state_revision,
         ],
     )?;
-    if let ObjectData::Relationship { subject, target, kind, trust, tags } = &record.data {
+    if let ObjectData::Relationship {
+        subject,
+        target,
+        kind,
+        trust,
+        tags,
+    } = &record.data
+    {
         tx.execute(
             "INSERT INTO relationship_versions
              (world_id, relationship_id, branch_id, revision, state_revision, subject_id, target_id, relation_kind, trust)
@@ -1154,12 +1226,23 @@ fn write_version(
                 "INSERT INTO relationship_tags
                  (world_id, relationship_id, branch_id, state_revision, revision, tag)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![object.world.0.as_bytes(), object.id.0.as_bytes(), branch.0.as_bytes(),
-                    state_revision, revision, tag.trim()],
+                params![
+                    object.world.0.as_bytes(),
+                    object.id.0.as_bytes(),
+                    branch.0.as_bytes(),
+                    state_revision,
+                    revision,
+                    tag.trim()
+                ],
             )?;
         }
     }
-    if let ObjectData::EventInvolvement { event, participant, role } = &record.data {
+    if let ObjectData::EventInvolvement {
+        event,
+        participant,
+        role,
+    } = &record.data
+    {
         let role = match role {
             EventRole::Actor => "actor",
             EventRole::Witness => "witness",
@@ -1175,7 +1258,15 @@ fn write_version(
                 state_revision, revision, event.id.0.as_bytes(), participant.id.0.as_bytes(), role],
         )?;
     }
-    if let ObjectData::ActorAction { event, actor, target, action, intent, outcome } = &record.data {
+    if let ObjectData::ActorAction {
+        event,
+        actor,
+        target,
+        action,
+        intent,
+        outcome,
+    } = &record.data
+    {
         let outcome = match outcome {
             ActionOutcome::Attempted => "attempted",
             ActionOutcome::Succeeded => "succeeded",
