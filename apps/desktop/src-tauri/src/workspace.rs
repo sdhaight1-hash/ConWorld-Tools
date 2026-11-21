@@ -360,6 +360,10 @@ impl AuthorWorkspace {
         let filter = match mode {
             "contains" => QueryFilter::LabelContains(term.into()),
             "exact" => QueryFilter::ExactLabel(term.into()),
+            "backlinks" => QueryFilter::Backlinks(ObjectRef {
+                world: world.id,
+                id: ObjectId(id(term.trim())?),
+            }),
             _ => return Err("Unknown historical search mode".into()),
         };
         let result = store
@@ -1717,6 +1721,37 @@ mod tests {
         assert!(
             workspace
                 .search(&world.id, 0, None, "contains", "alice", 0)
+                .is_err()
+        );
+        let beatrice = workspace
+            .snapshot(&world.id, 0, None)?
+            .people
+            .into_iter()
+            .find(|person| person.label == "Beatrice Thorne")
+            .unwrap()
+            .id;
+        workspace.create_relationship(RelationshipInput {
+            world_id: world.id.clone(),
+            subject_id: matches.rows[0].id.clone(),
+            target_id: beatrice,
+            kind: "friendship".into(),
+            trust: None,
+            tags: String::new(),
+            day: 0,
+        })?;
+        let references = workspace.search(
+            &world.id,
+            0,
+            None,
+            "backlinks",
+            &matches.rows[0].id,
+            20,
+        )?;
+        assert_eq!(references.rows.len(), 1);
+        assert_eq!(references.rows[0].kind, "relationship");
+        assert!(
+            workspace
+                .search(&world.id, 0, None, "backlinks", "not-a-uuid", 20)
                 .is_err()
         );
         Ok(())
