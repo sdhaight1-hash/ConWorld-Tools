@@ -1415,3 +1415,79 @@ test("oversized world discovers one exact claim and cancels stale discovery", as
   await expect(page.locator("#author-discovery-results li")).toHaveCount(0);
   await expect(cancel).toBeHidden();
 });
+
+test("public entry search uses reader IPC and discards obsolete responses", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "archive", name: "River Archive", revision: 4 };
+    const people = [{ id: "alice", label: "Alice" }];
+    const requests: unknown[] = [];
+    Object.assign(window, {
+      isTauri: true,
+      __entrySearchRequests: requests,
+      __TAURI_INTERNALS__: {
+        invoke: async (command: string, payload: { text?: string; day?: number }) => {
+          if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+          if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+          if (command === "workspace_worlds") return [world];
+          if (command === "workspace_saved_queries") return [];
+          if (command === "workspace_snapshot") return {
+            world, day: payload.day ?? 0, view_revision: 4, people,
+            relationships: [], events: [], definitions: [],
+          };
+          if (command === "workspace_entry_layout") return null;
+          if (command === "workspace_search_public_entry") {
+            requests.push(payload);
+            if (payload.text === "old") return new Promise(resolve => {
+              Object.assign(window, { __releaseOldEntrySearch: () => resolve({
+                matches: [["old-block", "Obsolete result"]], truncated: false,
+              }) });
+            });
+            if (payload.text === "gazette") return {
+              matches: [["public-block", "Gazette biography"]], truncated: false,
+            };
+            if (payload.text === "revoked") return null;
+            return { matches: [], truncated: false };
+          }
+          if (command === "workspace_public_entry") return { content: { Text: "Gazette biography" } };
+          throw new Error("Unexpected mock command: " + command);
+        },
+      },
+    });
+  });
+  await page.goto("/");
+  const graph = page.getByRole("region", { name: "Saved world graph" });
+  await graph.locator("#nodes button[data-node=alice]").click();
+  await graph.getByRole("button", { name: "Open character page" }).click();
+  const inspector = graph.getByRole("complementary", { name: "Node inspector" });
+  const input = inspector.getByLabel("Find in public page");
+  const find = inspector.getByRole("button", { name: "Find", exact: true });
+  await input.fill("old");
+  await find.click();
+  await expect.poll(() => page.evaluate(() => typeof (window as unknown as {
+    __releaseOldEntrySearch?: () => void;
+  }).__releaseOldEntrySearch)).toBe("function");
+  await input.fill("gazette");
+  await find.click();
+  await expect(inspector.getByText("1 matching blocks.", { exact: true })).toBeVisible();
+  await expect(inspector.getByText("Gazette biography", { exact: true })).toBeVisible();
+  await page.evaluate(() => (window as unknown as { __releaseOldEntrySearch: () => void }).__releaseOldEntrySearch());
+  await expect(inspector.getByText("Obsolete result")).toHaveCount(0);
+  const requests = await page.evaluate(() => (window as unknown as { __entrySearchRequests: unknown[] }).__entrySearchRequests);
+  expect(requests).toEqual([
+    { worldId: "archive", entryId: "alice", day: 0, text: "old" },
+    { worldId: "archive", entryId: "alice", day: 0, text: "gazette" },
+  ]);
+  if (process.env.ATLAS_CAPTURE_PHASE3 === "1") {
+    const timestamp = new Date().toISOString().slice(0, 19).replace("T", "_").replaceAll(":", "-") + "Z";
+    await inspector.screenshot({
+      path: "../../Development-Screenshots/" + timestamp + "_phase-03_query_mock-native-public-entry-find_01.png",
+      animations: "disabled",
+    });
+  }
+  await input.fill("private");
+  await find.click();
+  await expect(inspector.getByText("0 matching blocks.", { exact: true })).toBeVisible();
+  await input.fill("revoked");
+  await find.click();
+  await expect(inspector.getByText("Unpublished at this date.", { exact: true })).toBeVisible();
+});

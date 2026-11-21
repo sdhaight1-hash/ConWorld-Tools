@@ -801,3 +801,89 @@ fn fictional_comparison_uses_saved_biological_links_at_the_selected_revision() -
     assert_eq!(compare(&store, context)?, segments);
     Ok(())
 }
+
+#[test]
+fn entry_find_limits_only_visible_blocks_in_layout_order() -> Result<(), Error> {
+    let mut store = Store::open(":memory:")?;
+    let world = seed(&mut store)?;
+    let entry = id(&world, 1);
+    let block = |audience, content| LayoutElement {
+        id: ElementId(Uuid::new_v4()),
+        audience,
+        content,
+    };
+    let first = block(
+        ClaimAudience::Public,
+        ElementContent::Text("First Étoile".into()),
+    );
+    let second = block(
+        ClaimAudience::Public,
+        ElementContent::Text("Second Étoile".into()),
+    );
+    let first_id = first.id;
+    let second_id = second.id;
+    let document = LayoutDocument {
+        entry,
+        schema_version: LAYOUT_SCHEMA_VERSION,
+        root: block(
+            ClaimAudience::Public,
+            ElementContent::Stack(vec![
+                first,
+                block(
+                    ClaimAudience::Author,
+                    ElementContent::Stack(vec![block(
+                        ClaimAudience::Public,
+                        ElementContent::Text("Hidden Étoile".into()),
+                    )]),
+                ),
+                second,
+                block(
+                    ClaimAudience::Character(id(&world, 2)),
+                    ElementContent::Text("Reader Étoile".into()),
+                ),
+            ]),
+        ),
+    };
+    let author = view(&world, 13);
+    let revision = store.save_entry_layout(author, &document, true, Uuid::new_v4())?;
+    let public = ViewContext {
+        scope: Scope::Public,
+        revision,
+        ..author
+    };
+    let limited = store
+        .search_entry_text(public, entry, "étoile", 1)?
+        .unwrap();
+    assert_eq!(limited.matches, vec![(first_id, "First Étoile".into())]);
+    assert!(limited.truncated);
+    let full = store
+        .search_entry_text(public, entry, "ÉTOILE", 2)?
+        .unwrap();
+    assert_eq!(
+        full.matches,
+        vec![
+            (first_id, "First Étoile".into()),
+            (second_id, "Second Étoile".into())
+        ]
+    );
+    assert!(!full.truncated);
+    let reader = ViewContext {
+        scope: Scope::Character(id(&world, 2)),
+        ..public
+    };
+    let reader_hits = store
+        .search_entry_text(reader, entry, "étoile", 3)?
+        .unwrap();
+    assert_eq!(reader_hits.matches.len(), 3);
+    assert_eq!(reader_hits.matches[2].1, "Reader Étoile");
+    assert!(!reader_hits.truncated);
+    let other = ViewContext {
+        scope: Scope::Character(id(&world, 3)),
+        ..public
+    };
+    assert_eq!(
+        store.search_entry_text(other, entry, "étoile", 2)?.unwrap(),
+        full
+    );
+    Ok(())
+}
