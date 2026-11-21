@@ -6,8 +6,9 @@ use std::sync::{Mutex, MutexGuard};
 
 use atlas_store::{
     ActionOutcome, AuthorRevision, Change, ClaimAudience, Command, Definition, EventDate,
-    EventRole, ObjectData, ObjectId, ObjectRef, Record, Scope, Store, ValidInterval, ViewContext,
-    World, WorldDay, WorldId,
+    EventRole, ObjectData, ObjectId, ObjectRef, Record, Scope, Store, ValidInterval, VersionRef,
+    ViewContext, World, WorldDay, WorldId,
+    discovery::{MentionDisposition, ReviewMention},
     query::{Direction, QUERY_SCHEMA_VERSION, QueryFilter, QuerySpec, SaveNamedLabelQuery},
 };
 use serde::{Deserialize, Serialize};
@@ -59,9 +60,26 @@ pub struct SavedQuerySummary {
     recorded_at: i64,
 }
 
+#[derive(Deserialize)]
+pub struct ReviewMentionInput {
+    world_id: String,
+    day: i64,
+    expected_revision: i64,
+    source_id: String,
+    source_branch: String,
+    source_state_revision: i64,
+    source_revision: i64,
+    target_id: String,
+    start_byte: usize,
+    end_byte: usize,
+    decision: String,
+}
+
 #[derive(Serialize)]
 pub struct MentionDiscoveryRow {
     source_id: String,
+    source_branch: String,
+    source_state_revision: i64,
     source_revision: i64,
     source_label: String,
     statement: String,
@@ -70,6 +88,7 @@ pub struct MentionDiscoveryRow {
     start_byte: usize,
     end_byte: usize,
     collisions: usize,
+    disposition: Option<&'static str>,
 }
 
 #[derive(Serialize)]
@@ -459,6 +478,45 @@ impl AuthorWorkspace {
         Ok(saved.id.to_string())
     }
 
+    fn review_mention(&self, input: ReviewMentionInput) -> Result<i64, String> {
+        let decision = match input.decision.as_str() {
+            "approved" => MentionDisposition::Approved,
+            "dismissed" => MentionDisposition::Dismissed,
+            _ => return Err("Unknown mention decision".into()),
+        };
+        let mut store = self.lock()?;
+        let world = store
+            .world(WorldId(id(&input.world_id)?), Scope::Author)
+            .map_err(|error| error.to_string())?;
+        let revision = store
+            .review_mention(ReviewMention {
+                view: ViewContext {
+                    revision: AuthorRevision(input.expected_revision),
+                    ..view(&world, input.day)
+                },
+                expected: AuthorRevision(input.expected_revision),
+                source: VersionRef {
+                    object: ObjectRef {
+                        world: world.id,
+                        id: ObjectId(id(&input.source_id)?),
+                    },
+                    branch: atlas_store::BranchId(id(&input.source_branch)?),
+                    state_revision: AuthorRevision(input.source_state_revision),
+                    recorded_at: AuthorRevision(input.source_revision),
+                },
+                target: ObjectRef {
+                    world: world.id,
+                    id: ObjectId(id(&input.target_id)?),
+                },
+                start_byte: input.start_byte,
+                end_byte: input.end_byte,
+                decision,
+                command_id: Uuid::new_v4(),
+            })
+            .map_err(|error| error.to_string())?;
+        Ok(revision.0)
+    }
+
     fn discover_mentions(
         &self,
         world_id: &str,
@@ -485,6 +543,8 @@ impl AuthorWorkspace {
                 .into_iter()
                 .map(|candidate| MentionDiscoveryRow {
                     source_id: candidate.source.object.id.0.to_string(),
+                    source_branch: candidate.source.branch.0.to_string(),
+                    source_state_revision: candidate.source.state_revision.0,
                     source_revision: candidate.source.recorded_at.0,
                     source_label: candidate.source_label,
                     statement: candidate.statement,
@@ -493,6 +553,11 @@ impl AuthorWorkspace {
                     start_byte: candidate.start_byte,
                     end_byte: candidate.end_byte,
                     collisions: candidate.collisions,
+                    disposition: match candidate.disposition {
+                        Some(MentionDisposition::Approved) => Some("approved"),
+                        Some(MentionDisposition::Dismissed) => Some("dismissed"),
+                        None => None,
+                    },
                 })
                 .collect(),
         })
@@ -1427,6 +1492,14 @@ pub fn workspace_search(
     limit: usize,
 ) -> Result<SearchSummary, String> {
     workspace.search(&world_id, day, revision, &mode, &term, limit)
+}
+
+#[tauri::command]
+pub fn workspace_review_mention(
+    workspace: State<'_, AuthorWorkspace>,
+    request: ReviewMentionInput,
+) -> Result<i64, String> {
+    workspace.review_mention(request)
 }
 
 #[tauri::command]

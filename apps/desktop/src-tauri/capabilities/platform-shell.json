@@ -13,6 +13,7 @@
     "allow-workspace-snapshot",
     "allow-workspace-search",
     "allow-workspace-discover-mentions",
+    "allow-workspace-review-mention",
     "allow-workspace-saved-queries",
     "allow-workspace-save-query",
     "allow-workspace-query-path",
