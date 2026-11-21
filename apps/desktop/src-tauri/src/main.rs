@@ -179,6 +179,7 @@ fn main() {
             workspace::workspace_worlds,
             workspace::workspace_create_world,
             workspace::workspace_snapshot,
+            workspace::workspace_search,
             workspace::workspace_create_person,
             workspace::workspace_create_relationship,
             workspace::workspace_record_relationship_state,
