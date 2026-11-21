@@ -321,7 +321,7 @@ test("native historical search keeps ambiguous identities and navigates the real
   await expect(results.getByText(/Friendship · relationship · bond-1/)).toBeVisible();
   const calls = await page.evaluate(() => (window as unknown as { __searchCalls: unknown[] }).__searchCalls);
   expect(calls).toMatchObject([
-    { worldId: "world", day: 0, revision: null, mode: "exact", term: "Alice Vale", limit: 100 },
+    { worldId: "world", day: 0, revision: 3, mode: "exact", term: "Alice Vale", limit: 100 },
     { worldId: "world", day: 0, revision: 1, mode: "exact", term: "Alice Vale", limit: 100 },
     { worldId: "world", day: 0, revision: 1, mode: "backlinks", term: "alice-a", limit: 100 },
   ]);
@@ -399,11 +399,11 @@ test("native path explorer uses typed direction, hop and visit budgets at the se
   await expect(page.locator("#author-query-status")).toContainText("more results exist");
   const recorded = await page.evaluate(() => (window as unknown as { __pathCalls: unknown[] }).__pathCalls);
   expect(recorded).toMatchObject([
-    { world_id: "world", day: 10, revision: null, start_id: "alice", kind: "friendship",
+    { world_id: "world", day: 10, revision: 5, start_id: "alice", kind: "friendship",
       direction: "outgoing", max_depth: 2, max_visited: 3, limit: 100 },
-    { world_id: "world", day: 9, revision: null },
+    { world_id: "world", day: 9, revision: 5 },
     { world_id: "world", day: 10, revision: 3 },
-    { world_id: "world", day: 10, revision: null, max_depth: 2, max_visited: 2 },
+    { world_id: "world", day: 10, revision: 5, max_depth: 2, max_visited: 2 },
   ]);
 });
 
@@ -442,7 +442,7 @@ test("historical full-text option invokes indexed label search without client-si
   await form.getByRole("button", { name: "Search history" }).click();
   await expect(page.locator("#author-query-results").getByRole("button", { name: /^Alice Vale ·/ })).toBeVisible();
   const calls = await page.evaluate(() => (window as unknown as { __fulltextCalls: unknown[] }).__fulltextCalls);
-  expect(calls).toMatchObject([{ worldId: "world", day: 0, revision: null,
+  expect(calls).toMatchObject([{ worldId: "world", day: 0, revision: 1,
     mode: "fulltext", term: "Alice Vale", limit: 100 }]);
 });
 
@@ -567,7 +567,7 @@ test("native mention discovery lists distinct collision identities and never acc
   await expect(results.nth(1)).toContainText("person-b");
   await results.nth(1).getByRole("button", { name: "Inspect candidate person" }).click();
   const calls = await page.evaluate(() => (window as unknown as { __discoveryCalls: unknown[] }).__discoveryCalls);
-  expect(calls).toEqual([{ worldId: "world", day: 0, revision: null, limit: 100 }]);
+  expect(calls).toEqual([{ worldId: "world", day: 0, revision: 2, limit: 100 }]);
   const revision = page.locator("#author-revision");
   await revision.fill("1");
   await revision.blur();
@@ -710,7 +710,7 @@ test("native indexed claim search shows author-only statement provenance and rep
   await expect(result.locator("blockquote")).toContainText("obsidian ledger");
   const calls = await page.evaluate(() => (window as unknown as { __claimSearchCalls: unknown[] }).__claimSearchCalls);
   expect(calls).toMatchObject([
-    { operation: "search", worldId: "world", day: 0, revision: null, mode: "claimtext", term: "obsidian ledger", limit: 100 },
+    { operation: "search", worldId: "world", day: 0, revision: 2, mode: "claimtext", term: "obsidian ledger", limit: 100 },
     { operation: "save", expected_revision: 2, mode: "claimtext", term: "obsidian ledger" },
     { operation: "search", mode: "claimtext", term: "obsidian ledger" },
   ]);
@@ -769,8 +769,8 @@ test("native author queries historical events by person and recorded role", asyn
   await form.getByRole("button", { name: "Find participant events" }).click();
   const calls = await page.evaluate(() => (window as unknown as { __participantQueries: unknown[] }).__participantQueries);
   expect(calls).toEqual([
-    { world_id: "world", day: 10, revision: null, participant_id: "alice", role: "actor", limit: 100 },
-    { world_id: "world", day: 10, revision: null, participant_id: "alice",
+    { world_id: "world", day: 10, revision: 3, participant_id: "alice", role: "actor", limit: 100 },
+    { world_id: "world", day: 10, revision: 3, participant_id: "alice",
       role: "definition:role-uuid", limit: 100 },
   ]);
   await page.locator("#author-revision").fill("1");
@@ -826,7 +826,7 @@ test("native author composes bounded kind/source/name predicates and clears stal
   await expect(results.first()).toContainText("ledger was missing");
   const calls = await page.evaluate(() => (window as unknown as { __compositeCalls: unknown[] }).__compositeCalls);
   expect(calls).toEqual([{
-    world_id: "world", day: 0, revision: null, limit: 100,
+    world_id: "world", day: 0, revision: 4, limit: 100,
     predicate: { op: "not", filter: { op: "or", filters: [
       { op: "contains", text: "Diary" },
       { op: "object_kind", kind: "claim" },
@@ -912,7 +912,7 @@ test("native author saves and replays the exact versioned composite AST", async 
     { operation: "save", expected_revision: 2, query_id: null,
       mode: "composite", predicate, term: "", name: "Evidence diary" },
     { operation: "replay", request: {
-      world_id: "world", day: 0, revision: null, predicate, limit: 100,
+      world_id: "world", day: 0, revision: 3, predicate, limit: 100,
     } },
   ]);
   const revision = page.locator("#author-revision");
@@ -1010,4 +1010,79 @@ test("native author creates and disables a historical alias without inferring a 
   await page.locator("#author-revision").fill("2");
   await page.locator("#author-revision").blur();
   await expect(form.getByRole("button", { name: "Save person alias" })).toBeDisabled();
+});
+
+
+test("oversized worlds preserve pinned indexed search while disabling incomplete graph editing", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "large", name: "Large archive", revision: 7 };
+    const calls: { command: string; args: Record<string, unknown> }[] = [];
+    let mismatch = false;
+    Object.assign(window, {
+      isTauri: true,
+      __largeWorldCalls: calls,
+      __largeWorldMismatch: (value: boolean) => { mismatch = value; },
+      __largeWorldAdvance: () => { world.revision++; },
+      __TAURI_INTERNALS__: {
+        invoke: async (command: string, args: Record<string, unknown>) => {
+          if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+          if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+          if (command === "workspace_worlds") return [world];
+          calls.push({ command, args });
+          if (command === "workspace_snapshot") return {
+            world: { ...world }, day: args.day, view_revision: args.revision ?? world.revision,
+            scene_limited: args.revision !== 1,
+            people: args.revision === 1 ? [{ id: "person", label: "Obsidian navigator" }] : [],
+            relationships: [], events: [], definitions: [], aliases: [],
+          };
+          if (command === "workspace_saved_queries") return [];
+          if (command === "workspace_search") return {
+            revision: mismatch ? world.revision : args.revision, truncated: false,
+            rows: [{ id: "person", label: "Obsidian navigator", kind: "person" }],
+          };
+          throw new Error("Unexpected native command: " + command);
+        },
+      },
+    });
+  });
+  await page.goto("/");
+  await expect(page.locator("#author-status")).toContainText("Search-only mode");
+  await expect(page.locator("#workspace")).toBeHidden();
+  await expect(page.locator(".editor-forms")).toBeHidden();
+  await expect(page.locator("#author-mention-discovery")).toBeHidden();
+  const form = page.locator("#author-query-form");
+  await form.getByLabel("Find name").fill("Obsidian");
+  await form.getByLabel("Match names").selectOption("fulltext");
+  const search = form.getByRole("button", { name: "Search history" });
+  await page.evaluate(() => (window as unknown as { __largeWorldAdvance: () => void }).__largeWorldAdvance());
+  await search.click();
+  await expect(page.locator("#author-query-results")).toContainText("Obsidian navigator");
+  await expect(page.locator("#author-query-status")).toContainText("author revision 7");
+  await page.evaluate(() => (window as unknown as { __largeWorldMismatch: (value: boolean) => void }).__largeWorldMismatch(true));
+  await search.click();
+  await expect(page.locator("#author-query-status")).toContainText("different author revision");
+  await expect(page.locator("#author-query-results li")).toHaveCount(0);
+  await page.evaluate(() => (window as unknown as { __largeWorldMismatch: (value: boolean) => void }).__largeWorldMismatch(false));
+  await page.getByRole("button", { name: "Refresh historical view" }).click();
+  await expect(page.locator("#author-world-info")).toContainText("Author revision 8 / 8");
+  await search.click();
+  await expect(page.locator("#author-query-status")).toContainText("author revision 8");
+  const revision = page.locator("#author-revision");
+  await revision.fill("1");
+  await revision.blur();
+  await expect(page.locator("#workspace")).toBeVisible();
+  await expect(page.locator(".editor-forms")).toBeVisible();
+  await expect(page.locator("#author-create-person button")).toBeDisabled();
+  const calls = await page.evaluate(() => (window as unknown as { __largeWorldCalls: unknown[] }).__largeWorldCalls);
+  expect(calls).toMatchObject([
+    { command: "workspace_snapshot", args: { revision: null } },
+    { command: "workspace_saved_queries", args: { revision: 7 } },
+    { command: "workspace_search", args: { revision: 7, mode: "fulltext" } },
+    { command: "workspace_search", args: { revision: 7, mode: "fulltext" } },
+    { command: "workspace_snapshot", args: { revision: null } },
+    { command: "workspace_saved_queries", args: { revision: 8 } },
+    { command: "workspace_search", args: { revision: 8, mode: "fulltext" } },
+    { command: "workspace_snapshot", args: { revision: 1 } },
+    { command: "workspace_saved_queries", args: { revision: 1 } },
+  ]);
 });

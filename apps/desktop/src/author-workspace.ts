@@ -46,6 +46,7 @@ type Snapshot = {
   world: World; day: number; view_revision: number;
   people: Person[]; relationships: Relationship[]; events: Event[]; definitions: Definition[];
   aliases?: PersonAlias[];
+  scene_limited?: boolean;
 };
 type Option = { id: string; label: string };
 
@@ -127,6 +128,9 @@ export async function showAuthorWorkspace(
   const revisionInput = document.querySelector<HTMLInputElement>("#author-revision")!;
   const content = document.querySelector<HTMLElement>("#author-world-content")!;
   const info = document.querySelector<HTMLElement>("#author-world-info")!;
+  const refreshView = document.querySelector<HTMLButtonElement>("#author-refresh-view")!;
+  const editorForms = document.querySelector<HTMLElement>(".editor-forms")!;
+  const discoveryPanel = document.querySelector<HTMLElement>("#author-mention-discovery")!;
   const status = document.querySelector<HTMLElement>("#author-status")!;
   const queryForm = document.querySelector<HTMLFormElement>("#author-query-form")!;
   const saveQueryForm = document.querySelector<HTMLFormElement>("#author-save-query-form")!;
@@ -206,6 +210,12 @@ export async function showAuthorWorkspace(
 
   function syncButtons() {
     const blocked = !snapshot || revisionInput.value.trim() !== "" || saving;
+    const limited = Boolean(snapshot?.scene_limited);
+    editorForms.hidden = limited;
+    discoveryPanel.hidden = limited;
+    pathForm.hidden = limited;
+    participantEventsForm.hidden = limited;
+    refreshView.disabled = saving || !worldSelect.value;
     const day = snapshot?.day;
     const availability = [
       true,
@@ -218,13 +228,13 @@ export async function showAuthorWorkspace(
       people.length > 0,
     ];
     for (const [index, form] of forms.entries()) {
-      form.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = blocked || !availability[index];
+      form.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = blocked || limited || !availability[index];
     }
     for (const control of [worldSelect, dayInput, revisionInput]) control.disabled = saving;
     worldForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = saving;
     queryForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = !snapshot || saving;
     compositeForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = !snapshot || saving;
-    discoverButton.disabled = !snapshot || saving;
+    discoverButton.disabled = !snapshot || limited || saving;
     saveQueryForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = blocked;
     saveComposite.disabled = blocked;
     runSavedQuery.disabled = !snapshot || !savedSelect.value || saving;
@@ -373,9 +383,9 @@ export async function showAuthorWorkspace(
       try {
         const accounts = await invoke<EvidenceStatement[]>("workspace_evidence", {
           worldId: view.world.id, eventId: event.id, day: view.day,
-          revision: revisionInput.value.trim() ? view.view_revision : null, audience: select.value,
+          revision: view.view_revision, audience: select.value,
         });
-        if (latest !== sequence || !results.isConnected) return;
+        if (latest !== sequence || snapshot !== view || !results.isConnected) return;
         results.replaceChildren();
         if (!accounts.length) results.textContent = "No visible accounts.";
         for (const account of accounts) {
@@ -384,7 +394,7 @@ export async function showAuthorWorkspace(
           if (account.audience) line(results, "Audience", account.reader_id ? name(account.reader_id) : account.audience);
         }
       } catch (error) {
-        if (latest === sequence && results.isConnected) results.textContent = "Accounts unavailable: " + String(error);
+        if (latest === sequence && snapshot === view && results.isConnected) results.textContent = "Accounts unavailable: " + String(error);
       }
     }
     select.addEventListener("change", () => void refreshAccounts());
@@ -471,14 +481,15 @@ export async function showAuthorWorkspace(
       return;
     }
     const worldChanged = previous?.world.id !== worldId;
-    if (worldChanged) graph.hidden = true;
+    graph.hidden = true;
+    info.textContent = "Loading historical view…";
     const day = currentDay();
     const revision = selectedRevision();
     let next: Snapshot;
     let saved: SavedQuery[];
     try {
       next = await invoke<Snapshot>("workspace_snapshot", { worldId, day, revision });
-      saved = await invoke<SavedQuery[]>("workspace_saved_queries", { worldId, revision });
+      saved = await invoke<SavedQuery[]>("workspace_saved_queries", { worldId, revision: next.view_revision });
     } catch (error) {
       if (sequence === requestSequence) throw error;
       return;
@@ -502,7 +513,8 @@ export async function showAuthorWorkspace(
       aliasForm.reset();
       field<HTMLSelectElement>(aliasForm, "alias_id").value = "";
     }
-    info.textContent = `Author revision ${next.view_revision} / ${next.world.revision} · historical day ${next.day}`;
+    info.textContent = `Author revision ${next.view_revision} / ${next.world.revision} · historical day ${next.day}` +
+      (next.scene_limited ? " · Search-only mode: the complete scene exceeds its budget. Indexed search remains available." : "");
     const subject = field<HTMLSelectElement>(relationshipForm, "subject");
     const target = field<HTMLSelectElement>(relationshipForm, "target");
     options(subject, people);
@@ -567,16 +579,20 @@ export async function showAuthorWorkspace(
     syncEffect();
     syncButtons();
     if (info.nextElementSibling !== graph) info.after(graph);
-    graph.hidden = false;
+    graph.hidden = Boolean(next.scene_limited);
     heading.textContent = next.world.name;
-    intro.textContent = "Explore saved people, relationships, and events.";
+    intro.textContent = next.scene_limited
+      ? "Search the selected historical world without loading a complete graph."
+      : "Explore saved people, relationships, and events.";
     graph.setAttribute("aria-label", "Saved world graph");
     history.hidden = true;
     authorLink.hidden = true;
     setScene(projectScene(next, bondLabel), inspector);
-    status.textContent = revision !== null
-      ? "Read-only author revision. Clear the author revision field to resume editing."
-      : "World loaded. Edits are saved locally.";
+    status.textContent = next.scene_limited
+      ? "Search-only mode. Graph editing and snapshot-wide discovery are unavailable for this view."
+      : revision !== null
+        ? "Read-only author revision. Clear the author revision field to resume editing."
+        : "World loaded. Edits are saved locally.";
   }
 
   function runQuery(message: string, execute: () => Promise<SearchResult>) {
@@ -588,6 +604,7 @@ export async function showAuthorWorkspace(
       try {
         const result = await execute();
         if (sequence !== querySequence || !snapshot) return;
+        if (result.revision !== snapshot.view_revision) throw new Error("Search response belongs to a different author revision. Refresh the view.");
         const graphIds = new Set([
           ...snapshot.people.map((item) => item.id),
           ...snapshot.relationships.map((item) => item.id),
@@ -634,7 +651,7 @@ export async function showAuthorWorkspace(
   }
 
   function reviewCandidate(candidate: MentionDiscovery["rows"][number], decision: "approved" | "dismissed") {
-    if (!snapshot || saving || selectedRevision() !== null) return;
+    if (!snapshot || snapshot.scene_limited || saving || selectedRevision() !== null) return;
     const request = {
       world_id: snapshot.world.id,
       day: snapshot.day,
@@ -666,10 +683,10 @@ export async function showAuthorWorkspace(
   }
 
   discoverButton.addEventListener("click", () => {
-    if (!snapshot || saving) return;
+    if (!snapshot || snapshot.scene_limited || saving) return;
     const worldId = snapshot.world.id;
     const day = snapshot.day;
-    const revision = selectedRevision();
+    const revision = snapshot.view_revision;
     const sequence = ++discoverySequence;
     discoveryResults.replaceChildren();
     discoveryStatus.textContent = "Checking source statements for possible names…";
@@ -679,6 +696,7 @@ export async function showAuthorWorkspace(
           worldId, day, revision, limit: 100,
         });
         if (sequence !== discoverySequence || !snapshot) return;
+        if (result.revision !== snapshot.view_revision) throw new Error("Discovery response belongs to a different author revision. Refresh the view.");
         const visiblePeople = new Set(snapshot.people.map((person) => person.id));
         for (const candidate of result.rows) {
           const item = document.createElement("li");
@@ -736,7 +754,7 @@ export async function showAuthorWorkspace(
     if (!snapshot || saving) return;
     const worldId = snapshot.world.id;
     const day = snapshot.day;
-    const revision = selectedRevision();
+    const revision = snapshot.view_revision;
     runQuery(mode === "backlinks" ? "Finding incoming references…" : "Searching historical records…",
       () => invoke<SearchResult>("workspace_search", { worldId, day, revision, mode, term, limit }));
   }
@@ -770,7 +788,7 @@ export async function showAuthorWorkspace(
       const request = {
         world_id: snapshot.world.id,
         day: snapshot.day,
-        revision: selectedRevision(),
+        revision: snapshot.view_revision,
         predicate: query.predicate,
         limit: query.limit,
       };
@@ -850,7 +868,7 @@ export async function showAuthorWorkspace(
     const request = {
       world_id: snapshot.world.id,
       day: snapshot.day,
-      revision: selectedRevision(),
+      revision: snapshot.view_revision,
       predicate,
       limit: 100,
     };
@@ -899,11 +917,11 @@ export async function showAuthorWorkspace(
 
   participantEventsForm.addEventListener("submit", (event) => {
     event.preventDefault();
-    if (!snapshot || saving) return;
+    if (!snapshot || snapshot.scene_limited || saving) return;
     const request = {
       world_id: snapshot.world.id,
       day: snapshot.day,
-      revision: selectedRevision(),
+      revision: snapshot.view_revision,
       participant_id: value(participantEventsForm, "participant"),
       role: value(participantEventsForm, "role"),
       limit: 100,
@@ -914,11 +932,11 @@ export async function showAuthorWorkspace(
 
   pathForm.addEventListener("submit", (event) => {
     event.preventDefault();
-    if (!snapshot || saving) return;
+    if (!snapshot || snapshot.scene_limited || saving) return;
     const request = {
       world_id: snapshot.world.id,
       day: snapshot.day,
-      revision: selectedRevision(),
+      revision: snapshot.view_revision,
       start_id: value(pathForm, "start"),
       kind: value(pathForm, "kind").trim(),
       direction: value(pathForm, "direction"),
@@ -949,6 +967,7 @@ export async function showAuthorWorkspace(
             currentDay();
             if (selectedRevision() !== null) throw new Error("Archived author revisions are read-only.");
             if (!snapshot || snapshot.world.id !== worldSelect.value) throw new Error("Wait for the world to load.");
+            if (snapshot.scene_limited) throw new Error("Graph editing requires a complete scene.");
           }
           saving = true;
           syncButtons();
@@ -1103,6 +1122,7 @@ export async function showAuthorWorkspace(
     revisionInput.value = "";
     reload();
   });
+  refreshView.addEventListener("click", reload);
   dayInput.addEventListener("change", reload);
   revisionInput.addEventListener("change", reload);
   try {

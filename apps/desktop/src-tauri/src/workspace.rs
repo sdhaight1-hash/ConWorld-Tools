@@ -203,11 +203,29 @@ pub struct WorkspaceSnapshot {
     world: WorldSummary,
     view_revision: i64,
     day: i64,
+    /// True when a complete editable scene exceeds a bounded read budget.
+    scene_limited: bool,
     people: Vec<PersonSummary>,
     relationships: Vec<RelationshipSummary>,
     events: Vec<EventSummary>,
     definitions: Vec<DefinitionSummary>,
     aliases: Vec<PersonAliasSummary>,
+}
+
+impl WorkspaceSnapshot {
+    fn search_only(world: World, context: ViewContext) -> Self {
+        Self {
+            world: summary(world),
+            view_revision: context.revision.0,
+            day: context.day.0,
+            scene_limited: true,
+            people: Vec::new(),
+            relationships: Vec::new(),
+            events: Vec::new(),
+            definitions: Vec::new(),
+            aliases: Vec::new(),
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -844,9 +862,20 @@ impl AuthorWorkspace {
             revision: AuthorRevision(revision.unwrap_or(world.revision.0)),
             ..view(&world, day)
         };
-        let versions = store
-            .objects_at(context, 2_000)
-            .map_err(|error| error.to_string())?;
+        let versions = match store.objects_at(context, 2_000) {
+            Ok(versions) => versions,
+            Err(atlas_store::Error::QueryBudgetExceeded) => {
+                return Ok(WorkspaceSnapshot::search_only(world, context));
+            }
+            Err(error) => return Err(error.to_string()),
+        };
+        let alias_versions = match store.person_aliases(context) {
+            Ok(aliases) => aliases,
+            Err(atlas_store::Error::QueryBudgetExceeded) => {
+                return Ok(WorkspaceSnapshot::search_only(world, context));
+            }
+            Err(error) => return Err(error.to_string()),
+        };
         let mut people = Vec::new();
         let mut relationships = Vec::new();
         let mut events = HashMap::new();
@@ -977,9 +1006,7 @@ impl AuthorWorkspace {
         people.sort_by(|a, b| a.label.cmp(&b.label).then(a.id.cmp(&b.id)));
         relationships.sort_by(|a, b| a.kind.cmp(&b.kind).then(a.id.cmp(&b.id)));
         definitions.sort_by(|a, b| a.category.cmp(b.category).then(a.label.cmp(&b.label)));
-        let aliases = store
-            .person_aliases(context)
-            .map_err(|error| error.to_string())?
+        let aliases = alias_versions
             .into_iter()
             .map(|alias| PersonAliasSummary {
                 id: alias.id.to_string(),
@@ -995,6 +1022,7 @@ impl AuthorWorkspace {
             world: summary(world),
             view_revision: context.revision.0,
             day,
+            scene_limited: false,
             people,
             relationships,
             events,
@@ -1810,6 +1838,55 @@ pub fn workspace_evidence(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn oversized_scene_keeps_indexed_author_search_available_at_exact_revision()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let workspace = AuthorWorkspace::open(directory.path().join("large.sqlite"))?;
+        let world = workspace.create_world("Large archive")?;
+        let focus;
+        {
+            let mut store = workspace.lock()?;
+            let current = store.world(WorldId(id(&world.id)?), Scope::Author)?;
+            focus = ObjectRef::new(current.id);
+            let person = |label: String| Record {
+                label,
+                valid: ValidInterval::default(),
+                data: ObjectData::Person,
+                source: None,
+            };
+            commit(
+                &mut store,
+                &current,
+                vec![Change::Create(focus, person("Obsidian navigator".into()))],
+            )?;
+            let current = store.world(current.id, Scope::Author)?;
+            let changes = (0..2_005)
+                .map(|number| {
+                    Change::Create(
+                        ObjectRef::new(current.id),
+                        person(format!("Inhabitant {number}")),
+                    )
+                })
+                .collect();
+            commit(&mut store, &current, changes)?;
+        }
+        let latest = workspace.snapshot(&world.id, 0, None)?;
+        assert!(latest.scene_limited);
+        assert!(latest.people.is_empty());
+        assert!(latest.events.is_empty());
+        assert_eq!(latest.view_revision, 2);
+        let found = workspace.search(&world.id, 0, Some(2), "fulltext", "Obsidian", 10)?;
+        assert_eq!(found.revision, latest.view_revision);
+        assert_eq!(found.rows.len(), 1);
+        assert_eq!(found.rows[0].id, focus.id.0.to_string());
+        let historical = workspace.snapshot(&world.id, 0, Some(1))?;
+        assert!(!historical.scene_limited);
+        assert_eq!(historical.people.len(), 1);
+        assert!(workspace.snapshot(&world.id, 0, Some(3)).is_err());
+        Ok(())
+    }
 
     #[test]
     fn at_08_09_13_configured_roles_and_reports_preserve_outcomes_and_visibility()
