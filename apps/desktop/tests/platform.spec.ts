@@ -86,3 +86,48 @@ test("browser preview does not expose the persistent native author workspace", a
   await page.goto("/");
   await expect(page.locator("#author-workspace")).toBeHidden();
 });
+
+
+test("native author form refuses a missing historical day instead of silently saving day zero", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "00000000-0000-4000-8000-000000000001", name: "Audit world", revision: 0 };
+    const people = [
+      { id: "00000000-0000-4000-8000-000000000002", label: "Alice" },
+      { id: "00000000-0000-4000-8000-000000000003", label: "Beatrice" },
+    ];
+    const writes: string[] = [];
+    Object.assign(window, {
+      __authorTestWrites: writes,
+      __TAURI_INTERNALS__: {
+        invoke: async (command: string) => {
+          if (command === "platform_scene") {
+            return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+          }
+          if (command === "northbridge_history") {
+            return { day: 0, relationships: [], cause: null };
+          }
+          if (command === "workspace_worlds") return [world];
+          if (command === "workspace_snapshot") {
+            return { world, day: 0, people, relationships: [] };
+          }
+          if (command === "workspace_create_relationship") {
+            writes.push(command);
+            return null;
+          }
+          throw new Error("Unexpected mock command: " + command);
+        },
+      },
+    });
+  });
+  await page.goto("/");
+  await expect(page.getByRole("region", { name: "Persistent author workspace" })).toBeVisible();
+  const form = page.locator("#author-create-relationship");
+  await expect(form.locator('select[name="subject"]')).toHaveValue("00000000-0000-4000-8000-000000000002");
+  await expect(form.locator('select[name="target"]')).toHaveValue("00000000-0000-4000-8000-000000000003");
+  const day = page.locator("#author-day");
+  await day.fill("");
+  await form.getByRole("button", { name: "Create relationship at selected day" }).click();
+  await expect(page.locator("#author-status")).toContainText("Enter a whole-number historical day.");
+  const writes = await page.evaluate(() => (window as unknown as { __authorTestWrites: string[] }).__authorTestWrites);
+  expect(writes).toEqual([]);
+});
