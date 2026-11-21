@@ -621,7 +621,10 @@ fn indexed_backlinks_remain_exact_above_snapshot_budget() -> Result<(), Error> {
         references(&reopened, &world, large, person)?,
         vec![bond, claim]
     );
-    assert_eq!(references(&reopened, &world, corrected, person)?, vec![bond]);
+    assert_eq!(
+        references(&reopened, &world, corrected, person)?,
+        vec![bond]
+    );
     reopened.verify_foreign_keys(Scope::Author)?;
     Ok(())
 }
