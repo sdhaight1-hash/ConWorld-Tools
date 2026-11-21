@@ -1,7 +1,7 @@
-//! Phase 3 versioned person aliases participate in candidate discovery only.
+//! Phase 3 versioned person aliases participate in candidate discovery and exact historical lookup.
 use atlas_store::{
     discovery::{MentionDisposition, ReviewMention, SavePersonAlias},
-    query::{QUERY_SCHEMA_VERSION, QueryFilter, QuerySpec},
+    query::{ObjectKindFilter, QUERY_SCHEMA_VERSION, QueryFilter, QuerySpec, SaveNamedLabelQuery},
     *,
 };
 use tempfile::tempdir;
@@ -324,7 +324,8 @@ fn aliases_preserve_revision_and_valid_day_collisions_with_reviewed_backlinks() 
 
     let conn = rusqlite::Connection::open(&path)?;
     conn.execute_batch(
-        "DROP TABLE person_alias_versions;
+        "DROP TABLE person_alias_name_keys;
+         DROP TABLE person_alias_versions;
          DROP TABLE person_aliases;
          PRAGMA user_version = 13;",
     )?;
@@ -456,5 +457,123 @@ fn repeated_aliases_do_not_exhaust_distinct_candidate_budget() -> Result<(), Err
             && candidate.collisions == 1
             && candidate.matched_label == "Magpie"
     }));
+    Ok(())
+}
+
+#[test]
+fn indexed_aliases_preserve_collisions_and_historical_versions() -> Result<(), Error> {
+    let dir = tempdir()?;
+    let db = dir.path().join("alias-index.sqlite");
+    let mut store = Store::open(&db)?;
+    let world = store.create_world("Alias query", Scope::Author)?;
+    let alice = ObjectRef::new(world.id);
+    let bob = ObjectRef::new(world.id);
+    let mut changes = vec![
+        Change::Create(alice, record("Alice", ObjectData::Person, None)),
+        Change::Create(bob, record("Bob", ObjectData::Person, None)),
+    ];
+    for i in 0..2_005 {
+        changes.push(Change::Create(
+            ObjectRef::new(world.id),
+            record(&format!("Resident {i}"), ObjectData::Person, None),
+        ));
+    }
+    let initial = store.apply(&command(&world, world.revision, changes))?;
+    let a = save(
+        &mut store,
+        &world,
+        initial,
+        alice,
+        None,
+        ("Étoile", true, 10, Some(30)),
+    )?;
+    let b = save(
+        &mut store,
+        &world,
+        a.recorded_at,
+        bob,
+        None,
+        ("ÉTOILE", true, 10, None),
+    )?;
+    let spec = QuerySpec {
+        schema_version: QUERY_SCHEMA_VERSION,
+        filter: QueryFilter::ExactAlias(" étoile ".into()),
+        limit: 100,
+    };
+    let ids = |store: &Store, revision, day| -> Result<Vec<ObjectRef>, Error> {
+        Ok(store
+            .execute_query(&spec, view(&world, revision, day))?
+            .rows
+            .into_iter()
+            .map(|row| row.object)
+            .collect())
+    };
+    assert!(ids(&store, b.recorded_at, 9)?.is_empty());
+    assert_eq!(ids(&store, b.recorded_at, 20)?, vec![alice, bob]);
+    assert_eq!(ids(&store, b.recorded_at, 30)?, vec![bob]);
+    let next = save(
+        &mut store,
+        &world,
+        b.recorded_at,
+        alice,
+        Some(a.id),
+        ("Different", true, 10, None),
+    )?;
+    assert_eq!(ids(&store, next.recorded_at, 20)?, vec![bob]);
+    assert_eq!(ids(&store, b.recorded_at, 20)?, vec![alice, bob]);
+    let composite = QuerySpec {
+        filter: QueryFilter::And(vec![
+            QueryFilter::ExactAlias("Étoile".into()),
+            QueryFilter::Kind(ObjectKindFilter::Person),
+            QueryFilter::Not(Box::new(QueryFilter::ExactLabel("Alice".into()))),
+        ]),
+        ..spec.clone()
+    };
+    let saved = store.save_named_label_query(SaveNamedLabelQuery {
+        world_id: world.id,
+        expected: next.recorded_at,
+        query_id: None,
+        name: "Other Étoile",
+        spec: &composite,
+        command_id: Uuid::new_v4(),
+        scope: Scope::Author,
+    })?;
+    assert_eq!(
+        store
+            .execute_query(&composite, view(&world, b.recorded_at, 20))?
+            .rows[0]
+            .object,
+        bob
+    );
+    store.rebuild_search_index(Scope::Author)?;
+    assert_eq!(ids(&store, b.recorded_at, 20)?, vec![alice, bob]);
+    assert!(matches!(
+        store.execute_query(
+            &spec,
+            ViewContext {
+                scope: Scope::Public,
+                ..view(&world, next.recorded_at, 20)
+            }
+        ),
+        Err(Error::CapabilityDenied)
+    ));
+    drop(store);
+    let conn = rusqlite::Connection::open(&db)?;
+    conn.execute_batch("DROP TABLE person_alias_name_keys; PRAGMA user_version = 16;")?;
+    drop(conn);
+    let reopened = Store::open(&db)?;
+    assert_eq!(ids(&reopened, b.recorded_at, 20)?, vec![alice, bob]);
+    assert_eq!(ids(&reopened, next.recorded_at, 20)?, vec![bob]);
+    let definitions = reopened.saved_label_queries(world.id, saved.recorded_at, Scope::Author)?;
+    assert_eq!(definitions[0].id, saved.id);
+    assert_eq!(definitions[0].spec, composite);
+    assert_eq!(
+        reopened
+            .execute_query(&definitions[0].spec, view(&world, saved.recorded_at, 20))?
+            .rows[0]
+            .object,
+        bob
+    );
+    reopened.verify_foreign_keys(Scope::Author)?;
     Ok(())
 }

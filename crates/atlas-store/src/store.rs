@@ -17,7 +17,7 @@ use crate::query::{
 use crate::*;
 
 pub(crate) const APPLICATION_ID: i64 = 0x4357_4c44; // CWLD
-pub(crate) const SCHEMA_VERSION: i64 = 16;
+pub(crate) const SCHEMA_VERSION: i64 = 17;
 
 pub struct Store {
     conn: Connection,
@@ -94,6 +94,10 @@ impl Store {
         // Version 16 adds the reverse relationship endpoint index.
         if version < 16 {
             tx.execute_batch(include_str!("../migrations/0016.sql"))?;
+        }
+        if version < 17 {
+            tx.execute_batch(include_str!("../migrations/0017.sql"))?;
+            rebuild_alias_name_index(&tx)?;
         }
         if version < SCHEMA_VERSION {
             verify_foreign_keys(&tx)?;
@@ -229,6 +233,16 @@ impl Store {
                 request.active,
             ],
         )?;
+        tx.execute(
+            "INSERT INTO person_alias_name_keys (world_id, alias_id, revision, name_key)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![
+                world.id.0.as_bytes(),
+                id.as_bytes(),
+                revision,
+                label.to_lowercase()
+            ],
+        )?;
         tx.commit()?;
         Ok(PersonAlias {
             id,
@@ -266,8 +280,87 @@ impl Store {
              ORDER BY world_id, claim_id, branch_id, state_revision, revision",
             [],
         )?;
+        rebuild_alias_name_index(&tx)?;
         tx.commit()?;
         Ok(())
+    }
+
+    /// Resolve exact alternative names to distinct visible canonical people.
+    /// Alias annotations remain main-branch author metadata, never graph edges.
+    pub(crate) fn indexed_alias_at(
+        &self,
+        label: &str,
+        view: ViewContext,
+        limit: usize,
+    ) -> Result<crate::query::QueryResult, Error> {
+        require_author(view.scope)?;
+        let key = crate::query::search_label(label)?;
+        self.validate_query_view(view)?;
+        let tx = self.conn.unchecked_transaction()?;
+        let world = load_world(&tx, view.world)?;
+        let mut rows = Vec::new();
+        if view.branch == world.main {
+            const CANDIDATE_BUDGET: i64 = 10_000;
+            let candidates = {
+                let mut statement = tx.prepare(
+                    "SELECT DISTINCT a.person_id FROM person_alias_name_keys k
+                     JOIN person_alias_versions v ON v.world_id = k.world_id
+                       AND v.alias_id = k.alias_id AND v.revision = k.revision
+                     JOIN person_aliases a ON a.world_id = k.world_id AND a.id = k.alias_id
+                     WHERE k.world_id = ?1 AND k.name_key = ?2 AND k.revision <= ?3
+                       AND v.active = 1
+                       AND (v.starts_at IS NULL OR v.starts_at <= ?4)
+                       AND (v.ends_before IS NULL OR v.ends_before > ?4)
+                       AND NOT EXISTS (
+                           SELECT 1 FROM person_alias_versions newer
+                           WHERE newer.world_id = v.world_id AND newer.alias_id = v.alias_id
+                             AND newer.revision > v.revision AND newer.revision <= ?3
+                       )
+                     ORDER BY a.person_id LIMIT ?5",
+                )?;
+                statement
+                    .query_map(
+                        params![
+                            view.world.0.as_bytes(),
+                            key,
+                            view.revision.0,
+                            view.day.0,
+                            CANDIDATE_BUDGET + 1
+                        ],
+                        |row| row.get::<_, [u8; 16]>(0),
+                    )?
+                    .collect::<Result<Vec<_>, _>>()?
+            };
+            if candidates.len() > CANDIDATE_BUDGET as usize {
+                return Err(Error::QueryBudgetExceeded);
+            }
+            for id in candidates {
+                let person = ObjectRef {
+                    world: view.world,
+                    id: ObjectId(Uuid::from_bytes(id)),
+                };
+                if let Some(version) =
+                    resolve_object(&tx, person, view.branch, view.revision, view.day)?
+                    && matches!(version.record.data, ObjectData::Person)
+                {
+                    rows.push(version);
+                }
+            }
+        }
+        rows.sort_by(|a, b| {
+            a.record
+                .label
+                .cmp(&b.record.label)
+                .then(a.object.id.0.cmp(&b.object.id.0))
+        });
+        let truncated = rows.len() > limit;
+        rows.truncate(limit);
+        tx.commit()?;
+        Ok(crate::query::QueryResult {
+            rows,
+            revision: view.revision,
+            truncated,
+        })
     }
 
     /// Find candidate IDs via canonical typed involvement indexes, then resolve
@@ -700,7 +793,8 @@ impl Store {
             QueryFilter::ExactLabel(text) => ("exact", text.trim().to_string()),
             QueryFilter::FullTextPhrase(text) => ("fulltext", text.trim().to_string()),
             QueryFilter::ClaimFullTextPhrase(text) => ("claimtext", text.trim().to_string()),
-            QueryFilter::Kind(_)
+            QueryFilter::ExactAlias(_)
+            | QueryFilter::Kind(_)
             | QueryFilter::HasSource(_)
             | QueryFilter::And(_)
             | QueryFilter::Or(_)
@@ -2131,6 +2225,26 @@ fn require_author(scope: Scope) -> Result<(), Error> {
 fn validate_text(value: &str, field: &'static str) -> Result<(), Error> {
     if value.trim().is_empty() {
         return Err(Error::InvalidInput(field));
+    }
+    Ok(())
+}
+
+/// Recreate Unicode-lowercase lookup keys from immutable authored versions.
+fn rebuild_alias_name_index(conn: &Connection) -> Result<(), Error> {
+    conn.execute("DELETE FROM person_alias_name_keys", [])?;
+    let mut select =
+        conn.prepare("SELECT world_id, alias_id, revision, label FROM person_alias_versions")?;
+    let mut rows = select.query([])?;
+    let mut insert = conn.prepare(
+        "INSERT INTO person_alias_name_keys (world_id, alias_id, revision, name_key)
+         VALUES (?1, ?2, ?3, ?4)",
+    )?;
+    while let Some(row) = rows.next()? {
+        let world: Vec<u8> = row.get(0)?;
+        let alias: Vec<u8> = row.get(1)?;
+        let revision: i64 = row.get(2)?;
+        let label: String = row.get(3)?;
+        insert.execute(params![world, alias, revision, label.to_lowercase()])?;
     }
     Ok(())
 }

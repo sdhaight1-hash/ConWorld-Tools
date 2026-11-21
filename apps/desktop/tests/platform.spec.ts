@@ -964,6 +964,13 @@ test("native author creates and disables a historical alias without inferring a 
             aliases.splice(0, aliases.length, row);
             return id;
           }
+          if (command === "workspace_search") {
+            if (args.mode !== "alias" || args.term !== "Magpie") throw new Error("Unexpected alias query");
+            return { revision: args.revision ?? world.revision, truncated: false,
+              rows: aliases.filter((item) => item.active).map((item) => ({
+                id: item.person_id, label: "Alice Rowan", kind: "person",
+              })) };
+          }
           if (command === "workspace_discover_mentions") {
             const matching = aliases.filter((item) => item.active && (args.day as number) >= (item.starts_at ?? -9999));
             return { revision: args.revision ?? world.revision, truncated: false,
@@ -993,6 +1000,11 @@ test("native author creates and disables a historical alias without inferring a 
   await page.getByRole("button", { name: "Find possible mentions" }).click();
   await expect(page.locator("#author-discovery-results")).toContainText("matched alias: Magpie");
   await expect(page.locator("#author-discovery-results")).toContainText("Candidate only");
+  const search = page.locator("#author-query-form");
+  await search.getByLabel("Find name").fill("Magpie");
+  await search.getByLabel("Match names").selectOption("alias");
+  await search.getByRole("button", { name: "Search history" }).click();
+  await expect(page.locator("#author-query-results")).toContainText("Alice Rowan");
   await form.getByLabel("Enable this alias").uncheck();
   await form.getByRole("button", { name: "Save person alias" }).click();
   await page.getByRole("button", { name: "Find possible mentions" }).click();
@@ -1002,6 +1014,8 @@ test("native author creates and disables a historical alias without inferring a 
   await expect(form.getByLabel("Valid from day (optional)")).toHaveValue("");
   await expect(form.getByLabel("Valid before day (optional)")).toHaveValue("");
   await expect(form.getByLabel("Enable this alias")).toBeChecked();
+  await search.getByRole("button", { name: "Search history" }).click();
+  await expect(page.locator("#author-query-status")).toContainText("0 match(es)");
   const calls = await page.evaluate(() => (window as unknown as { __aliasCalls: unknown[] }).__aliasCalls);
   expect(calls).toMatchObject([
     { operation: "save", expected_revision: 2, alias_id: null, person_id: "alice",

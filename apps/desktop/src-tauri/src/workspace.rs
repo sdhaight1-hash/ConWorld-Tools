@@ -505,6 +505,7 @@ impl AuthorWorkspace {
                 let (mode, term, predicate) = match &query.spec.filter {
                     QueryFilter::LabelContains(term) => ("contains", term.clone(), None),
                     QueryFilter::ExactLabel(term) => ("exact", term.clone(), None),
+                    QueryFilter::ExactAlias(term) => ("alias", term.clone(), None),
                     QueryFilter::FullTextPhrase(term) => ("fulltext", term.clone(), None),
                     QueryFilter::ClaimFullTextPhrase(term) => ("claimtext", term.clone(), None),
                     filter => (
@@ -533,6 +534,7 @@ impl AuthorWorkspace {
         let filter = match request.mode.as_str() {
             "contains" => QueryFilter::LabelContains(request.term),
             "exact" => QueryFilter::ExactLabel(request.term),
+            "alias" => QueryFilter::ExactAlias(request.term),
             "fulltext" => QueryFilter::FullTextPhrase(request.term),
             "claimtext" => QueryFilter::ClaimFullTextPhrase(request.term),
             "composite" => {
@@ -688,6 +690,7 @@ impl AuthorWorkspace {
         let filter = match mode {
             "contains" => QueryFilter::LabelContains(term.into()),
             "exact" => QueryFilter::ExactLabel(term.into()),
+            "alias" => QueryFilter::ExactAlias(term.into()),
             "fulltext" => QueryFilter::FullTextPhrase(term.into()),
             "claimtext" => QueryFilter::ClaimFullTextPhrase(term.into()),
             "backlinks" => QueryFilter::Backlinks(ObjectRef {
