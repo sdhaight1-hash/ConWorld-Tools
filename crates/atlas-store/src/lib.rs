@@ -110,9 +110,47 @@ impl EventDate {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EventRole {
+    Actor,
+    Witness,
+    Victim,
+    Stakeholder,
+    Sponsor,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ActionOutcome {
+    Attempted,
+    Succeeded,
+    Failed,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ObjectData {
     Person,
+    /// A directed, addressable bond. Reverse perceptions are independent records.
+    Relationship {
+        subject: ObjectRef,
+        target: ObjectRef,
+        kind: String,
+        trust: Option<u8>,
+        tags: Vec<String>,
+    },
+    /// An event role does not itself imply an intentional action.
+    EventInvolvement {
+        event: ObjectRef,
+        participant: ObjectRef,
+        role: EventRole,
+    },
+    ActorAction {
+        event: ObjectRef,
+        actor: ObjectRef,
+        target: Option<ObjectRef>,
+        action: String,
+        intent: String,
+        outcome: ActionOutcome,
+    },
     HistoricalEvent {
         occurrence: EventDate,
     },
