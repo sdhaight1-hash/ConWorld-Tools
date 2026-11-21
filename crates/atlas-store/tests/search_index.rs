@@ -101,9 +101,19 @@ fn fts_phrase_indexes_current_version_without_resurrecting_corrections_or_other_
     assert!(ids(&store, &world, first, "\"\" OR Vale")?.is_empty());
     assert!(ids(&store, &world, AuthorRevision(0), "Alice")?.is_empty());
 
+    let fork = store.fork(&ForkCommand {
+        world: world.id,
+        parent: world.main,
+        day: WorldDay(10),
+        expected: first,
+        id: Uuid::new_v4(),
+        author: "FTS test".into(),
+        rationale: "Freeze earlier history".into(),
+        scope: Scope::Author,
+    })?;
     let second = store.apply(&command(
         &world,
-        first,
+        fork.created_revision,
         vec![Change::Correct(alice, person("Beatrice Thorne"))],
     ))?;
     assert_eq!(ids(&store, &world, first, "Alice Vale")?.len(), 2);
@@ -111,6 +121,36 @@ fn fts_phrase_indexes_current_version_without_resurrecting_corrections_or_other_
     assert_eq!(ids(&store, &world, second, "Beatrice Thorne")?, vec![alice]);
     let future_hits = store.execute_query(&phrase("Alice Vale"), view(&world, second, 41))?;
     assert_eq!(future_hits.rows.len(), 2);
+    let child = ViewContext {
+        branch: fork.id,
+        ..view(&world, second, 20)
+    };
+    assert_eq!(
+        store.execute_query(&phrase("Alice Vale"), child)?.rows.len(),
+        2,
+        "later main-line corrections must not rewrite a pinned fork"
+    );
+    let invalid = ObjectRef::new(world.id);
+    let faulty = store.apply(&command(
+        &world,
+        second,
+        vec![
+            Change::Correct(alice, person("Eve Deleted")),
+            Change::Create(
+                invalid,
+                Record {
+                    valid: ValidInterval {
+                        start: Some(WorldDay(4)),
+                        end_exclusive: Some(WorldDay(4)),
+                    },
+                    ..person("Invalid record")
+                },
+            ),
+        ],
+    ));
+    assert!(matches!(faulty, Err(Error::InvalidInterval)));
+    assert!(ids(&store, &world, second, "Eve Deleted")?.is_empty());
+    assert_eq!(ids(&store, &world, second, "Beatrice Thorne")?, vec![alice]);
 
     let public = ViewContext {
         scope: Scope::Public,
