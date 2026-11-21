@@ -108,6 +108,7 @@ test("native author form refuses a missing historical day instead of silently sa
             return { day: 0, relationships: [], cause: null };
           }
           if (command === "workspace_worlds") return [world];
+          if (command === "workspace_saved_queries") return [];
           if (command === "workspace_snapshot") {
             return { world, day: 0, view_revision: 0, people, relationships: [], events: [] };
           }
@@ -171,6 +172,7 @@ test("saved world graph follows the author view and submits a specific causing a
             requests.push(payload.request);
             return null;
           }
+          if (command === "workspace_saved_queries") return [];
           if (command === "workspace_snapshot") {
             const later = payload.day >= 10 && payload.revision !== 3;
             return {
@@ -284,6 +286,7 @@ test("native historical search keeps ambiguous identities and navigates the real
           if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
           if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
           if (command === "workspace_worlds") return [world];
+          if (command === "workspace_saved_queries") return [];
           if (command === "workspace_snapshot") return {
             world, day: args.day, view_revision: args.revision ?? 3,
             people, relationships: [], events: [], definitions: [],
@@ -341,6 +344,7 @@ test("native path explorer uses typed direction, hop and visit budgets at the se
           if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
           if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
           if (command === "workspace_worlds") return [world];
+          if (command === "workspace_saved_queries") return [];
           if (command === "workspace_snapshot") return {
             world, day: args.day, view_revision: args.revision ?? 5,
             people, relationships: [], events: [], definitions: [],
@@ -416,6 +420,7 @@ test("historical full-text option invokes indexed label search without client-si
           if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
           if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
           if (command === "workspace_worlds") return [world];
+          if (command === "workspace_saved_queries") return [];
           if (command === "workspace_snapshot") return {
             world, day: args.day, view_revision: args.revision ?? 1,
             people: [{ id: "alice", label: "Alice Vale" }], relationships: [], events: [], definitions: [],
@@ -439,4 +444,76 @@ test("historical full-text option invokes indexed label search without client-si
   const calls = await page.evaluate(() => (window as unknown as { __fulltextCalls: unknown[] }).__fulltextCalls);
   expect(calls).toMatchObject([{ worldId: "world", day: 0, revision: null,
     mode: "fulltext", term: "Alice Vale", limit: 100 }]);
+});
+
+
+test("native author saves, revises and replays historical name searches", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "world", name: "Saved search world", revision: 1 };
+    const alice = { id: "alice", label: "Alice Vale" };
+    const calls: unknown[] = [];
+    const saved: { id: string; name: string; mode: string; term: string; limit: number; recorded_at: number }[] = [];
+    Object.assign(window, {
+      isTauri: true,
+      __savedQueryCalls: calls,
+      __TAURI_INTERNALS__: {
+        invoke: async (command: string, args: Record<string, unknown>) => {
+          if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+          if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+          if (command === "workspace_worlds") return [world];
+          if (command === "workspace_snapshot") return {
+            world: { ...world }, day: args.day, view_revision: args.revision ?? world.revision,
+            people: [alice], relationships: [], events: [], definitions: [],
+          };
+          if (command === "workspace_saved_queries") {
+            return saved.filter(query => query.recorded_at <= (args.revision ?? world.revision));
+          }
+          if (command === "workspace_save_query") {
+            const request = args.request as { expected_revision: number; query_id: string | null; name: string; mode: string; term: string; limit: number };
+            if (request.expected_revision !== world.revision) throw new Error("stale revision");
+            calls.push({ operation: "save", ...request });
+            world.revision++;
+            const query = { id: request.query_id ?? "saved-1", name: request.name, mode: request.mode,
+              term: request.term, limit: request.limit, recorded_at: world.revision };
+            saved.splice(0, saved.length, query);
+            return query.id;
+          }
+          if (command === "workspace_search") {
+            calls.push({ operation: "run", ...args });
+            return { revision: args.revision ?? world.revision, truncated: false,
+              rows: [{ ...alice, kind: "person" }] };
+          }
+          throw new Error("Unexpected mock command: " + command);
+        },
+      },
+    });
+  });
+  await page.goto("/");
+  const searchForm = page.locator("#author-query-form");
+  const savedForm = page.locator("#author-save-query-form");
+  await searchForm.getByLabel("Find name").fill("Alice Vale");
+  await searchForm.getByLabel("Match names").selectOption("fulltext");
+  await savedForm.getByLabel("Saved search name").fill("Find Alice");
+  await savedForm.getByRole("button", { name: "Save search definition" }).click();
+  await expect(page.locator("#author-query-status")).toContainText("Saved search definition");
+  await expect(savedForm.locator('select[name="query_id"]')).toHaveValue("saved-1");
+  await savedForm.getByRole("button", { name: "Run saved search" }).click();
+  await expect(page.locator("#author-query-results").getByRole("button", { name: /^Alice Vale ·/ })).toBeVisible();
+  const revision = page.locator("#author-revision");
+  await revision.fill("1");
+  await revision.blur();
+  await expect(savedForm.locator('select[name="query_id"]')).toHaveValue("");
+  await expect(savedForm.getByRole("button", { name: "Save search definition" })).toBeDisabled();
+  await revision.fill("");
+  await revision.blur();
+  await savedForm.locator('select[name="query_id"]').selectOption("saved-1");
+  await savedForm.getByLabel("Saved search name").fill("Find Alice corrected");
+  await savedForm.getByRole("button", { name: "Save search definition" }).click();
+  await expect(page.locator("#author-query-status")).toContainText("Saved search definition");
+  const calls = await page.evaluate(() => (window as unknown as { __savedQueryCalls: unknown[] }).__savedQueryCalls);
+  expect(calls).toMatchObject([
+    { operation: "save", expected_revision: 1, query_id: null, name: "Find Alice", mode: "fulltext", term: "Alice Vale" },
+    { operation: "run", worldId: "world", mode: "fulltext", term: "Alice Vale", limit: 100 },
+    { operation: "save", expected_revision: 2, query_id: "saved-1", name: "Find Alice corrected" },
+  ]);
 });

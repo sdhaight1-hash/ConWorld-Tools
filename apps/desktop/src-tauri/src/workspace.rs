@@ -8,7 +8,7 @@ use atlas_store::{
     ActionOutcome, AuthorRevision, Change, ClaimAudience, Command, Definition, EventDate,
     EventRole, ObjectData, ObjectId, ObjectRef, Record, Scope, Store, ValidInterval, ViewContext,
     World, WorldDay, WorldId,
-    query::{Direction, QUERY_SCHEMA_VERSION, QueryFilter, QuerySpec},
+    query::{Direction, QUERY_SCHEMA_VERSION, QueryFilter, QuerySpec, SaveNamedLabelQuery},
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -36,6 +36,27 @@ pub struct PathQueryInput {
     max_depth: u8,
     max_visited: usize,
     limit: usize,
+}
+
+#[derive(Deserialize)]
+pub struct SavedQueryInput {
+    world_id: String,
+    expected_revision: i64,
+    query_id: Option<String>,
+    name: String,
+    mode: String,
+    term: String,
+    limit: usize,
+}
+
+#[derive(Serialize)]
+pub struct SavedQuerySummary {
+    id: String,
+    name: String,
+    mode: &'static str,
+    term: String,
+    limit: usize,
+    recorded_at: i64,
 }
 
 #[derive(Serialize)]
@@ -351,6 +372,71 @@ impl AuthorWorkspace {
             .create_world(&name, Scope::Author)
             .map(summary)
             .map_err(|error| error.to_string())
+    }
+
+    fn saved_queries(
+        &self,
+        world_id: &str,
+        revision: Option<i64>,
+    ) -> Result<Vec<SavedQuerySummary>, String> {
+        let store = self.lock()?;
+        let world = store
+            .world(WorldId(id(world_id)?), Scope::Author)
+            .map_err(|error| error.to_string())?;
+        let queries = store
+            .saved_label_queries(
+                world.id,
+                AuthorRevision(revision.unwrap_or(world.revision.0)),
+                Scope::Author,
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(queries
+            .into_iter()
+            .map(|query| {
+                let (mode, term) = match query.spec.filter {
+                    QueryFilter::LabelContains(term) => ("contains", term),
+                    QueryFilter::ExactLabel(term) => ("exact", term),
+                    QueryFilter::FullTextPhrase(term) => ("fulltext", term),
+                    _ => unreachable!("only supported label filters are persisted"),
+                };
+                SavedQuerySummary {
+                    id: query.id.to_string(),
+                    name: query.name,
+                    mode,
+                    term,
+                    limit: query.spec.limit,
+                    recorded_at: query.recorded_at.0,
+                }
+            })
+            .collect())
+    }
+
+    fn save_query(&self, request: SavedQueryInput) -> Result<String, String> {
+        let filter = match request.mode.as_str() {
+            "contains" => QueryFilter::LabelContains(request.term),
+            "exact" => QueryFilter::ExactLabel(request.term),
+            "fulltext" => QueryFilter::FullTextPhrase(request.term),
+            _ => return Err("Only name and indexed phrase searches can be saved".into()),
+        };
+        let spec = QuerySpec {
+            schema_version: QUERY_SCHEMA_VERSION,
+            filter,
+            limit: request.limit,
+        };
+        let query_id = request.query_id.as_deref().map(id).transpose()?;
+        let mut store = self.lock()?;
+        let saved = store
+            .save_named_label_query(SaveNamedLabelQuery {
+                world_id: WorldId(id(&request.world_id)?),
+                expected: AuthorRevision(request.expected_revision),
+                query_id,
+                name: &request.name,
+                spec: &spec,
+                command_id: Uuid::new_v4(),
+                scope: Scope::Author,
+            })
+            .map_err(|error| error.to_string())?;
+        Ok(saved.id.to_string())
     }
 
     fn search(
@@ -1290,6 +1376,23 @@ pub fn workspace_query_path(
     request: PathQueryInput,
 ) -> Result<SearchSummary, String> {
     workspace.query_path(request)
+}
+
+#[tauri::command]
+pub fn workspace_saved_queries(
+    workspace: State<'_, AuthorWorkspace>,
+    world_id: String,
+    revision: Option<i64>,
+) -> Result<Vec<SavedQuerySummary>, String> {
+    workspace.saved_queries(&world_id, revision)
+}
+
+#[tauri::command]
+pub fn workspace_save_query(
+    workspace: State<'_, AuthorWorkspace>,
+    request: SavedQueryInput,
+) -> Result<String, String> {
+    workspace.save_query(request)
 }
 
 #[tauri::command]

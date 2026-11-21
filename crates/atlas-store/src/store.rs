@@ -6,10 +6,13 @@ use std::time::Duration;
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use uuid::Uuid;
 
+use crate::query::{
+    QUERY_SCHEMA_VERSION, QueryFilter, QuerySpec, SaveNamedLabelQuery, SavedLabelQuery,
+};
 use crate::*;
 
 pub(crate) const APPLICATION_ID: i64 = 0x4357_4c44; // CWLD
-pub(crate) const SCHEMA_VERSION: i64 = 8;
+pub(crate) const SCHEMA_VERSION: i64 = 9;
 
 pub struct Store {
     conn: Connection,
@@ -63,6 +66,9 @@ impl Store {
         }
         if version < 8 {
             tx.execute_batch(include_str!("../migrations/0008.sql"))?;
+        }
+        if version < 9 {
+            tx.execute_batch(include_str!("../migrations/0009.sql"))?;
             verify_foreign_keys(&tx)?;
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
@@ -182,6 +188,168 @@ impl Store {
             revision: view.revision,
             truncated,
         })
+    }
+
+    /// Save one of the accepted textual QuerySpec filters as append-only author
+    /// metadata. The query definition has a stable ID and its own author history.
+    pub fn save_named_label_query(
+        &mut self,
+        request: SaveNamedLabelQuery<'_>,
+    ) -> Result<SavedLabelQuery, Error> {
+        let SaveNamedLabelQuery {
+            world_id,
+            expected,
+            query_id,
+            name,
+            spec,
+            command_id,
+            scope,
+        } = request;
+        require_author(scope)?;
+        let name = name.trim();
+        if name.is_empty() || name.len() > 200 {
+            return Err(Error::InvalidInput("saved query name"));
+        }
+        if spec.schema_version != QUERY_SCHEMA_VERSION || !(1..=500).contains(&spec.limit) {
+            return Err(Error::InvalidInput("saved query schema or limit"));
+        }
+        let (kind, term) = match &spec.filter {
+            QueryFilter::LabelContains(text) => ("contains", text.as_str()),
+            QueryFilter::ExactLabel(text) => ("exact", text.as_str()),
+            QueryFilter::FullTextPhrase(text) => ("fulltext", text.as_str()),
+            _ => return Err(Error::InvalidInput("unsupported saved query filter")),
+        };
+        let term = term.trim();
+        if term.is_empty() || term.len() > 800 {
+            return Err(Error::InvalidInput("saved query search term"));
+        }
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let world = load_world(&tx, world_id)?;
+        let id = query_id.unwrap_or_else(Uuid::new_v4);
+        if query_id.is_some() {
+            let exists: bool = tx.query_row(
+                "SELECT EXISTS(
+                    SELECT 1 FROM saved_queries WHERE world_id = ?1 AND id = ?2
+                )",
+                params![world_id.0.as_bytes(), id.as_bytes()],
+                |row| row.get(0),
+            )?;
+            if !exists {
+                return Err(Error::NotFound);
+            }
+        }
+        let revision = append_revision(
+            &tx,
+            &world,
+            world.main,
+            expected,
+            command_id,
+            ("Local author", "Save versioned label query"),
+        )?;
+        if query_id.is_none() {
+            tx.execute(
+                "INSERT INTO saved_queries (world_id, id) VALUES (?1, ?2)",
+                params![world_id.0.as_bytes(), id.as_bytes()],
+            )?;
+        }
+        tx.execute(
+            "INSERT INTO saved_query_versions
+             (world_id, query_id, revision, name, schema_version,
+              filter_kind, filter_text, result_limit)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                world_id.0.as_bytes(),
+                id.as_bytes(),
+                revision,
+                name,
+                i64::from(spec.schema_version),
+                kind,
+                term,
+                spec.limit as i64
+            ],
+        )?;
+        tx.commit()?;
+        Ok(SavedLabelQuery {
+            id,
+            name: name.into(),
+            spec: QuerySpec {
+                filter: match kind {
+                    "contains" => QueryFilter::LabelContains(term.into()),
+                    "exact" => QueryFilter::ExactLabel(term.into()),
+                    _ => QueryFilter::FullTextPhrase(term.into()),
+                },
+                ..spec.clone()
+            },
+            recorded_at: AuthorRevision(revision),
+        })
+    }
+
+    /// Show only definitions known at the selected recorded/author revision.
+    /// The actual rows of each query are always resolved when it is executed.
+    pub fn saved_label_queries(
+        &self,
+        world_id: WorldId,
+        revision: AuthorRevision,
+        scope: Scope,
+    ) -> Result<Vec<SavedLabelQuery>, Error> {
+        require_author(scope)?;
+        let tx = self.conn.unchecked_transaction()?;
+        let world = load_world(&tx, world_id)?;
+        if revision < AuthorRevision(0) || revision > world.revision {
+            return Err(Error::InvalidRevision);
+        }
+        let records = {
+            let mut statement = tx.prepare(
+                "SELECT q.query_id, q.name, q.schema_version, q.filter_kind,
+                        q.filter_text, q.result_limit, q.revision
+                 FROM saved_query_versions q
+                 WHERE q.world_id = ?1 AND q.revision = (
+                     SELECT MAX(prev.revision) FROM saved_query_versions prev
+                     WHERE prev.world_id = q.world_id AND prev.query_id = q.query_id
+                       AND prev.revision <= ?2
+                 )
+                 ORDER BY q.name, q.query_id",
+            )?;
+            statement
+                .query_map(params![world_id.0.as_bytes(), revision.0], |row| {
+                    Ok((
+                        Uuid::from_bytes(row.get(0)?),
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, i64>(5)?,
+                        row.get::<_, i64>(6)?,
+                    ))
+                })?
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        let mut result = Vec::new();
+        for (id, name, schema, kind, term, limit, recorded_at) in records {
+            if schema != i64::from(QUERY_SCHEMA_VERSION) || !(1..=500).contains(&limit) {
+                return Err(Error::InvalidInput("saved query schema or limit"));
+            }
+            let filter = match kind.as_str() {
+                "contains" => QueryFilter::LabelContains(term),
+                "exact" => QueryFilter::ExactLabel(term),
+                "fulltext" => QueryFilter::FullTextPhrase(term),
+                _ => return Err(Error::InvalidInput("saved query filter kind")),
+            };
+            result.push(SavedLabelQuery {
+                id,
+                name,
+                spec: QuerySpec {
+                    schema_version: QUERY_SCHEMA_VERSION,
+                    filter,
+                    limit: limit as usize,
+                },
+                recorded_at: AuthorRevision(recorded_at),
+            });
+        }
+        tx.commit()?;
+        Ok(result)
     }
 
     pub fn create_world(&mut self, name: &str, scope: Scope) -> Result<World, Error> {
