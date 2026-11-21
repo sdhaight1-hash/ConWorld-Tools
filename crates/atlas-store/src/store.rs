@@ -6,7 +6,9 @@ use std::time::Duration;
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use uuid::Uuid;
 
-use crate::query::{QUERY_SCHEMA_VERSION, QueryFilter, QuerySpec, SaveNamedLabelQuery, SavedLabelQuery};
+use crate::query::{
+    QUERY_SCHEMA_VERSION, QueryFilter, QuerySpec, SaveNamedLabelQuery, SavedLabelQuery,
+};
 use crate::*;
 
 pub(crate) const APPLICATION_ID: i64 = 0x4357_4c44; // CWLD
