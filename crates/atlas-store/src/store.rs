@@ -323,15 +323,27 @@ impl Store {
                                 return Err(Error::WrongWorld);
                             }
                             if *action == object {
-                                return Err(Error::InvalidInput("action cannot cause its own state change"));
+                                return Err(Error::InvalidInput(
+                                    "action cannot cause its own state change",
+                                ));
                             }
-                            let version = resolve_object(&tx, *action, branch, AuthorRevision(revision), day)?
-                                .ok_or(Error::NotFound)?;
+                            let version = resolve_object(
+                                &tx,
+                                *action,
+                                branch,
+                                AuthorRevision(revision),
+                                day,
+                            )?
+                            .ok_or(Error::NotFound)?;
                             match &version.record.data {
-                                ObjectData::ActorAction { event: action_event, .. }
-                                    if *action_event == *event => Some(version.reference()),
+                                ObjectData::ActorAction {
+                                    event: action_event,
+                                    ..
+                                } if *action_event == *event => Some(version.reference()),
                                 ObjectData::ActorAction { .. } => {
-                                    return Err(Error::InvalidInput("action belongs to another event"));
+                                    return Err(Error::InvalidInput(
+                                        "action belongs to another event",
+                                    ));
                                 }
                                 _ => return Err(Error::WrongKind),
                             }
@@ -372,9 +384,16 @@ impl Store {
                          (world_id, target_id, branch_id, effect_revision,
                           action_id, action_branch, action_state_revision, action_revision)
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                        params![object.world.0.as_bytes(), object.id.0.as_bytes(), branch.0.as_bytes(),
-                            revision, action.object.id.0.as_bytes(), action.branch.0.as_bytes(),
-                            action.state_revision.0, action.recorded_at.0],
+                        params![
+                            object.world.0.as_bytes(),
+                            object.id.0.as_bytes(),
+                            branch.0.as_bytes(),
+                            revision,
+                            action.object.id.0.as_bytes(),
+                            action.branch.0.as_bytes(),
+                            action.state_revision.0,
+                            action.recorded_at.0
+                        ],
                     )?;
                 }
             }
@@ -419,8 +438,10 @@ impl Store {
             return Ok(None);
         };
         // Corrections retain the provenance of the state they update.
-        Ok(self.conn.query_row(
-            "SELECT e.event_id, e.event_branch, e.event_state_revision, e.event_revision,
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT e.event_id, e.event_branch, e.event_state_revision, e.event_revision,
                     e.before_branch, e.before_state_revision, e.before_revision, e.day,
                     a.action_id, a.action_branch, a.action_state_revision, a.action_revision
              FROM historical_effects AS e
@@ -428,31 +449,52 @@ impl Store {
                 ON a.world_id = e.world_id AND a.target_id = e.target_id
                 AND a.branch_id = e.branch_id AND a.effect_revision = e.revision
              WHERE e.world_id = ?1 AND e.target_id = ?2 AND e.branch_id = ?3 AND e.revision = ?4",
-            params![target.world.0.as_bytes(), target.id.0.as_bytes(), after.branch.0.as_bytes(), after.state_revision.0],
-            |row| Ok(HistoricalEffect {
-                event: VersionRef {
-                    object: ObjectRef { world: target.world, id: ObjectId(Uuid::from_bytes(row.get(0)?)) },
-                    branch: BranchId(Uuid::from_bytes(row.get(1)?)),
-                    state_revision: AuthorRevision(row.get(2)?),
-                    recorded_at: AuthorRevision(row.get(3)?),
-                },
-                before: VersionRef {
-                    object: target, branch: BranchId(Uuid::from_bytes(row.get(4)?)),
-                    state_revision: AuthorRevision(row.get(5)?),
-                    recorded_at: AuthorRevision(row.get(6)?),
-                },
-                after: VersionRef { recorded_at: after.state_revision, ..after },
-                day: WorldDay(row.get(7)?),
-                action: row.get::<_, Option<[u8; 16]>>(8)?.map(|id| {
-                    Ok::<_, rusqlite::Error>(VersionRef {
-                        object: ObjectRef { world: target.world, id: ObjectId(Uuid::from_bytes(id)) },
-                        branch: BranchId(Uuid::from_bytes(row.get(9)?)),
-                        state_revision: AuthorRevision(row.get(10)?),
-                        recorded_at: AuthorRevision(row.get(11)?),
+                params![
+                    target.world.0.as_bytes(),
+                    target.id.0.as_bytes(),
+                    after.branch.0.as_bytes(),
+                    after.state_revision.0
+                ],
+                |row| {
+                    Ok(HistoricalEffect {
+                        event: VersionRef {
+                            object: ObjectRef {
+                                world: target.world,
+                                id: ObjectId(Uuid::from_bytes(row.get(0)?)),
+                            },
+                            branch: BranchId(Uuid::from_bytes(row.get(1)?)),
+                            state_revision: AuthorRevision(row.get(2)?),
+                            recorded_at: AuthorRevision(row.get(3)?),
+                        },
+                        before: VersionRef {
+                            object: target,
+                            branch: BranchId(Uuid::from_bytes(row.get(4)?)),
+                            state_revision: AuthorRevision(row.get(5)?),
+                            recorded_at: AuthorRevision(row.get(6)?),
+                        },
+                        after: VersionRef {
+                            recorded_at: after.state_revision,
+                            ..after
+                        },
+                        day: WorldDay(row.get(7)?),
+                        action: row
+                            .get::<_, Option<[u8; 16]>>(8)?
+                            .map(|id| {
+                                Ok::<_, rusqlite::Error>(VersionRef {
+                                    object: ObjectRef {
+                                        world: target.world,
+                                        id: ObjectId(Uuid::from_bytes(id)),
+                                    },
+                                    branch: BranchId(Uuid::from_bytes(row.get(9)?)),
+                                    state_revision: AuthorRevision(row.get(10)?),
+                                    recorded_at: AuthorRevision(row.get(11)?),
+                                })
+                            })
+                            .transpose()?,
                     })
-                }).transpose()?,
-            }),
-        ).optional()?)
+                },
+            )
+            .optional()?)
     }
 
     pub fn verify_foreign_keys(&self, scope: Scope) -> Result<(), Error> {
@@ -810,7 +852,9 @@ fn apply_change(
         }
         if current.is_none() {
             new_override = Some(match change {
-                Change::RecordState(..) | Change::EventEffect { .. } | Change::ActionEffect { .. } => {
+                Change::RecordState(..)
+                | Change::EventEffect { .. }
+                | Change::ActionEffect { .. } => {
                     record.valid.start.ok_or(Error::InvalidInterval)?
                 }
                 _ => fork.day,
@@ -830,7 +874,10 @@ fn apply_change(
             }
             state
         }
-        (Change::RecordState(..) | Change::EventEffect { .. } | Change::ActionEffect { .. }, Some((state, mut previous))) => {
+        (
+            Change::RecordState(..) | Change::EventEffect { .. } | Change::ActionEffect { .. },
+            Some((state, mut previous)),
+        ) => {
             let start = record.valid.start.ok_or(Error::InvalidInterval)?;
             if previous
                 .record
