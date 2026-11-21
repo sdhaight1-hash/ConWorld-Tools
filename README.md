@@ -65,7 +65,7 @@ The native Node author workspace supports historical label and relationship quer
 
 ### Phase Three typed combined filters
 
-Node Studio's historical author search also supports a bounded **combined query builder**: select a record kind, optional name text and/or an exact cited source identity, combine predicates with AND/OR and invert with NOT. The Rust query engine validates nested typed predicates before execution, obeying the selected world, branch, day, author revision and permission scope. Nested indexed full-text, backlinks and graph paths are intentionally rejected until a permission-safe candidate-set planner exists. Combined queries currently scan a bounded 2,000-object author snapshot and are not yet persisted as named reusable typed queries.
+Node Studio's historical author search also supports a bounded **combined query builder**: select a record kind, optional name text and/or an exact cited source identity, combine predicates with AND/OR and invert with NOT. The Rust query engine validates nested typed predicates before execution, obeying the selected world, branch, day, author revision and permission scope. Nested indexed full-text, backlinks and graph paths are intentionally rejected until a permission-safe candidate-set planner exists. Combined queries scan a bounded 2,000-object author snapshot and **can be saved as versioned typed query definitions** alongside name and claim-text searches. Replaying them reevaluates the current historical view; only the definition is stored, never cached results.
 
 ### Development screenshots and video evidence
 

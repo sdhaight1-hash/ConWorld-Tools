@@ -839,3 +839,91 @@ test("native author composes bounded kind/source/name predicates and clears stal
   await form.getByRole("button", { name: "Run combined query" }).click();
   await expect(page.locator("#author-query-status")).toContainText("author revision 2");
 });
+
+
+test("native author saves and replays the exact versioned composite AST", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "world", name: "Typed query history", revision: 2 };
+    const saved: { id: string; name: string; mode: string; term: string; predicate?: unknown; limit: number; recorded_at: number }[] = [];
+    const calls: unknown[] = [];
+    Object.assign(window, {
+      isTauri: true,
+      __savedCompositeCalls: calls,
+      __TAURI_INTERNALS__: {
+        invoke: async (command: string, args: Record<string, unknown>) => {
+          if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+          if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+          if (command === "workspace_worlds") return [world];
+          if (command === "workspace_snapshot") return {
+            world: { ...world }, day: args.day, view_revision: args.revision ?? world.revision,
+            people: [], relationships: [], events: [], definitions: [],
+          };
+          if (command === "workspace_saved_queries") {
+            return saved.filter(item => item.recorded_at <= (args.revision ?? world.revision));
+          }
+          if (command === "workspace_save_query") {
+            const request = args.request as { expected_revision: number; name: string; query_id: string | null;
+              mode: string; term: string; predicate?: unknown; limit: number };
+            if (request.expected_revision !== world.revision) throw new Error("stale author revision");
+            calls.push({ operation: "save", ...request });
+            world.revision++;
+            const result = { id: request.query_id ?? "saved-ast", name: request.name, mode: request.mode,
+              term: request.term, predicate: request.predicate, limit: request.limit,
+              recorded_at: world.revision };
+            saved.splice(0, saved.length, result);
+            return result.id;
+          }
+          if (command === "workspace_composite_query") {
+            calls.push({ operation: "replay", ...args });
+            return { revision: (args.request as { revision: number | null }).revision ?? world.revision,
+              truncated: false,
+              rows: [{ id: "claim", label: "Diary entry", kind: "claim",
+                statement: "The ledger was moved.", source_citation: "Source 88" }] };
+          }
+          throw new Error("Unexpected mock command: " + command);
+        },
+      },
+    });
+  });
+  await page.goto("/");
+  const filter = page.locator("#author-composite-form");
+  const saved = page.locator("#author-save-query-form");
+  const sourceId = "00000000-0000-4000-8000-000000000001";
+  await filter.getByLabel("Label contains").fill("Diary");
+  await filter.getByLabel("Object kind").selectOption("claim");
+  await filter.getByLabel("Has cited source ID").fill(sourceId);
+  await filter.getByLabel("Combine selected filters").selectOption("and");
+  await saved.getByLabel("Saved search name").fill("Evidence diary");
+  await saved.getByRole("button", { name: "Save combined query" }).click();
+  await expect(page.locator("#author-query-status")).toContainText("Saved combined query definition");
+  await expect(saved.locator('select[name="query_id"]')).toHaveValue("saved-ast");
+  await filter.getByLabel("Label contains").fill("CHANGED UNSAVED FORM");
+  await saved.getByRole("button", { name: "Run saved search" }).click();
+  const matches = page.locator("#author-query-results li");
+  await expect(matches).toHaveCount(1);
+  await expect(matches).toContainText("Source 88");
+  const calls = await page.evaluate(() => (window as unknown as { __savedCompositeCalls: unknown[] }).__savedCompositeCalls);
+  const predicate = { op: "and", filters: [
+    { op: "contains", text: "Diary" },
+    { op: "object_kind", kind: "claim" },
+    { op: "has_source", source_id: sourceId },
+  ] };
+  expect(calls).toMatchObject([
+    { operation: "save", expected_revision: 2, query_id: null,
+      mode: "composite", predicate, term: "", name: "Evidence diary" },
+    { operation: "replay", request: {
+      world_id: "world", day: 0, revision: null, predicate, limit: 100,
+    } },
+  ]);
+  const revision = page.locator("#author-revision");
+  await revision.fill("2");
+  await revision.blur();
+  await expect(matches).toHaveCount(0);
+  await expect(saved.locator('select[name="query_id"]')).toHaveValue("");
+  await expect(saved.getByRole("button", { name: "Save combined query" })).toBeDisabled();
+  await revision.fill("");
+  await revision.blur();
+  await saved.locator('select[name="query_id"]').selectOption("saved-ast");
+  await saved.getByRole("button", { name: "Run saved search" }).click();
+  await expect(matches).toHaveCount(1);
+});

@@ -1,4 +1,5 @@
 //! Phase 3 typed reads over a single authorized historical snapshot.
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
@@ -51,7 +52,8 @@ pub enum QueryFilter {
 }
 
 /// Allowlisted record kinds for author-only historical predicates.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ObjectKindFilter {
     Person,
     Definition,
@@ -61,6 +63,99 @@ pub enum ObjectKindFilter {
     HistoricalEvent,
     Source,
     Claim,
+}
+
+/// Versioned, allowlisted wire/persistence shape for composite predicates.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PredicateInput {
+    Contains { text: String },
+    Exact { text: String },
+    ObjectKind { kind: ObjectKindFilter },
+    HasSource { source_id: String },
+    And { filters: Vec<PredicateInput> },
+    Or { filters: Vec<PredicateInput> },
+    Not { filter: Box<PredicateInput> },
+}
+
+impl PredicateInput {
+    /// Decode a typed predicate with the same depth/node rules as the
+    /// authoritative planner. Only its exact saved world supplies references.
+    pub fn into_filter(
+        self,
+        world: WorldId,
+        depth: usize,
+        nodes: &mut usize,
+    ) -> Result<QueryFilter, Error> {
+        *nodes += 1;
+        if depth > MAX_PREDICATE_DEPTH || *nodes > MAX_PREDICATE_NODES {
+            return Err(Error::QueryBudgetExceeded);
+        }
+        Ok(match self {
+            Self::Contains { text } => QueryFilter::LabelContains(text),
+            Self::Exact { text } => QueryFilter::ExactLabel(text),
+            Self::ObjectKind { kind } => QueryFilter::Kind(kind),
+            Self::HasSource { source_id } => QueryFilter::HasSource(ObjectRef {
+                world,
+                id: crate::ObjectId(
+                    Uuid::parse_str(&source_id)
+                        .map_err(|_| Error::InvalidInput("predicate source ID"))?,
+                ),
+            }),
+            Self::And { filters } | Self::Or { filters }
+                if filters.len() > MAX_BOOLEAN_CHILDREN =>
+            {
+                return Err(Error::QueryBudgetExceeded);
+            }
+            Self::And { filters } | Self::Or { filters } if filters.len() < 2 => {
+                return Err(Error::InvalidInput("boolean predicate children"));
+            }
+            Self::And { filters } => QueryFilter::And(
+                filters
+                    .into_iter()
+                    .map(|item| item.into_filter(world, depth + 1, nodes))
+                    .collect::<Result<Vec<_>, _>>()?,
+            ),
+            Self::Or { filters } => QueryFilter::Or(
+                filters
+                    .into_iter()
+                    .map(|item| item.into_filter(world, depth + 1, nodes))
+                    .collect::<Result<Vec<_>, _>>()?,
+            ),
+            Self::Not { filter } => {
+                QueryFilter::Not(Box::new(filter.into_filter(world, depth + 1, nodes)?))
+            }
+        })
+    }
+
+    /// Encode only the allowed snapshot predicates; no raw SQL or nested
+    /// full-text/graph execution can be introduced through saved metadata.
+    pub fn from_filter(filter: &QueryFilter) -> Result<Self, Error> {
+        Ok(match filter {
+            QueryFilter::LabelContains(text) => Self::Contains { text: text.clone() },
+            QueryFilter::ExactLabel(text) => Self::Exact { text: text.clone() },
+            QueryFilter::Kind(kind) => Self::ObjectKind { kind: *kind },
+            QueryFilter::HasSource(source) => Self::HasSource {
+                source_id: source.id.0.to_string(),
+            },
+            QueryFilter::And(filters) => Self::And {
+                filters: filters
+                    .iter()
+                    .map(Self::from_filter)
+                    .collect::<Result<Vec<_>, _>>()?,
+            },
+            QueryFilter::Or(filters) => Self::Or {
+                filters: filters
+                    .iter()
+                    .map(Self::from_filter)
+                    .collect::<Result<Vec<_>, _>>()?,
+            },
+            QueryFilter::Not(filter) => Self::Not {
+                filter: Box::new(Self::from_filter(filter)?),
+            },
+            _ => return Err(Error::InvalidInput("unsupported saved predicate")),
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -117,7 +212,7 @@ impl Store {
                 | QueryFilter::Not(_)
         ) {
             let mut nodes = 0;
-            validate_predicate(&spec.filter, view, 0, &mut nodes)?;
+            validate_predicate(&spec.filter, view.world, 0, &mut nodes)?;
             let objects = self.objects_at(view, 2_000)?;
             let visible: HashSet<_> = objects.iter().map(|item| item.object).collect();
             let mut rows: Vec<_> = objects
@@ -303,9 +398,9 @@ const MAX_PREDICATE_DEPTH: usize = 4;
 const MAX_BOOLEAN_CHILDREN: usize = 8;
 
 /// Validate all children before short-circuiting, including those under NOT.
-fn validate_predicate(
+pub(crate) fn validate_predicate(
     filter: &QueryFilter,
-    view: ViewContext,
+    world: WorldId,
     depth: usize,
     nodes: &mut usize,
 ) -> Result<(), Error> {
@@ -318,7 +413,11 @@ fn validate_predicate(
             search_label(label)?;
         }
         QueryFilter::Kind(_) => {}
-        QueryFilter::HasSource(source) => same_world(*source, view)?,
+        QueryFilter::HasSource(source) => {
+            if source.world != world {
+                return Err(Error::WrongWorld);
+            }
+        }
         QueryFilter::And(children) | QueryFilter::Or(children) => {
             if children.len() > MAX_BOOLEAN_CHILDREN {
                 return Err(Error::QueryBudgetExceeded);
@@ -327,10 +426,10 @@ fn validate_predicate(
                 return Err(Error::InvalidInput("boolean predicate children"));
             }
             for child in children {
-                validate_predicate(child, view, depth + 1, nodes)?;
+                validate_predicate(child, world, depth + 1, nodes)?;
             }
         }
-        QueryFilter::Not(inner) => validate_predicate(inner, view, depth + 1, nodes)?,
+        QueryFilter::Not(inner) => validate_predicate(inner, world, depth + 1, nodes)?,
         _ => return Err(Error::InvalidInput("unsupported nested query predicate")),
     }
     Ok(())
