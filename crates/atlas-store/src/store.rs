@@ -215,7 +215,7 @@ impl Store {
                     version.state_revision.0,
                     version.recorded_at.0,
                 ))
-                && (!claims_only || matches!(version.record.data, ObjectData::Claim { .. }))
+                && (!claims_only || matches!(&version.record.data, ObjectData::Claim { .. }))
             {
                 rows.push(version);
             }
