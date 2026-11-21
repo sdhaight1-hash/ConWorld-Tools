@@ -180,6 +180,7 @@ fn main() {
             workspace::workspace_create_world,
             workspace::workspace_snapshot,
             workspace::workspace_search,
+            workspace::workspace_discover_mentions,
             workspace::workspace_saved_queries,
             workspace::workspace_save_query,
             workspace::workspace_query_path,

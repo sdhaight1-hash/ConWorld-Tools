@@ -24,6 +24,10 @@ type Definition = { id: string; label: string; category: "relationship" | "tag" 
 type EvidenceStatement = { statement: string; source: string | null; audience: string | null; reader_id: string | null };
 type SearchResult = { revision: number; truncated: boolean; rows: { id: string; label: string; kind: string }[] };
 type SavedQuery = { id: string; name: string; mode: "contains" | "exact" | "fulltext"; term: string; limit: number; recorded_at: number };
+type MentionDiscovery = { revision: number; truncated: boolean; rows: {
+  source_id: string; source_revision: number; source_label: string; statement: string;
+  target_id: string; target_label: string; start_byte: number; end_byte: number; collisions: number;
+}[] };
 type Snapshot = {
   world: World; day: number; view_revision: number;
   people: Person[]; relationships: Relationship[]; events: Event[]; definitions: Definition[];
@@ -115,6 +119,9 @@ export async function showAuthorWorkspace(
   const savedSelect = saveQueryForm.elements.namedItem("query_id") as HTMLSelectElement;
   const pathForm = document.querySelector<HTMLFormElement>("#author-path-form")!;
   const queryResults = document.querySelector<HTMLUListElement>("#author-query-results")!;
+  const discoverButton = document.querySelector<HTMLButtonElement>("#author-discover-mentions")!;
+  const discoveryStatus = document.querySelector<HTMLElement>("#author-discovery-status")!;
+  const discoveryResults = document.querySelector<HTMLUListElement>("#author-discovery-results")!;
   const queryStatus = document.querySelector<HTMLElement>("#author-query-status")!;
   const graph = document.querySelector<HTMLElement>("#workspace")!;
   const history = document.querySelector<HTMLElement>("#history")!;
@@ -154,6 +161,7 @@ export async function showAuthorWorkspace(
   let snapshot: Snapshot | undefined;
   let requestSequence = 0;
   let querySequence = 0;
+  let discoverySequence = 0;
   let saving = false;
   let selectedEvent: Event | undefined;
   let people: Option[] = [];
@@ -195,6 +203,7 @@ export async function showAuthorWorkspace(
     for (const control of [worldSelect, dayInput, revisionInput]) control.disabled = saving;
     worldForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = saving;
     queryForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = !snapshot || saving;
+    discoverButton.disabled = !snapshot || saving;
     saveQueryForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = blocked;
     runSavedQuery.disabled = !snapshot || !savedSelect.value || saving;
     pathForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = !snapshot || !people.length || saving;
@@ -422,6 +431,9 @@ export async function showAuthorWorkspace(
   async function refresh() {
     const sequence = ++requestSequence;
     ++querySequence;
+    ++discoverySequence;
+    discoveryResults.replaceChildren();
+    discoveryStatus.textContent = "Choose Find possible mentions to scan this historical view.";
     queryResults.replaceChildren();
     queryStatus.textContent = "Search the selected world, historical day, and author revision.";
     const worldId = worldSelect.value;
@@ -573,6 +585,56 @@ export async function showAuthorWorkspace(
       }
     })();
   }
+
+  discoverButton.addEventListener("click", () => {
+    if (!snapshot || saving) return;
+    const worldId = snapshot.world.id;
+    const day = snapshot.day;
+    const revision = selectedRevision();
+    const sequence = ++discoverySequence;
+    discoveryResults.replaceChildren();
+    discoveryStatus.textContent = "Checking source statements for possible names…";
+    void (async () => {
+      try {
+        const result = await invoke<MentionDiscovery>("workspace_discover_mentions", {
+          worldId, day, revision, limit: 100,
+        });
+        if (sequence !== discoverySequence || !snapshot) return;
+        const visiblePeople = new Set(snapshot.people.map((person) => person.id));
+        for (const candidate of result.rows) {
+          const item = document.createElement("li");
+          const name = document.createElement("p");
+          name.textContent = "Candidate: " + candidate.target_label + " · " + candidate.target_id +
+            " · " + candidate.collisions + " possible identity/identities for this occurrence";
+          const provenance = document.createElement("p");
+          provenance.className = "hint";
+          provenance.textContent = "From claim " + candidate.source_label + " · " + candidate.source_id +
+            " · author revision " + candidate.source_revision +
+            " · bytes " + candidate.start_byte + "–" + candidate.end_byte;
+          const excerpt = document.createElement("blockquote");
+          excerpt.textContent = candidate.statement;
+          const caution = document.createElement("p");
+          caution.className = "hint";
+          caution.textContent = "Candidate only — no hyperlink, membership, or relationship recorded.";
+          item.append(name, provenance, excerpt, caution);
+          if (visiblePeople.has(candidate.target_id)) {
+            const inspect = document.createElement("button");
+            inspect.type = "button";
+            inspect.textContent = "Inspect candidate person";
+            inspect.addEventListener("click", () => selectNode(candidate.target_id));
+            item.append(inspect);
+          }
+          discoveryResults.append(item);
+        }
+        discoveryStatus.textContent = result.rows.length + " possible name candidate(s) at author revision " +
+          result.revision + (result.truncated ? " · more candidates exist; results are limited." : "");
+      } catch (error) {
+        if (sequence === discoverySequence) {
+          discoveryStatus.textContent = "Discovery failed: " + String(error);
+        }
+      }
+    })();
+  });
 
   function runSearch(mode: string, term: string, limit = 100) {
     if (!snapshot || saving) return;

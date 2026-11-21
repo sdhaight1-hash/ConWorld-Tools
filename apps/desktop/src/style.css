@@ -109,6 +109,12 @@ button:disabled { opacity: 0.55; cursor: default; }
 .query-form { display: grid; grid-template-columns: minmax(12rem, 2fr) minmax(10rem, 1fr) auto; gap: 0.7rem; align-items: end; }
 .query-path-form { grid-template-columns: repeat(5, minmax(0, 1fr)) auto; padding-top: 0.8rem; margin-top: 0.75rem; border-top: 1px solid var(--border); }
 .saved-query-form { grid-template-columns: minmax(10rem, 1fr) minmax(12rem, 1fr) auto auto; border-top: 1px solid var(--border); padding-top: 0.8rem; margin-top: 0.75rem; }
+.mention-discovery { border-top: 1px solid var(--border); margin-top: 0.8rem; padding-top: 0.8rem; }
+.mention-discovery h4 { margin: 0.35rem 0; }
+#author-discovery-results { list-style: none; display: grid; gap: 0.65rem; padding: 0; margin: 0.7rem 0; }
+#author-discovery-results li { border: 1px solid var(--border); border-radius: 0.35rem; padding: 0.6rem; overflow-wrap: anywhere; }
+#author-discovery-results li p { margin: 0.35rem 0; }
+#author-discovery-results blockquote { margin: 0.4rem 0; padding-left: 0.65rem; border-left: 2px solid var(--border); }
 #author-query-results { list-style: none; display: grid; gap: 0.35rem; margin: 0.65rem 0 0; padding: 0; }
 #author-query-results li { overflow-wrap: anywhere; }
 #author-query-results button { text-align: left; width: 100%; }

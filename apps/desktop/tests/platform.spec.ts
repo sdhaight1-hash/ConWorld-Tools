@@ -517,3 +517,58 @@ test("native author saves, revises and replays historical name searches", async 
     { operation: "save", expected_revision: 2, query_id: "saved-1", name: "Find Alice corrected" },
   ]);
 });
+
+
+test("native mention discovery lists distinct collision identities and never accepts inferred facts", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "world", name: "Discovery world", revision: 2 };
+    const calls: unknown[] = [];
+    Object.assign(window, {
+      isTauri: true,
+      __discoveryCalls: calls,
+      __TAURI_INTERNALS__: {
+        invoke: async (command: string, args: Record<string, unknown>) => {
+          if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+          if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+          if (command === "workspace_worlds") return [world];
+          if (command === "workspace_saved_queries") return [];
+          if (command === "workspace_snapshot") return {
+            world, day: args.day, view_revision: args.revision ?? 2,
+            people: [{ id: "person-a", label: "Eleanor Vale" }, { id: "person-b", label: "Eleanor Vale" }],
+            relationships: [], events: [], definitions: [],
+          };
+          if (command === "workspace_discover_mentions") {
+            calls.push(args);
+            return { revision: args.revision ?? 2, truncated: false, rows: [
+              { source_id: "claim", source_revision: 2, source_label: "Witness diary",
+                statement: "Eleanor Vale met the Guild.", target_id: "person-a",
+                target_label: "Eleanor Vale", start_byte: 0, end_byte: 12, collisions: 2 },
+              { source_id: "claim", source_revision: 2, source_label: "Witness diary",
+                statement: "Eleanor Vale met the Guild.", target_id: "person-b",
+                target_label: "Eleanor Vale", start_byte: 0, end_byte: 12, collisions: 2 },
+            ] };
+          }
+          throw new Error("Unexpected mock native command: " + command);
+        },
+      },
+    });
+  });
+  await page.goto("/");
+  const trigger = page.getByRole("button", { name: "Find possible mentions" });
+  await trigger.click();
+  await expect(page.locator("#author-discovery-status")).toContainText("2 possible name candidate");
+  const results = page.locator("#author-discovery-results li");
+  await expect(results).toHaveCount(2);
+  await expect(results.nth(0)).toContainText("Candidate only");
+  await expect(results.nth(1)).toContainText("Candidate only");
+  await expect(results.nth(0)).toContainText("person-a");
+  await expect(results.nth(1)).toContainText("person-b");
+  await results.nth(1).getByRole("button", { name: "Inspect candidate person" }).click();
+  const calls = await page.evaluate(() => (window as unknown as { __discoveryCalls: unknown[] }).__discoveryCalls);
+  expect(calls).toEqual([{ worldId: "world", day: 0, revision: null, limit: 100 }]);
+  const revision = page.locator("#author-revision");
+  await revision.fill("1");
+  await revision.blur();
+  await expect(results).toHaveCount(0);
+  await expect(page.locator("#author-discovery-status")).toContainText("Choose Find possible mentions");
+});
