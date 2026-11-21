@@ -74,3 +74,10 @@ test("wgpu renders, pans, zooms and recovers from device loss", async ({ page })
   await expect.poll(() => plot.evaluate((el) => [el.scrollLeft, el.scrollTop])).toEqual([760, 310]);
   expect(errors).toEqual([]);
 });
+
+
+test("the browser-only preview does not expose native author history", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("region", { name: "Scrollable diagram" })).toBeVisible();
+  await expect(page.locator("#history")).toBeHidden();
+});

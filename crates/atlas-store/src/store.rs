@@ -9,7 +9,7 @@ use uuid::Uuid;
 use crate::*;
 
 const APPLICATION_ID: i64 = 0x4357_4c44; // CWLD
-const SCHEMA_VERSION: i64 = 5;
+const SCHEMA_VERSION: i64 = 6;
 
 pub struct Store {
     conn: Connection,
@@ -54,6 +54,9 @@ impl Store {
         }
         if version < 5 {
             tx.execute_batch(include_str!("../migrations/0005.sql"))?;
+        }
+        if version < 6 {
+            tx.execute_batch(include_str!("../migrations/0006.sql"))?;
             verify_foreign_keys(&tx)?;
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
@@ -285,7 +288,8 @@ impl Store {
                 Change::Create(object, record)
                 | Change::Correct(object, record)
                 | Change::RecordState(object, record) => (*object, record),
-                Change::EventEffect { target, record, .. } => (*target, record),
+                Change::EventEffect { target, record, .. }
+                | Change::ActionEffect { target, record, .. } => (*target, record),
             };
             if object.world != world.id {
                 return Err(Error::WrongWorld);
@@ -294,7 +298,7 @@ impl Store {
                 return Err(Error::RepeatedObject);
             }
             let effect = match change {
-                Change::EventEffect { event, .. } => {
+                Change::EventEffect { event, .. } | Change::ActionEffect { event, .. } => {
                     if event.world != object.world {
                         return Err(Error::WrongWorld);
                     }
@@ -313,14 +317,47 @@ impl Store {
                         ObjectData::HistoricalEvent { .. } => return Err(Error::InvalidOccurrence),
                         _ => return Err(Error::WrongKind),
                     }
+                    let action = match change {
+                        Change::ActionEffect { action, .. } => {
+                            if action.world != object.world {
+                                return Err(Error::WrongWorld);
+                            }
+                            if *action == object {
+                                return Err(Error::InvalidInput(
+                                    "action cannot cause its own state change",
+                                ));
+                            }
+                            let version = resolve_object(
+                                &tx,
+                                *action,
+                                branch,
+                                AuthorRevision(revision),
+                                day,
+                            )?
+                            .ok_or(Error::NotFound)?;
+                            match &version.record.data {
+                                ObjectData::ActorAction {
+                                    event: action_event,
+                                    ..
+                                } if *action_event == *event => Some(version.reference()),
+                                ObjectData::ActorAction { .. } => {
+                                    return Err(Error::InvalidInput(
+                                        "action belongs to another event",
+                                    ));
+                                }
+                                _ => return Err(Error::WrongKind),
+                            }
+                        }
+                        _ => None,
+                    };
                     let before = resolve_object(&tx, object, branch, world.revision, day)?
                         .ok_or(Error::NotFound)?;
-                    Some((origin.reference(), before.reference(), day))
+                    Some((origin.reference(), before.reference(), day, action))
                 }
                 _ => None,
             };
             apply_change(&tx, branch, fork, revision, change, object, record)?;
-            if let Some((event, before, day)) = effect {
+            if let Some((event, before, day, action)) = effect {
                 tx.execute(
                     "INSERT INTO historical_effects (world_id, target_id, branch_id, revision,
                          event_id, event_branch, event_state_revision, event_revision,
@@ -341,6 +378,24 @@ impl Store {
                         day.0
                     ],
                 )?;
+                if let Some(action) = action {
+                    tx.execute(
+                        "INSERT INTO action_effect_links
+                         (world_id, target_id, branch_id, effect_revision,
+                          action_id, action_branch, action_state_revision, action_revision)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                        params![
+                            object.world.0.as_bytes(),
+                            object.id.0.as_bytes(),
+                            branch.0.as_bytes(),
+                            revision,
+                            action.object.id.0.as_bytes(),
+                            action.branch.0.as_bytes(),
+                            action.state_revision.0,
+                            action.recorded_at.0
+                        ],
+                    )?;
+                }
             }
             tx.execute(
                 "INSERT INTO invalidations (world_id, revision, object_id) VALUES (?1, ?2, ?3)",
@@ -383,27 +438,63 @@ impl Store {
             return Ok(None);
         };
         // Corrections retain the provenance of the state they update.
-        Ok(self.conn.query_row(
-            "SELECT event_id, event_branch, event_state_revision, event_revision,
-                    before_branch, before_state_revision, before_revision, day
-             FROM historical_effects WHERE world_id = ?1 AND target_id = ?2 AND branch_id = ?3 AND revision = ?4",
-            params![target.world.0.as_bytes(), target.id.0.as_bytes(), after.branch.0.as_bytes(), after.state_revision.0],
-            |row| Ok(HistoricalEffect {
-                event: VersionRef {
-                    object: ObjectRef { world: target.world, id: ObjectId(Uuid::from_bytes(row.get(0)?)) },
-                    branch: BranchId(Uuid::from_bytes(row.get(1)?)),
-                    state_revision: AuthorRevision(row.get(2)?),
-                    recorded_at: AuthorRevision(row.get(3)?),
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT e.event_id, e.event_branch, e.event_state_revision, e.event_revision,
+                    e.before_branch, e.before_state_revision, e.before_revision, e.day,
+                    a.action_id, a.action_branch, a.action_state_revision, a.action_revision
+             FROM historical_effects AS e
+             LEFT JOIN action_effect_links AS a
+                ON a.world_id = e.world_id AND a.target_id = e.target_id
+                AND a.branch_id = e.branch_id AND a.effect_revision = e.revision
+             WHERE e.world_id = ?1 AND e.target_id = ?2 AND e.branch_id = ?3 AND e.revision = ?4",
+                params![
+                    target.world.0.as_bytes(),
+                    target.id.0.as_bytes(),
+                    after.branch.0.as_bytes(),
+                    after.state_revision.0
+                ],
+                |row| {
+                    Ok(HistoricalEffect {
+                        event: VersionRef {
+                            object: ObjectRef {
+                                world: target.world,
+                                id: ObjectId(Uuid::from_bytes(row.get(0)?)),
+                            },
+                            branch: BranchId(Uuid::from_bytes(row.get(1)?)),
+                            state_revision: AuthorRevision(row.get(2)?),
+                            recorded_at: AuthorRevision(row.get(3)?),
+                        },
+                        before: VersionRef {
+                            object: target,
+                            branch: BranchId(Uuid::from_bytes(row.get(4)?)),
+                            state_revision: AuthorRevision(row.get(5)?),
+                            recorded_at: AuthorRevision(row.get(6)?),
+                        },
+                        after: VersionRef {
+                            recorded_at: after.state_revision,
+                            ..after
+                        },
+                        day: WorldDay(row.get(7)?),
+                        action: row
+                            .get::<_, Option<[u8; 16]>>(8)?
+                            .map(|id| {
+                                Ok::<_, rusqlite::Error>(VersionRef {
+                                    object: ObjectRef {
+                                        world: target.world,
+                                        id: ObjectId(Uuid::from_bytes(id)),
+                                    },
+                                    branch: BranchId(Uuid::from_bytes(row.get(9)?)),
+                                    state_revision: AuthorRevision(row.get(10)?),
+                                    recorded_at: AuthorRevision(row.get(11)?),
+                                })
+                            })
+                            .transpose()?,
+                    })
                 },
-                before: VersionRef {
-                    object: target, branch: BranchId(Uuid::from_bytes(row.get(4)?)),
-                    state_revision: AuthorRevision(row.get(5)?),
-                    recorded_at: AuthorRevision(row.get(6)?),
-                },
-                after: VersionRef { recorded_at: after.state_revision, ..after },
-                day: WorldDay(row.get(7)?),
-            }),
-        ).optional()?)
+            )
+            .optional()?)
     }
 
     pub fn verify_foreign_keys(&self, scope: Scope) -> Result<(), Error> {
@@ -715,6 +806,9 @@ fn apply_change(
 ) -> Result<(), Error> {
     let prior_revision = AuthorRevision(revision - 1);
     let existing = latest_state(tx, object, branch, None)?;
+    if let Some((_, prior)) = &existing {
+        validate_stable_links(&prior.record.data, &record.data)?;
+    }
     let mut new_override = None;
     let mut local_boundary = None;
     if let Some(fork) = fork {
@@ -737,6 +831,9 @@ fn apply_change(
         } else {
             None
         };
+        if let Some(prior) = &inherited {
+            validate_stable_links(&prior.record.data, &record.data)?;
+        }
         if let ObjectData::HistoricalEvent { occurrence } = &record.data {
             let previous = existing
                 .as_ref()
@@ -755,7 +852,9 @@ fn apply_change(
         }
         if current.is_none() {
             new_override = Some(match change {
-                Change::RecordState(..) | Change::EventEffect { .. } => {
+                Change::RecordState(..)
+                | Change::EventEffect { .. }
+                | Change::ActionEffect { .. } => {
                     record.valid.start.ok_or(Error::InvalidInterval)?
                 }
                 _ => fork.day,
@@ -775,7 +874,10 @@ fn apply_change(
             }
             state
         }
-        (Change::RecordState(..) | Change::EventEffect { .. }, Some((state, mut previous))) => {
+        (
+            Change::RecordState(..) | Change::EventEffect { .. } | Change::ActionEffect { .. },
+            Some((state, mut previous)),
+        ) => {
             let start = record.valid.start.ok_or(Error::InvalidInterval)?;
             if previous
                 .record
@@ -904,6 +1006,108 @@ fn latest_state(
         .optional()?)
 }
 
+fn validate_stable_links(old: &ObjectData, new: &ObjectData) -> Result<(), Error> {
+    let changed = match (old, new) {
+        (
+            ObjectData::Relationship {
+                subject: a,
+                target: b,
+                kind: k,
+                ..
+            },
+            ObjectData::Relationship {
+                subject: next_a,
+                target: next_b,
+                kind: next_k,
+                ..
+            },
+        ) => a != next_a || b != next_b || k != next_k,
+        (
+            ObjectData::EventInvolvement {
+                event: a,
+                participant: b,
+                ..
+            },
+            ObjectData::EventInvolvement {
+                event: next_a,
+                participant: next_b,
+                ..
+            },
+        ) => a != next_a || b != next_b,
+        (
+            ObjectData::ActorAction {
+                event: a, actor: b, ..
+            },
+            ObjectData::ActorAction {
+                event: next_a,
+                actor: next_b,
+                ..
+            },
+        ) => a != next_a || b != next_b,
+        _ => false,
+    };
+    if changed {
+        Err(Error::InvalidInput(
+            "stable relationship or event actor identity",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn require_visible(
+    conn: &Connection,
+    world: WorldId,
+    reference: ObjectRef,
+    branch: BranchId,
+    revision: i64,
+    day: WorldDay,
+) -> Result<Version, Error> {
+    if reference.world != world {
+        return Err(Error::WrongWorld);
+    }
+    resolve_object(conn, reference, branch, AuthorRevision(revision), day)?.ok_or(Error::NotFound)
+}
+
+fn require_person(
+    conn: &Connection,
+    world: WorldId,
+    reference: ObjectRef,
+    branch: BranchId,
+    revision: i64,
+    day: WorldDay,
+) -> Result<(), Error> {
+    match require_visible(conn, world, reference, branch, revision, day)?
+        .record
+        .data
+    {
+        ObjectData::Person => Ok(()),
+        _ => Err(Error::WrongKind),
+    }
+}
+
+fn require_event(
+    conn: &Connection,
+    world: WorldId,
+    reference: ObjectRef,
+    branch: BranchId,
+    revision: i64,
+    day: WorldDay,
+) -> Result<(), Error> {
+    match require_visible(conn, world, reference, branch, revision, day)?
+        .record
+        .data
+    {
+        ObjectData::HistoricalEvent { occurrence }
+            if occurrence.exact_day().is_some_and(|at| at <= day) =>
+        {
+            Ok(())
+        }
+        ObjectData::HistoricalEvent { .. } => Err(Error::InvalidOccurrence),
+        _ => Err(Error::WrongKind),
+    }
+}
+
 fn write_version(
     tx: &Transaction<'_>,
     branch: BranchId,
@@ -920,6 +1124,58 @@ fn write_version(
     }
     let (kind, occurrence, citation) = match &record.data {
         ObjectData::Person => ("person", &EventDate::Unknown, None),
+        ObjectData::Relationship {
+            subject,
+            target,
+            kind,
+            trust,
+            tags,
+        } => {
+            let day = record.valid.start.ok_or(Error::InvalidInterval)?;
+            if subject == target {
+                return Err(Error::InvalidInput("self-relationship"));
+            }
+            validate_text(kind, "relationship kind")?;
+            if trust.is_some_and(|value| value > 100) {
+                return Err(Error::InvalidInput("trust must be between 0 and 100"));
+            }
+            let mut seen = HashSet::new();
+            for tag in tags {
+                validate_text(tag, "relationship tag")?;
+                if !seen.insert(tag.trim().to_lowercase()) {
+                    return Err(Error::InvalidInput("duplicate relationship tag"));
+                }
+            }
+            require_person(tx, object.world, *subject, branch, revision, day)?;
+            require_person(tx, object.world, *target, branch, revision, day)?;
+            ("relationship", &EventDate::Unknown, None)
+        }
+        ObjectData::EventInvolvement {
+            event, participant, ..
+        } => {
+            let day = record.valid.start.ok_or(Error::InvalidInterval)?;
+            require_event(tx, object.world, *event, branch, revision, day)?;
+            require_person(tx, object.world, *participant, branch, revision, day)?;
+            ("event_involvement", &EventDate::Unknown, None)
+        }
+        ObjectData::ActorAction {
+            event,
+            actor,
+            target,
+            action,
+            intent,
+            ..
+        } => {
+            let day = record.valid.start.ok_or(Error::InvalidInterval)?;
+            validate_text(action, "action kind")?;
+            validate_text(intent, "action intention")?;
+            require_event(tx, object.world, *event, branch, revision, day)?;
+            require_person(tx, object.world, *actor, branch, revision, day)?;
+            if let Some(target) = target {
+                require_visible(tx, object.world, *target, branch, revision, day)?;
+            }
+            ("actor_action", &EventDate::Unknown, None)
+        }
         ObjectData::Claim {
             subject,
             predicate,
@@ -1043,6 +1299,81 @@ fn write_version(
             state_revision,
         ],
     )?;
+    if let ObjectData::Relationship {
+        subject,
+        target,
+        kind,
+        trust,
+        tags,
+    } = &record.data
+    {
+        tx.execute(
+            "INSERT INTO relationship_versions
+             (world_id, relationship_id, branch_id, revision, state_revision, subject_id, target_id, relation_kind, trust)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![object.world.0.as_bytes(), object.id.0.as_bytes(), branch.0.as_bytes(), revision,
+                state_revision, subject.id.0.as_bytes(), target.id.0.as_bytes(), kind, trust.map(i64::from)],
+        )?;
+        for tag in tags {
+            tx.execute(
+                "INSERT INTO relationship_tags
+                 (world_id, relationship_id, branch_id, state_revision, revision, tag)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    object.world.0.as_bytes(),
+                    object.id.0.as_bytes(),
+                    branch.0.as_bytes(),
+                    state_revision,
+                    revision,
+                    tag.trim()
+                ],
+            )?;
+        }
+    }
+    if let ObjectData::EventInvolvement {
+        event,
+        participant,
+        role,
+    } = &record.data
+    {
+        let role = match role {
+            EventRole::Actor => "actor",
+            EventRole::Witness => "witness",
+            EventRole::Victim => "victim",
+            EventRole::Stakeholder => "stakeholder",
+            EventRole::Sponsor => "sponsor",
+        };
+        tx.execute(
+            "INSERT INTO event_involvement_versions
+             (world_id, involvement_id, branch_id, state_revision, revision, event_id, participant_id, role)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![object.world.0.as_bytes(), object.id.0.as_bytes(), branch.0.as_bytes(),
+                state_revision, revision, event.id.0.as_bytes(), participant.id.0.as_bytes(), role],
+        )?;
+    }
+    if let ObjectData::ActorAction {
+        event,
+        actor,
+        target,
+        action,
+        intent,
+        outcome,
+    } = &record.data
+    {
+        let outcome = match outcome {
+            ActionOutcome::Attempted => "attempted",
+            ActionOutcome::Succeeded => "succeeded",
+            ActionOutcome::Failed => "failed",
+        };
+        tx.execute(
+            "INSERT INTO actor_action_versions
+             (world_id, action_id, branch_id, state_revision, revision, event_id, actor_id, target_id, action_kind, intent, outcome)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![object.world.0.as_bytes(), object.id.0.as_bytes(), branch.0.as_bytes(),
+                state_revision, revision, event.id.0.as_bytes(), actor.id.0.as_bytes(),
+                target.map(|refid| *refid.id.0.as_bytes()), action, intent, outcome],
+        )?;
+    }
     if let ObjectData::Claim {
         subject,
         predicate,
@@ -1083,6 +1414,70 @@ fn read_version(
 ) -> rusqlite::Result<Version> {
     let data = match row.get::<_, String>(1)?.as_str() {
         "person" => ObjectData::Person,
+        "relationship" => {
+            let (subject, target, kind, trust): ([u8; 16], [u8; 16], String, Option<u8>) = conn.query_row(
+                "SELECT subject_id, target_id, relation_kind, trust FROM relationship_versions
+                 WHERE world_id = ?1 AND relationship_id = ?2 AND branch_id = ?3 AND revision = ?4 AND state_revision = ?5",
+                params![object.world.0.as_bytes(), object.id.0.as_bytes(), branch.0.as_bytes(),
+                    row.get::<_, i64>(0)?, row.get::<_, i64>(11)?],
+                |relation| Ok((relation.get(0)?, relation.get(1)?, relation.get(2)?, relation.get(3)?)),
+            )?;
+            let mut stmt = conn.prepare(
+                "SELECT tag FROM relationship_tags WHERE world_id = ?1 AND relationship_id = ?2
+                 AND branch_id = ?3 AND revision = ?4 AND state_revision = ?5 ORDER BY tag",
+            )?;
+            let tags = stmt.query_map(params![object.world.0.as_bytes(), object.id.0.as_bytes(),
+                branch.0.as_bytes(), row.get::<_, i64>(0)?, row.get::<_, i64>(11)?], |tag| tag.get(0))?
+                .collect::<rusqlite::Result<Vec<String>>>()?;
+            ObjectData::Relationship {
+                subject: ObjectRef { world: object.world, id: ObjectId(Uuid::from_bytes(subject)) },
+                target: ObjectRef { world: object.world, id: ObjectId(Uuid::from_bytes(target)) },
+                kind, trust, tags,
+            }
+        }
+        "event_involvement" => conn.query_row(
+            "SELECT event_id, participant_id, role FROM event_involvement_versions
+             WHERE world_id = ?1 AND involvement_id = ?2 AND branch_id = ?3 AND revision = ?4 AND state_revision = ?5",
+            params![object.world.0.as_bytes(), object.id.0.as_bytes(), branch.0.as_bytes(),
+                row.get::<_, i64>(0)?, row.get::<_, i64>(11)?],
+            |entry| {
+                let role = match entry.get::<_, String>(2)?.as_str() {
+                    "actor" => EventRole::Actor,
+                    "witness" => EventRole::Witness,
+                    "victim" => EventRole::Victim,
+                    "stakeholder" => EventRole::Stakeholder,
+                    "sponsor" => EventRole::Sponsor,
+                    _ => return Err(rusqlite::Error::InvalidQuery),
+                };
+                Ok(ObjectData::EventInvolvement {
+                    event: ObjectRef { world: object.world, id: ObjectId(Uuid::from_bytes(entry.get(0)?)) },
+                    participant: ObjectRef { world: object.world, id: ObjectId(Uuid::from_bytes(entry.get(1)?)) },
+                    role,
+                })
+            },
+        )?,
+        "actor_action" => conn.query_row(
+            "SELECT event_id, actor_id, target_id, action_kind, intent, outcome FROM actor_action_versions
+             WHERE world_id = ?1 AND action_id = ?2 AND branch_id = ?3 AND revision = ?4 AND state_revision = ?5",
+            params![object.world.0.as_bytes(), object.id.0.as_bytes(), branch.0.as_bytes(),
+                row.get::<_, i64>(0)?, row.get::<_, i64>(11)?],
+            |entry| {
+                let outcome = match entry.get::<_, String>(5)?.as_str() {
+                    "attempted" => ActionOutcome::Attempted,
+                    "succeeded" => ActionOutcome::Succeeded,
+                    "failed" => ActionOutcome::Failed,
+                    _ => return Err(rusqlite::Error::InvalidQuery),
+                };
+                Ok(ObjectData::ActorAction {
+                    event: ObjectRef { world: object.world, id: ObjectId(Uuid::from_bytes(entry.get(0)?)) },
+                    actor: ObjectRef { world: object.world, id: ObjectId(Uuid::from_bytes(entry.get(1)?)) },
+                    target: entry.get::<_, Option<[u8; 16]>>(2)?.map(|id| ObjectRef {
+                        world: object.world, id: ObjectId(Uuid::from_bytes(id)),
+                    }),
+                    action: entry.get(3)?, intent: entry.get(4)?, outcome,
+                })
+            },
+        )?,
         "claim" => conn.query_row(
             "SELECT subject_id, predicate, statement FROM claim_versions
              WHERE world_id = ?1 AND claim_id = ?2 AND branch_id = ?3 AND revision = ?4 AND state_revision = ?5",

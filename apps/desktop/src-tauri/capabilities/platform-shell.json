@@ -2,5 +2,5 @@
   "identifier": "platform-shell",
   "description": "The local shell can load the platform fixture and report a requested smoke test.",
   "windows": ["main"],
-  "permissions": ["allow-platform-scene", "allow-complete-platform-smoke"]
+  "permissions": ["allow-platform-scene", "allow-complete-platform-smoke", "allow-northbridge-history"]
 }

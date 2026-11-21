@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod history;
+
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
@@ -38,6 +40,7 @@ struct PlatformScene {
 struct SmokeObservation {
     scene_verified: bool,
     canvas2d_verified: bool,
+    history_verified: bool,
     webgpu: WebGpuStatus,
 }
 
@@ -84,18 +87,24 @@ fn complete_platform_smoke(
     });
     println!("ATLAS_PLATFORM_SMOKE {report}");
     app.exit(i32::from(
-        !observation.scene_verified || !observation.canvas2d_verified,
+        !observation.scene_verified
+            || !observation.canvas2d_verified
+            || !observation.history_verified,
     ));
     Ok(())
 }
 
 fn main() {
     let smoke = std::env::args_os().any(|arg| arg == "--platform-smoke");
+    let history = history::NorthbridgeHistory::seed()
+        .expect("failed to initialize the Phase 2 Northbridge history fixture");
     tauri::Builder::default()
         .manage(PlatformSmoke(smoke))
+        .manage(history)
         .invoke_handler(tauri::generate_handler![
             platform_scene,
-            complete_platform_smoke
+            complete_platform_smoke,
+            history::northbridge_history
         ])
         .run(tauri::generate_context!())
         .expect("failed to start Living History Atlas");
