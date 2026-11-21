@@ -7,7 +7,7 @@ use crate::{
 pub const MODEL_VERSION: u16 = 1;
 pub const MODEL_LENGTH: u32 = 100_000;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
 pub struct SyntheticSegment {
     pub start: u32,
     pub end: u32,
@@ -64,4 +64,69 @@ fn mix(value: u64) -> u64 {
     value = (value ^ (value >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
     value = (value ^ (value >> 27)).wrapping_mul(0x94d049bb133111eb);
     value ^ (value >> 31)
+}
+
+/// Shared dimensionless intervals from the same immediate fictional contributor.
+/// Distinct people can have zero overlap even with a shared biological parent.
+pub fn shared_segments(
+    pedigree: &Pedigree,
+    first: ObjectRef,
+    second: ObjectRef,
+    seed: u64,
+    model: u16,
+) -> Result<Vec<SyntheticSegment>, Error> {
+    if first == second {
+        return Err(Error::InvalidInput("select two distinct people"));
+    }
+    let left = fictional_segments(pedigree, first, seed, model)?;
+    let right = fictional_segments(pedigree, second, seed, model)?;
+    let mut shared = Vec::new();
+    for a in left {
+        for b in right {
+            let start = a.start.max(b.start);
+            let end = a.end.min(b.end);
+            if a.contributor == b.contributor && start < end {
+                shared.push(SyntheticSegment {
+                    start,
+                    end,
+                    contributor: a.contributor,
+                });
+            }
+        }
+    }
+    Ok(shared)
+}
+
+impl crate::Store {
+    /// Compare accepted biological parents from the same historical author view.
+    pub fn family_match_at(
+        &self,
+        view: crate::ViewContext,
+        first: ObjectRef,
+        second: ObjectRef,
+        seed: u64,
+    ) -> Result<Vec<SyntheticSegment>, Error> {
+        if first == second {
+            return Err(Error::InvalidInput("select two distinct people"));
+        }
+        let mut parents = Vec::new();
+        for child in [first, second] {
+            for link in self.family_links(view, child)? {
+                if link.child == child && link.kind == ParentageKind::Biological {
+                    parents.push(crate::genealogy::Parentage {
+                        parent: link.parent,
+                        child,
+                        kind: link.kind,
+                        accepted: true,
+                        valid: crate::ValidInterval {
+                            start: Some(crate::WorldDay(link.starts_at)),
+                            end_exclusive: link.ends_before.map(crate::WorldDay),
+                        },
+                    });
+                }
+            }
+        }
+        let pedigree = Pedigree::at(view.world, view.day, &parents)?;
+        shared_segments(&pedigree, first, second, seed, MODEL_VERSION)
+    }
 }

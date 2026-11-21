@@ -1,3 +1,5 @@
+import { openFamilyHistory } from "./family-history";
+import { openEntryEditor } from "./entry-editor";
 import { invoke } from "@tauri-apps/api/core";
 import type { Scene } from "./main";
 
@@ -31,10 +33,10 @@ type Predicate = { op: "contains" | "exact" | "exact_alias" | "full_text" | "cla
   { op: "has_source"; source_id: string } |
   { op: "and" | "or"; filters: Predicate[] } |
   { op: "not"; filter: Predicate };
-type ParameterValue = { type: "text" | "object_kind"; value: string } |
+export type ParameterValue = { type: "text" | "object_kind"; value: string } |
   { type: "source"; world_id: string; source_id: string };
 type QueryParameter = { name: string; default: ParameterValue };
-type SavedQuery = { id: string; name: string; mode: "contains" | "exact" | "alias" | "fulltext" | "claimtext" | "composite";
+export type SavedQuery = { id: string; name: string; mode: "contains" | "exact" | "alias" | "fulltext" | "claimtext" | "composite";
   term: string; predicate?: Predicate | null; limit: number; recorded_at: number; parameters?: QueryParameter[] };
 type MentionDiscovery = { revision: number; truncated: boolean; rows: {
   source_id: string; source_branch: string; source_state_revision: number; source_revision: number;
@@ -136,6 +138,11 @@ export async function showAuthorWorkspace(
   const discoveryPanel = document.querySelector<HTMLElement>("#author-mention-discovery")!;
   const status = document.querySelector<HTMLElement>("#author-status")!;
   const queryForm = document.querySelector<HTMLFormElement>("#author-query-form")!;
+  const publicSearch = document.querySelector<HTMLFormElement>("#public-page-search-form")!;
+  const publicStatus = document.querySelector<HTMLElement>("#public-page-search-status")!;
+  const publicResults = document.querySelector<HTMLUListElement>("#public-page-search-results")!;
+  const publicPreview = document.querySelector<HTMLElement>("#public-page-preview")!;
+  const publicCancel = document.querySelector<HTMLButtonElement>("#public-page-search-cancel")!;
   const saveQueryForm = document.querySelector<HTMLFormElement>("#author-save-query-form")!;
   const runSavedQuery = document.querySelector<HTMLButtonElement>("#author-run-saved-query")!;
   const saveComposite = document.querySelector<HTMLButtonElement>("#author-save-composite-query")!;
@@ -193,6 +200,9 @@ export async function showAuthorWorkspace(
   let snapshot: Snapshot | undefined;
   let requestSequence = 0;
   let querySequence = 0;
+  let publicSequence = 0;
+  let publicPreviewSequence = 0;
+  let activePublicSearch: string | undefined;
   let activeQuery: string | undefined;
   let pageCursor: string | undefined;
   let pageNumber = 1;
@@ -436,6 +446,19 @@ export async function showAuthorWorkspace(
       control.addEventListener("click", action);
       panel.append(control);
     }
+    const current = snapshot;
+    if (current && people.some(person => person.id === id)) {
+      button("Family history", () => {
+        panel.replaceChildren();
+        void openFamilyHistory(panel, { world_id: current.world.id, person_id: id, day: current.day, revision: current.view_revision },
+          people, !revisionInput.value.trim(), async () => { await refresh(); selectNode(id); });
+      });
+      button("Open character page", () => {
+        panel.replaceChildren();
+        void openEntryEditor(panel, current.world.id, id, current.day, current.view_revision,
+          !revisionInput.value.trim(), async () => { await refresh(); selectNode(id); });
+      });
+    }
     if (event) {
       eventDetails(panel, event, name);
       if (snapshot) evidencePanel(panel, event, snapshot);
@@ -499,7 +522,93 @@ export async function showAuthorWorkspace(
     }
   }
 
+  function clearPublicSearch() {
+    ++publicSequence;
+    ++publicPreviewSequence;
+    const requestId = activePublicSearch;
+    activePublicSearch = undefined;
+    publicCancel.hidden = true;
+    publicResults.replaceChildren();
+    publicPreview.replaceChildren();
+    publicStatus.textContent = "";
+    if (requestId) void invoke("workspace_cancel_query", { requestId }).catch(() => {});
+  }
+
+  publicSearch.addEventListener("input", clearPublicSearch);
+  publicCancel.addEventListener("click", () => {
+    clearPublicSearch();
+    publicStatus.textContent = "Public search cancelled.";
+  });
+  publicSearch.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!snapshot || saving) return;
+    clearPublicSearch();
+    const text = field<HTMLInputElement>(publicSearch, "text").value.trim();
+    if (!text) return;
+    const sequence = publicSequence;
+    const requestId = crypto.randomUUID();
+    const { world: { id: worldId }, day } = snapshot;
+    activePublicSearch = requestId;
+    publicCancel.hidden = false;
+    publicStatus.textContent = "Searching current published pages…";
+    type Hit = { entry: { world: string; id: string }; element: string; text: string };
+    type PublicDisplay = { content: { Text?: string; Stack?: PublicDisplay[] } };
+    try {
+      const found = await invoke<{ matches: Hit[]; truncated: boolean }>(
+        "workspace_search_public_pages", { worldId, day, text, requestId });
+      if (sequence !== publicSequence) return;
+      publicStatus.textContent = found.truncated ? "Showing first 50 matching blocks." :
+        found.matches.length + " matching public blocks.";
+      for (const hit of found.matches) {
+        const item = document.createElement("li");
+        const passage = document.createElement("p");
+        passage.textContent = hit.text;
+        const open = document.createElement("button");
+        open.type = "button";
+        open.textContent = "Read published page";
+        open.addEventListener("click", async () => {
+          const preview = ++publicPreviewSequence;
+          publicPreview.textContent = "Loading current publication…";
+          try {
+            const page = await invoke<PublicDisplay | null>("workspace_public_entry",
+              { worldId, day, entryId: hit.entry.id });
+            if (sequence !== publicSequence || preview !== publicPreviewSequence) return;
+            publicPreview.replaceChildren();
+            if (!page) {
+              clearPublicSearch();
+              publicStatus.textContent = "Publication changed. Search again.";
+              return;
+            }
+            function render(node: PublicDisplay) {
+              if (node.content.Text !== undefined) {
+                const p = document.createElement("p");
+                p.textContent = node.content.Text;
+                publicPreview.append(p);
+              }
+              node.content.Stack?.forEach(render);
+            }
+            render(page);
+          } catch (error) {
+            if (sequence === publicSequence && preview === publicPreviewSequence) {
+              publicPreview.textContent = String(error);
+            }
+          }
+        });
+        item.append(passage, open);
+        publicResults.append(item);
+      }
+    } catch (error) {
+      if (sequence === publicSequence) publicStatus.textContent = "Public search failed: " + String(error);
+    } finally {
+      if (sequence === publicSequence) {
+        activePublicSearch = undefined;
+        publicCancel.hidden = true;
+      }
+    }
+  });
+
   async function refresh() {
+    clearPublicSearch();
     const sequence = ++requestSequence;
     ++querySequence;
     cancelActiveQuery();
@@ -693,6 +802,17 @@ export async function showAuthorWorkspace(
               syncButtons();
               field(pathForm, "kind").focus();
             });
+            const pageButton = document.createElement("button");
+            pageButton.type = "button";
+            pageButton.textContent = "Open character page";
+            pageButton.addEventListener("click", () => {
+              const current = snapshot;
+              if (!current || sequence !== querySequence) return;
+              pageButton.disabled = true;
+              void openEntryEditor(item, current.world.id, row.id, current.day, current.view_revision,
+                !revisionInput.value.trim(), refresh);
+            });
+            item.append(pageButton);
             item.append(focus);
           }
           const references = document.createElement("button");

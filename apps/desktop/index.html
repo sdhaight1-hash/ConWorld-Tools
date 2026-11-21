@@ -80,6 +80,18 @@
         </form>
         <div id="author-world-content" hidden>
           <p id="author-world-info" class="hint"></p>
+          <section id="public-page-search" aria-label="Published page search" class="query-panel">
+            <h3>Search published pages</h3>
+            <p class="hint">Current publication, selected historical day. Private author notes and unlisted pages are excluded.</p>
+            <form id="public-page-search-form" class="query-form">
+              <label>Text in public pages <input name="text" required maxlength="256" /></label>
+              <button type="submit">Search published pages</button>
+              <button type="button" id="public-page-search-cancel" hidden>Cancel public search</button>
+            </form>
+            <p id="public-page-search-status" role="status" aria-live="polite" class="hint"></p>
+            <ul id="public-page-search-results" aria-label="Published page results"></ul>
+            <div id="public-page-preview" aria-live="polite"></div>
+          </section>
           <section id="author-query" aria-label="Historical search" class="query-panel">
             <h3>Search the historical snapshot</h3>
             <form id="author-query-form" class="query-form">

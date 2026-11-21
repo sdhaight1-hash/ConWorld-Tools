@@ -6,7 +6,8 @@ use crate::{
     graph::acyclic,
 };
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ParentageKind {
     Biological,
     Adoptive,
@@ -99,7 +100,12 @@ impl Store {
             return Err(Error::CapabilityDenied);
         }
         let pedigree = Pedigree::at(view.world, view.day, records)?;
-        let snapshot = self.objects_at(view, 2_000)?;
+        let references = pedigree
+            .links
+            .iter()
+            .flat_map(|link| [link.parent, link.child])
+            .collect();
+        let snapshot = self.referenced_versions(view, references)?;
         let people: HashSet<_> = snapshot
             .into_iter()
             .filter(|item| matches!(item.record.data, ObjectData::Person))
@@ -116,4 +122,27 @@ impl Store {
         }
         Ok(pedigree)
     }
+}
+
+/// A direct accepted link observed in one author snapshot.
+#[derive(Debug, serde::Serialize)]
+pub struct FamilyLink {
+    pub id: uuid::Uuid,
+    pub parent: ObjectRef,
+    pub child: ObjectRef,
+    pub kind: ParentageKind,
+    pub starts_at: i64,
+    pub ends_before: Option<i64>,
+    pub relative_label: String,
+    pub rationale: String,
+}
+
+pub struct RecordParentage<'a> {
+    pub parent: ObjectRef,
+    pub child: ObjectRef,
+    pub kind: ParentageKind,
+    pub starts_at: WorldDay,
+    pub ends_before: Option<WorldDay>,
+    pub rationale: &'a str,
+    pub command_id: uuid::Uuid,
 }

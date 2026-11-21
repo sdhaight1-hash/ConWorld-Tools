@@ -4,9 +4,9 @@ use std::collections::HashSet;
 use uuid::Uuid;
 
 use crate::{
-    ClaimAudience, Error, ObjectRef, Scope, Store, ViewContext,
+    AuthorRevision, ClaimAudience, Error, ObjectRef, Scope, Store, ViewContext, WorldId,
     access::{can_view, restrict},
-    query::QuerySpec,
+    query::{ParameterBinding, QuerySpec},
 };
 
 pub const LAYOUT_SCHEMA_VERSION: u16 = 1;
@@ -14,44 +14,119 @@ const MAX_ELEMENTS: usize = 512;
 const MAX_DEPTH: usize = 16;
 const MAX_QUERIES: usize = 16;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ElementId(pub Uuid);
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LayoutDocument {
     pub schema_version: u16,
     pub entry: ObjectRef,
     pub root: LayoutElement,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LayoutElement {
     pub id: ElementId,
     pub audience: ClaimAudience,
     pub content: ElementContent,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ElementContent {
     Stack(Vec<LayoutElement>),
     Text(String),
     Query(QuerySpec),
+    SavedQuery(SavedQueryBinding),
+    ObjectLink(ObjectLink),
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObjectLink {
+    pub target: ObjectRef,
+    pub label: String,
+}
+
+#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct EntryBacklink {
+    pub source: ObjectRef,
+    pub element: ElementId,
+    pub label: String,
+}
+
+#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct EntryBacklinks {
+    pub matches: Vec<EntryBacklink>,
+    pub truncated: bool,
+}
+
+/// Pin the definition, not its results. Runtime data follows the layout's view.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedQueryBinding {
+    pub world: WorldId,
+    pub query_id: Uuid,
+    pub definition_revision: i64,
+    pub bindings: Vec<ParameterBinding>,
+}
+
+impl SavedQueryBinding {
+    pub fn resolve(&self, store: &Store, view: ViewContext) -> Result<QuerySpec, Error> {
+        if view.scope != Scope::Author {
+            return Err(Error::CapabilityDenied);
+        }
+        if self.world != view.world {
+            return Err(Error::WrongWorld);
+        }
+        let pinned = AuthorRevision(self.definition_revision);
+        if pinned.0 <= 0 || pinned > view.revision {
+            return Err(Error::InvalidRevision);
+        }
+        let saved = store
+            .saved_label_query(self.world, pinned, view.scope, self.query_id)?
+            .ok_or(Error::NotFound)?;
+        if saved.recorded_at != pinned {
+            return Err(Error::InvalidRevision);
+        }
+        saved.bind(view, &self.bindings)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DisplayElement {
     pub id: ElementId,
     pub content: DisplayContent,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum DisplayContent {
     Stack(Vec<DisplayElement>),
     Text(String),
+    ObjectLink(ObjectLink),
     QueryRows {
         records: Vec<(ObjectRef, String)>,
         truncated: bool,
     },
+}
+
+/// Matches are drawn only from the compiled, audience-authorized page.
+#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct EntryTextSearch {
+    pub matches: Vec<(ElementId, String)>,
+    pub truncated: bool,
+}
+
+#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PublicPageMatch {
+    pub entry: ObjectRef,
+    pub element: ElementId,
+    pub text: String,
+}
+
+#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PublicPageSearch {
+    pub matches: Vec<PublicPageMatch>,
+    pub truncated: bool,
 }
 
 impl LayoutDocument {
@@ -86,10 +161,96 @@ impl LayoutDocument {
                 ElementContent::Text(text) if text.len() > 16_384 => {
                     return Err(Error::InvalidInput("layout text length"));
                 }
+                ElementContent::ObjectLink(link) => {
+                    if link.target.world != self.entry.world {
+                        return Err(Error::WrongWorld);
+                    }
+                    if link.label.trim().is_empty() || link.label.len() > 800 {
+                        return Err(Error::InvalidInput("layout link label"));
+                    }
+                }
+                ElementContent::SavedQuery(binding) => {
+                    if binding.world != self.entry.world {
+                        return Err(Error::WrongWorld);
+                    }
+                    if binding.definition_revision <= 0 || binding.bindings.len() > 32 {
+                        return Err(Error::InvalidInput("saved layout binding"));
+                    }
+                }
                 _ => {}
             }
         }
         Ok(())
+    }
+
+    /// The query engine currently returns author records. Such bindings can
+    /// live in private subtrees but cannot be released to any reader.
+    pub(crate) fn validate_publication(&self) -> Result<(), Error> {
+        let mut pending = vec![(&self.root, ClaimAudience::Public)];
+        while let Some((element, parent)) = pending.pop() {
+            let audience = restrict(element.audience, parent);
+            if audience == ClaimAudience::Author {
+                continue;
+            }
+            match &element.content {
+                ElementContent::Query(_) | ElementContent::SavedQuery(_) => {
+                    return Err(Error::CapabilityDenied);
+                }
+                ElementContent::Stack(children) => {
+                    pending.extend(children.iter().map(|child| (child, audience)))
+                }
+                ElementContent::Text(_) | ElementContent::ObjectLink(_) => {}
+            }
+        }
+        Ok(())
+    }
+
+    /// Use the same public subtree gate and literal text as the Display projection.
+    /// This is only a conservative candidate index; canonical reads still authorize results.
+    pub(crate) fn public_index_text(&self) -> Result<Option<String>, Error> {
+        self.validate()?;
+        self.validate_publication()?;
+        if !can_view(Scope::Public, self.root.audience) {
+            return Ok(None);
+        }
+        let mut text = String::new();
+        let mut pending = vec![&self.root];
+        while let Some(element) = pending.pop() {
+            if !can_view(Scope::Public, element.audience) {
+                continue;
+            }
+            match &element.content {
+                ElementContent::Stack(children) => pending.extend(children.iter().rev()),
+                ElementContent::Text(block) => {
+                    // SQLite tokenization may stop at NUL; normalize it only in
+                    // candidates. Queries containing NUL use the exact fallback.
+                    text.push_str(&block.to_lowercase().replace('\0', " "));
+                    text.push('\n');
+                }
+                // Destination-dependent captions are excluded from static text search.
+                ElementContent::ObjectLink(_) => {}
+                ElementContent::Query(_) | ElementContent::SavedQuery(_) => {
+                    return Err(Error::CapabilityDenied);
+                }
+            }
+        }
+        Ok(Some(text))
+    }
+
+    pub(crate) fn visible_links(&self, scope: Scope) -> Vec<(ElementId, &ObjectLink)> {
+        let mut links = Vec::new();
+        let mut pending = vec![&self.root];
+        while let Some(element) = pending.pop() {
+            if !can_view(scope, element.audience) {
+                continue;
+            }
+            match &element.content {
+                ElementContent::Stack(children) => pending.extend(children.iter().rev()),
+                ElementContent::ObjectLink(link) => links.push((element.id, link)),
+                _ => {}
+            }
+        }
+        links
     }
 
     pub fn reparent(&mut self, id: ElementId, target: ElementId) -> Result<(), Error> {
@@ -195,7 +356,13 @@ fn project(
             }
             DisplayContent::Text(text.clone())
         }
-        ElementContent::Query(query) => {
+        ElementContent::ObjectLink(link) => {
+            if !store.entry_link_target_visible(view, link.target)? {
+                return Ok(None);
+            }
+            DisplayContent::ObjectLink(link.clone())
+        }
+        ElementContent::Query(_) | ElementContent::SavedQuery(_) => {
             if view.scope != Scope::Author {
                 return Err(Error::CapabilityDenied);
             }
@@ -203,7 +370,13 @@ fn project(
                 return Err(Error::QueryBudgetExceeded);
             }
             budget.queries += 1;
-            let result = store.execute_query(query, view)?;
+            let result = match &element.content {
+                ElementContent::Query(query) => store.execute_query(query, view)?,
+                ElementContent::SavedQuery(binding) => {
+                    store.execute_query(&binding.resolve(store, view)?, view)?
+                }
+                _ => unreachable!("query component"),
+            };
             DisplayContent::QueryRows {
                 records: result
                     .rows

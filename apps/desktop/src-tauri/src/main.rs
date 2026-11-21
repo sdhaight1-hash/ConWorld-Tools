@@ -149,6 +149,30 @@ fn complete_platform_smoke(
 }
 
 fn main() {
+    let mut args = std::env::args_os().skip(1);
+    if args.next().as_deref() == Some(std::ffi::OsStr::new("--restore-archive")) {
+        let (Some(source), Some(destination), None) = (args.next(), args.next(), args.next())
+        else {
+            eprintln!("Usage: atlas-desktop --restore-archive BACKUP.sqlite NEW.sqlite");
+            std::process::exit(2);
+        };
+        match atlas_store::archive::restore_archive(
+            source.as_ref(),
+            destination.as_ref(),
+            atlas_store::Scope::Author,
+        ) {
+            Ok(manifest) => println!(
+                "Restored {} world(s) to {}",
+                manifest.worlds.len(),
+                destination.to_string_lossy()
+            ),
+            Err(error) => {
+                eprintln!("Restore failed: {error}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
     let has_flag = |name| std::env::args_os().any(|arg| arg == name);
     let smoke = if has_flag("--renderer-smoke") {
         PlatformSmoke::Renderer {
@@ -191,6 +215,16 @@ fn main() {
             workspace::workspace_query_path,
             workspace::workspace_query_participant_events,
             workspace::workspace_composite_query,
+            workspace::workspace_family_match,
+            workspace::workspace_family_links,
+            workspace::workspace_record_parentage,
+            workspace::workspace_withdraw_parentage,
+            workspace::workspace_entry_layout,
+            workspace::workspace_preview_author_layout,
+            workspace::workspace_save_layout,
+            workspace::workspace_public_entry,
+            workspace::workspace_search_public_entry,
+            workspace::workspace_search_public_pages,
             workspace::workspace_create_person,
             workspace::workspace_create_relationship,
             workspace::workspace_record_relationship_state,

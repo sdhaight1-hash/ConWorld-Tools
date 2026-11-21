@@ -1415,3 +1415,215 @@ test("oversized world discovers one exact claim and cancels stale discovery", as
   await expect(page.locator("#author-discovery-results li")).toHaveCount(0);
   await expect(cancel).toBeHidden();
 });
+
+test("public entry search uses reader IPC and discards obsolete responses", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "archive", name: "River Archive", revision: 4 };
+    const people = [{ id: "alice", label: "Alice" }];
+    const requests: unknown[] = [];
+    Object.assign(window, {
+      isTauri: true,
+      __entrySearchRequests: requests,
+      __TAURI_INTERNALS__: {
+        invoke: async (command: string, payload: { text?: string; day?: number }) => {
+          if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+          if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+          if (command === "workspace_worlds") return [world];
+          if (command === "workspace_saved_queries") return [];
+          if (command === "workspace_snapshot") return {
+            world, day: payload.day ?? 0, view_revision: 4, people,
+            relationships: [], events: [], definitions: [],
+          };
+          if (command === "workspace_entry_layout") return null;
+          if (command === "workspace_search_public_entry") {
+            requests.push(payload);
+            if (payload.text === "old") return new Promise(resolve => {
+              Object.assign(window, { __releaseOldEntrySearch: () => resolve({
+                matches: [["old-block", "Obsolete result"]], truncated: false,
+              }) });
+            });
+            if (payload.text === "gazette") return {
+              matches: [["public-block", "Gazette biography"]], truncated: false,
+            };
+            if (payload.text === "revoked") return null;
+            return { matches: [], truncated: false };
+          }
+          if (command === "workspace_public_entry") return { content: { Text: "Gazette biography" } };
+          throw new Error("Unexpected mock command: " + command);
+        },
+      },
+    });
+  });
+  await page.goto("/");
+  const graph = page.getByRole("region", { name: "Saved world graph" });
+  await graph.locator("#nodes button[data-node=alice]").click();
+  await graph.getByRole("button", { name: "Open character page" }).click();
+  const inspector = graph.getByRole("complementary", { name: "Node inspector" });
+  const input = inspector.getByLabel("Find in public page");
+  const find = inspector.getByRole("button", { name: "Find", exact: true });
+  await input.fill("old");
+  await find.click();
+  await expect.poll(() => page.evaluate(() => typeof (window as unknown as {
+    __releaseOldEntrySearch?: () => void;
+  }).__releaseOldEntrySearch)).toBe("function");
+  await input.fill("gazette");
+  await find.click();
+  await expect(inspector.getByText("1 matching blocks.", { exact: true })).toBeVisible();
+  await expect(inspector.getByText("Gazette biography", { exact: true })).toBeVisible();
+  await page.evaluate(() => (window as unknown as { __releaseOldEntrySearch: () => void }).__releaseOldEntrySearch());
+  await expect(inspector.getByText("Obsolete result")).toHaveCount(0);
+  const requests = await page.evaluate(() => (window as unknown as { __entrySearchRequests: unknown[] }).__entrySearchRequests);
+  expect(requests).toEqual([
+    { worldId: "archive", entryId: "alice", day: 0, text: "old" },
+    { worldId: "archive", entryId: "alice", day: 0, text: "gazette" },
+  ]);
+  if (process.env.ATLAS_CAPTURE_PHASE3 === "1") {
+    const timestamp = new Date().toISOString().slice(0, 19).replace("T", "_").replaceAll(":", "-") + "Z";
+    await inspector.screenshot({
+      path: "../../Development-Screenshots/" + timestamp + "_phase-03_query_mock-native-public-entry-find_01.png",
+      animations: "disabled",
+    });
+  }
+  await input.fill("private");
+  await find.click();
+  await expect(inspector.getByText("0 matching blocks.", { exact: true })).toBeVisible();
+  await input.fill("revoked");
+  await find.click();
+  await expect(inspector.getByText("Unpublished at this date.", { exact: true })).toBeVisible();
+});
+
+test("world public search opens only the current reader projection", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "archive", name: "River Archive", revision: 4 };
+    Object.assign(window, {
+      isTauri: true,
+      __TAURI_INTERNALS__: {
+        invoke: async (command: string, payload: { day?: number; text?: string; entryId?: string }) => {
+          if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+          if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+          if (command === "workspace_worlds") return [world];
+          if (command === "workspace_saved_queries") return [];
+          if (command === "workspace_snapshot") return {
+            world, day: payload.day ?? 0, view_revision: 4, people: [],
+            relationships: [], events: [], definitions: [],
+          };
+          if (command === "workspace_search_public_pages") return {
+            matches: payload.text === "gazette" ? [
+              { entry: { world: "archive", id: "alice" }, element: "one", text: "Gazette biography" },
+            ] : [], truncated: false,
+          };
+          if (command === "workspace_public_entry" && payload.entryId === "alice") return {
+            content: { Stack: [{ content: { Text: "Gazette biography" } }, { content: { Text: "Released context" } }] },
+          };
+          if (command === "workspace_cancel_query") return null;
+          throw new Error("Unexpected mock command: " + command);
+        },
+      },
+    });
+  });
+  await page.goto("/");
+  const search = page.getByRole("region", { name: "Published page search" });
+  await search.getByLabel("Text in public pages").fill("gazette");
+  await search.getByRole("button", { name: "Search published pages" }).click();
+  await expect(search.getByText("1 matching public blocks.")).toBeVisible();
+  await search.getByRole("button", { name: "Read published page" }).click();
+  await expect(search.getByText("Released context")).toBeVisible();
+  if (process.env.ATLAS_CAPTURE_PHASE3 === "1") {
+    const timestamp = new Date().toISOString().slice(0, 19).replace("T", "_").replaceAll(":", "-") + "Z";
+    await search.screenshot({
+      path: "../../Development-Screenshots/" + timestamp + "_phase-03_query_mock-native-public-world-search_01.png",
+      animations: "disabled",
+    });
+  }
+  await search.getByLabel("Text in public pages").fill("private");
+  await search.getByRole("button", { name: "Search published pages" }).click();
+  await expect(search.getByText("0 matching public blocks.")).toBeVisible();
+  await expect(search.getByText("Released context")).toHaveCount(0);
+});
+
+test("character canvas pins a private saved query and previews typed overrides", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "archive", name: "River Archive", revision: 4 };
+    const people = [{ id: "alice", label: "Alice" }];
+    const requests: { command: string; payload: unknown }[] = [];
+    let savedLayout: unknown = null;
+    Object.assign(window, {
+      isTauri: true,
+      __canvasBindingRequests: requests,
+      __TAURI_INTERNALS__: {
+        invoke: async (command: string, payload: { day?: number; revision?: number; document?: unknown; published?: boolean }) => {
+          if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+          if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+          if (command === "workspace_worlds") return [world];
+          if (command === "workspace_snapshot") return {
+            world, day: payload.day ?? 0, view_revision: world.revision, people,
+            relationships: [], events: [], definitions: [],
+          };
+          if (command === "workspace_saved_queries") return [{
+            id: "saved", name: "Find a person", mode: "exact", term: "Alice", limit: 10,
+            recorded_at: 3, parameters: [{ name: "exact_1", default: { type: "text", value: "Alice" } }],
+          }];
+          if (command === "workspace_entry_layout") return savedLayout;
+          if (command === "workspace_preview_author_layout") {
+            requests.push({ command, payload });
+            return { content: { Stack: [
+              { content: { Text: "Public biography" } },
+              { content: { QueryRows: { records: [[{ world: "archive", id: "beatrice" }, "Beatrice"]], truncated: false } } },
+            ] } };
+          }
+          if (command === "workspace_save_layout") {
+            requests.push({ command, payload });
+            savedLayout = [payload.document, payload.published];
+            world.revision++;
+            return null;
+          }
+          if (command === "workspace_public_entry") return { content: { Text: "Public biography" } };
+          if (command === "workspace_cancel_query") return null;
+          throw new Error("Unexpected mock command: " + command);
+        },
+      },
+    });
+  });
+  await page.goto("/");
+  const graph = page.getByRole("region", { name: "Saved world graph" });
+  const inspector = graph.getByRole("complementary", { name: "Node inspector" });
+  await graph.locator("#nodes button[data-node=alice]").click();
+  await graph.getByRole("button", { name: "Open character page" }).click();
+  await inspector.getByRole("textbox", { name: "Page text", exact: true }).fill("Public biography");
+  await inspector.getByLabel("Private saved query").selectOption("saved@3");
+  await inspector.getByLabel("exact 1").fill("Beatrice");
+  await inspector.getByRole("button", { name: "Preview author layout" }).click();
+  await expect(inspector.getByRole("table", { name: "Private query table" })).toContainText("Beatrice");
+  if (process.env.ATLAS_CAPTURE_PHASE3 === "1") {
+    const timestamp = new Date().toISOString().slice(0, 19).replace("T", "_").replaceAll(":", "-") + "Z";
+    await inspector.screenshot({
+      path: "../../Development-Screenshots/" + timestamp + "_phase-04_canvas_mock-native-saved-binding_01.png",
+      animations: "disabled",
+    });
+  }
+  await inspector.getByLabel("Publish page text").check();
+  await inspector.getByRole("button", { name: "Save page" }).click();
+  await graph.getByRole("button", { name: "Open character page" }).click();
+  await expect(inspector.getByLabel("Private saved query")).toHaveValue("saved@3");
+  await expect(inspector.getByLabel("exact 1")).toHaveValue("Beatrice");
+  const requests = await page.evaluate(() => (window as unknown as {
+    __canvasBindingRequests: { command: string; payload: unknown }[];
+  }).__canvasBindingRequests);
+  const previews = requests.filter(request => request.command === "workspace_preview_author_layout");
+  const saves = requests.filter(request => request.command === "workspace_save_layout");
+  expect(previews).toHaveLength(1);
+  expect(saves).toHaveLength(1);
+  const preview = previews[0].payload as { revision: number; document: { root: { content: { Stack: unknown[] } } } };
+  const save = saves[0].payload as { expectedRevision: number; published: boolean; document: typeof preview.document };
+  expect(preview.revision).toBe(4);
+  expect(save.expectedRevision).toBe(4);
+  expect(save.published).toBe(true);
+  expect(save.document.root.content.Stack[2]).toEqual(preview.document.root.content.Stack[2]);
+  expect(save.document.root.content.Stack[2]).toMatchObject({
+    audience: "Author", content: { SavedQuery: { world: "archive", query_id: "saved",
+      definition_revision: 3, bindings: [{ name: "exact_1", value: { type: "text", value: "Beatrice" } }] } },
+  });
+  await inspector.getByRole("button", { name: "View current public page" }).click();
+  await expect(inspector.getByText("Public biography", { exact: true })).toBeVisible();
+  await expect(inspector.getByRole("table", { name: "Private query table" })).toHaveCount(0);
+});

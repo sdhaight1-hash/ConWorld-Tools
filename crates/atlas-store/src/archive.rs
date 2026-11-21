@@ -66,3 +66,32 @@ pub fn inspect_archive(path: impl AsRef<Path>, scope: Scope) -> Result<ArchiveMa
         worlds,
     })
 }
+
+/// Restore to a new database beside the caller's chosen destination. Existing
+/// worlds are never overwritten. Validate and migrate before publishing the copy.
+pub fn restore_archive(
+    archive: &Path,
+    destination: &Path,
+    scope: Scope,
+) -> Result<ArchiveManifest, Error> {
+    if scope != Scope::Author {
+        return Err(Error::CapabilityDenied);
+    }
+    let destination = std::path::absolute(destination)?;
+    let parent = destination
+        .parent()
+        .ok_or_else(|| Error::InvalidBackupPath(destination.clone()))?;
+    let temp = tempfile::NamedTempFile::new_in(parent)?.into_temp_path();
+    let filename = temp
+        .to_str()
+        .ok_or_else(|| Error::InvalidBackupPath(temp.to_path_buf()))?;
+    let source = Connection::open_with_flags(archive, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    source.execute("VACUUM INTO ?1", [filename])?;
+    drop(source);
+    inspect_archive(&temp, scope)?;
+    drop(crate::Store::open(&temp)?);
+    let manifest = inspect_archive(&temp, scope)?;
+    temp.persist_noclobber(&destination)
+        .map_err(|error| error.error)?;
+    Ok(manifest)
+}

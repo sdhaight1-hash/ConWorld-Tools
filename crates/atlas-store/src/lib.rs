@@ -20,13 +20,13 @@ pub use calendar::{
 pub use store::Store;
 use uuid::Uuid;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct WorldId(pub Uuid);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct BranchId(pub Uuid);
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ObjectId(pub Uuid);
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -35,7 +35,7 @@ pub struct AuthorRevision(pub i64);
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct WorldDay(pub i64);
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ObjectRef {
     pub world: WorldId,
     pub id: ObjectId,
@@ -119,7 +119,7 @@ impl EventDate {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum EventRole {
     Actor,
     Witness,
@@ -136,7 +136,7 @@ pub enum ActionOutcome {
     Failed,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ClaimAudience {
     Author,
     Public,

@@ -71,6 +71,20 @@ Node Studio's historical author search also supports a bounded **combined query 
 
 The author workspace supports historical alternative names and nicknames for a person, with a versioned alias history, optional fictional-day range, and an enabled/disabled setting. These aliases enhance **possible source mention discovery**. Candidate results show the matched alias and the person's stable canonical identity, including collisions when different people share a name. Review approval still records only an explicit hyperlink; a name match never creates family ties, affiliation, guilt or any other canonical world fact. Alias metadata is currently scoped to the **main author-history branch** and does not flow into forks until branch-aware alias lineage is designed. Published/character search remains unimplemented.
 
+### Character pages and recovery
+
+On the main historical branch, select a person and choose **Open character page**. Enter reader-facing page text and private author notes. **Publish page text** makes the saved text available to the public preview. Clearing the checkbox and saving withdraws the page. Earlier author revisions are read-only. In a world above the graph display budget, a person search result also opens the editor. The editor currently supports a two-text-block character page.
+
+To restore a compatible SQLite backup to a new database file, run `atlas-desktop --restore-archive BACKUP.sqlite NEW.sqlite` (on Windows, `atlas-desktop.exe`). The destination must be new. The command validates the copied database, applies supported migrations, and reports how many worlds it restored. This exports no media assets and does not switch the running application's database.
+
+The [cross-phase development record](Design-Docs/Cross-Phase-Entry-Verification.md) covers scoped publication, historical queries, genealogy, event impact, fictional segment comparison and recovery.
+
+### Family history
+
+Select a person in the native author workspace and choose **Family history**. **Record a parent** saves the parent, the relationship type (biological, adoptive or legal), the effective day range and the author's basis for accepting it. The end day is exclusive. Both people show the link. A withdrawal corrects the author record while preserving what earlier author revisions showed.
+
+**Compare fictional inheritance** uses the selected day, author revision and model seed. Both people need two accepted biological parents for the current fictional model. The output lists shared immediate contributors and dimensionless intervals. Family history currently uses the main author-history branch. See the [kinship implementation and verification record](Design-Docs/ADRs/phase-5-dated-parentage.md).
+
 ### Development screenshots and video evidence
 
 The [**Development-Screenshots**](Development-Screenshots/) directory is the project's chronological archive of **real screenshots and screen recordings** captured during development, debugging, testing, and visual reviews. Its [Dev-Screenshots.md guide](Development-Screenshots/Dev-Screenshots.md) defines the filename convention, documentation requirements, and media index.

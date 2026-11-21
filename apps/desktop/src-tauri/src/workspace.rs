@@ -2094,6 +2094,247 @@ pub fn workspace_save_query(
     workspace.save_query(request)
 }
 
+#[derive(Deserialize)]
+pub struct FamilyRequest {
+    world_id: String,
+    person_id: String,
+    day: i64,
+    revision: i64,
+}
+
+impl FamilyRequest {
+    fn resolve(&self, store: &Store) -> Result<(ViewContext, ObjectRef), String> {
+        let world = store
+            .world(WorldId(id(&self.world_id)?), Scope::Author)
+            .map_err(|e| e.to_string())?;
+        Ok((
+            ViewContext {
+                revision: AuthorRevision(self.revision),
+                ..view(&world, self.day)
+            },
+            reference(world.id, &self.person_id)?,
+        ))
+    }
+}
+
+#[tauri::command]
+pub fn workspace_family_match(
+    workspace: State<'_, AuthorWorkspace>,
+    request: FamilyRequest,
+    other_id: String,
+    seed: u32,
+) -> Result<Vec<atlas_store::inheritance::SyntheticSegment>, String> {
+    let store = workspace.lock()?;
+    let (context, person) = request.resolve(&store)?;
+    store
+        .family_match_at(
+            context,
+            person,
+            reference(context.world, &other_id)?,
+            u64::from(seed),
+        )
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn workspace_family_links(
+    workspace: State<'_, AuthorWorkspace>,
+    request: FamilyRequest,
+) -> Result<Vec<atlas_store::genealogy::FamilyLink>, String> {
+    let store = workspace.lock()?;
+    let (context, person) = request.resolve(&store)?;
+    store
+        .family_links(context, person)
+        .map_err(|e| e.to_string())
+}
+
+#[derive(Deserialize)]
+pub struct ParentInput {
+    parent_id: String,
+    kind: atlas_store::genealogy::ParentageKind,
+    starts_at: i64,
+    ends_before: Option<i64>,
+    rationale: String,
+}
+
+#[tauri::command]
+pub fn workspace_record_parentage(
+    workspace: State<'_, AuthorWorkspace>,
+    request: FamilyRequest,
+    input: ParentInput,
+) -> Result<(), String> {
+    let mut store = workspace.lock()?;
+    let (context, child) = request.resolve(&store)?;
+    let parent = reference(context.world, &input.parent_id)?;
+    store
+        .record_parentage(
+            context,
+            atlas_store::genealogy::RecordParentage {
+                parent,
+                child,
+                kind: input.kind,
+                starts_at: WorldDay(input.starts_at),
+                ends_before: input.ends_before.map(WorldDay),
+                rationale: &input.rationale,
+                command_id: Uuid::new_v4(),
+            },
+        )
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn workspace_withdraw_parentage(
+    workspace: State<'_, AuthorWorkspace>,
+    request: FamilyRequest,
+    link_id: String,
+    rationale: String,
+) -> Result<(), String> {
+    let mut store = workspace.lock()?;
+    let (context, person) = request.resolve(&store)?;
+    store
+        .withdraw_parentage(context, person, id(&link_id)?, Uuid::new_v4(), &rationale)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn workspace_entry_layout(
+    workspace: State<'_, AuthorWorkspace>,
+    world_id: String,
+    entry_id: String,
+    revision: i64,
+    day: i64,
+) -> Result<Option<(atlas_store::layout::LayoutDocument, bool)>, String> {
+    let store = workspace.lock()?;
+    let world = store
+        .world(WorldId(id(&world_id)?), Scope::Author)
+        .map_err(|e| e.to_string())?;
+    let context = ViewContext {
+        revision: AuthorRevision(revision),
+        ..view(&world, day)
+    };
+    store
+        .entry_layout(context, reference(world.id, &entry_id)?)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn workspace_preview_author_layout(
+    app: AppHandle,
+    request_id: String,
+    world_id: String,
+    day: i64,
+    revision: i64,
+    document: atlas_store::layout::LayoutDocument,
+) -> Result<Option<atlas_store::layout::DisplayElement>, String> {
+    run_query_job(app, request_id, move |workspace, control| {
+        let store = workspace.lock()?;
+        let world = store
+            .world(WorldId(id(&world_id)?), Scope::Author)
+            .map_err(|e| e.to_string())?;
+        let context = ViewContext {
+            revision: AuthorRevision(revision),
+            ..view(&world, day)
+        };
+        store
+            .preview_author_layout(context, &document, control)
+            .map_err(|e| e.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
+pub fn workspace_save_layout(
+    workspace: State<'_, AuthorWorkspace>,
+    world_id: String,
+    day: i64,
+    expected_revision: i64,
+    document: atlas_store::layout::LayoutDocument,
+    published: bool,
+) -> Result<(), String> {
+    let mut store = workspace.lock()?;
+    let world = AuthorWorkspace::edit_world(&store, &world_id, expected_revision)?;
+    store
+        .save_entry_layout(view(&world, day), &document, published, Uuid::new_v4())
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn workspace_public_entry(
+    workspace: State<'_, AuthorWorkspace>,
+    world_id: String,
+    entry_id: String,
+    day: i64,
+) -> Result<Option<atlas_store::layout::DisplayElement>, String> {
+    let store = workspace.lock()?;
+    let world = store
+        .world(WorldId(id(&world_id)?), Scope::Author)
+        .map_err(|e| e.to_string())?;
+    store
+        .display_entry(
+            ViewContext {
+                scope: Scope::Public,
+                ..view(&world, day)
+            },
+            reference(world.id, &entry_id)?,
+        )
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn workspace_search_public_entry(
+    workspace: State<'_, AuthorWorkspace>,
+    world_id: String,
+    entry_id: String,
+    day: i64,
+    text: String,
+) -> Result<Option<atlas_store::layout::EntryTextSearch>, String> {
+    let store = workspace.lock()?;
+    let world = store
+        .world(WorldId(id(&world_id)?), Scope::Author)
+        .map_err(|e| e.to_string())?;
+    store
+        .search_entry_text(
+            ViewContext {
+                scope: Scope::Public,
+                ..view(&world, day)
+            },
+            reference(world.id, &entry_id)?,
+            &text,
+            50,
+        )
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn workspace_search_public_pages(
+    app: AppHandle,
+    request_id: String,
+    world_id: String,
+    day: i64,
+    text: String,
+) -> Result<atlas_store::layout::PublicPageSearch, String> {
+    run_query_job(app, request_id, move |workspace, control| {
+        let store = workspace.lock()?;
+        let world = store
+            .world(WorldId(id(&world_id)?), Scope::Author)
+            .map_err(|e| e.to_string())?;
+        store
+            .search_public_pages(
+                ViewContext {
+                    scope: Scope::Public,
+                    ..view(&world, day)
+                },
+                &text,
+                50,
+                control,
+            )
+            .map_err(|e| e.to_string())
+    })
+    .await
+}
+
 #[tauri::command]
 pub fn workspace_create_person(
     workspace: State<'_, AuthorWorkspace>,

@@ -18,7 +18,10 @@ use crate::query::{
 use crate::*;
 
 pub(crate) const APPLICATION_ID: i64 = 0x4357_4c44; // CWLD
-pub(crate) const SCHEMA_VERSION: i64 = 21;
+mod entries;
+mod family;
+
+pub(crate) const SCHEMA_VERSION: i64 = 26;
 
 // Candidate queries bind world (?1), focus/phrase (?2), author revision (?3),
 // limit (?4) and branch (?5). Follow only immutable inherited revisions.
@@ -166,6 +169,22 @@ impl Store {
         }
         if version < 21 {
             tx.execute_batch(include_str!("../migrations/0021.sql"))?;
+        }
+        if version < 22 {
+            tx.execute_batch(include_str!("../migrations/0022.sql"))?;
+        }
+        if version < 23 {
+            tx.execute_batch(include_str!("../migrations/0023.sql"))?;
+        }
+        if version < 24 {
+            tx.execute_batch(include_str!("../migrations/0024.sql"))?;
+            entries::rebuild_public_page_index(&tx)?;
+        }
+        // Version 25 adds the SavedQuery layout variant without changing tables.
+        // Older readers must not open databases containing this serialization.
+        if version < 26 {
+            tx.execute_batch(include_str!("../migrations/0026.sql"))?;
+            entries::rebuild_entry_link_index(&tx)?;
         }
         if version < SCHEMA_VERSION {
             verify_foreign_keys(&tx)?;
@@ -353,6 +372,8 @@ impl Store {
             [],
         )?;
         rebuild_alias_name_index(&tx)?;
+        entries::rebuild_public_page_index(&tx)?;
+        entries::rebuild_entry_link_index(&tx)?;
         tx.execute_batch(
             "REINDEX discovery_person_prefix_idx; REINDEX discovery_alias_prefix_idx;",
         )?;
@@ -932,28 +953,27 @@ impl Store {
         const CANDIDATE_BUDGET: i64 = 10_000;
         let matches = {
             // Static, allowlisted SQL plans only. User input is always a bound
-            // literal FTS phrase; never a table name or MATCH expression.
+            // literal FTS phrase. Drive lookup from postings before fetching version
+            // metadata. Complete results are sorted after historical resolution.
             let sql = if claims_only {
                 "SELECT d.claim_id, d.branch_id, d.state_revision, d.revision
                  FROM claim_search_fts
-                 JOIN claim_search_documents d ON d.doc_id = claim_search_fts.rowid
+                 CROSS JOIN claim_search_documents d ON d.doc_id = claim_search_fts.rowid
                  WHERE d.world_id = ?1 AND claim_search_fts MATCH ?2
                    AND d.revision <= ?3 AND EXISTS (
                        SELECT 1 FROM lineage l WHERE l.branch_id = d.branch_id
                        AND d.revision <= l.max_revision
                    )
-                 ORDER BY d.claim_id, d.branch_id, d.state_revision, d.revision
                  LIMIT ?4"
             } else {
                 "SELECT d.object_id, d.branch_id, d.state_revision, d.revision
                  FROM object_search_fts
-                 JOIN object_search_documents d ON d.doc_id = object_search_fts.rowid
+                 CROSS JOIN object_search_documents d ON d.doc_id = object_search_fts.rowid
                  WHERE d.world_id = ?1 AND object_search_fts MATCH ?2
                    AND d.revision <= ?3 AND EXISTS (
                        SELECT 1 FROM lineage l WHERE l.branch_id = d.branch_id
                        AND d.revision <= l.max_revision
                    )
-                 ORDER BY d.object_id, d.branch_id, d.state_revision, d.revision
                  LIMIT ?4"
             };
             let sql = format!("{QUERY_LINEAGE}{sql}");
@@ -2189,6 +2209,31 @@ impl Store {
         }
         tx.commit()?;
         Ok(linked)
+    }
+
+    /// Resolve only the endpoints used by a bounded domain operation.
+    pub(crate) fn referenced_versions(
+        &self,
+        view: ViewContext,
+        references: HashSet<ObjectRef>,
+    ) -> Result<Vec<Version>, Error> {
+        require_author(view.scope)?;
+        self.validate_query_view(view)?;
+        let tx = self.conn.unchecked_transaction()?;
+        let mut versions = Vec::new();
+        for object in references {
+            self.check_query_control()?;
+            if object.world != view.world {
+                return Err(Error::WrongWorld);
+            }
+            if let Some(version) =
+                resolve_object(&tx, object, view.branch, view.revision, view.day)?
+            {
+                versions.push(version);
+            }
+        }
+        tx.commit()?;
+        Ok(versions)
     }
 
     pub fn get_object(
