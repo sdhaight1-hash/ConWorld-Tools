@@ -8,12 +8,12 @@ use uuid::Uuid;
 
 use crate::discovery::{MentionCandidate, MentionDisposition, ReviewMention, matching_spans};
 use crate::query::{
-    QUERY_SCHEMA_VERSION, QueryFilter, QuerySpec, SaveNamedLabelQuery, SavedLabelQuery,
+    QUERY_SCHEMA_VERSION, PredicateInput, QueryFilter, QuerySpec, SaveNamedLabelQuery, SavedLabelQuery, validate_predicate,
 };
 use crate::*;
 
 pub(crate) const APPLICATION_ID: i64 = 0x4357_4c44; // CWLD
-pub(crate) const SCHEMA_VERSION: i64 = 11;
+pub(crate) const SCHEMA_VERSION: i64 = 12;
 
 pub struct Store {
     conn: Connection,
@@ -76,6 +76,9 @@ impl Store {
         }
         if version < 11 {
             tx.execute_batch(include_str!("../migrations/0011.sql"))?;
+        }
+        if version < 12 {
+            tx.execute_batch(include_str!("../migrations/0012.sql"))?;
             verify_foreign_keys(&tx)?;
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
@@ -287,14 +290,25 @@ impl Store {
             return Err(Error::InvalidInput("saved query schema or limit"));
         }
         let (kind, term) = match &spec.filter {
-            QueryFilter::LabelContains(text) => ("contains", text.as_str()),
-            QueryFilter::ExactLabel(text) => ("exact", text.as_str()),
-            QueryFilter::FullTextPhrase(text) => ("fulltext", text.as_str()),
-            QueryFilter::ClaimFullTextPhrase(text) => ("claimtext", text.as_str()),
+            QueryFilter::LabelContains(text) => ("contains", text.trim().to_string()),
+            QueryFilter::ExactLabel(text) => ("exact", text.trim().to_string()),
+            QueryFilter::FullTextPhrase(text) => ("fulltext", text.trim().to_string()),
+            QueryFilter::ClaimFullTextPhrase(text) => ("claimtext", text.trim().to_string()),
+            QueryFilter::Kind(_)
+            | QueryFilter::HasSource(_)
+            | QueryFilter::And(_)
+            | QueryFilter::Or(_)
+            | QueryFilter::Not(_) => {
+                let mut nodes = 0;
+                validate_predicate(&spec.filter, world_id, 0, &mut nodes)?;
+                let encoded = PredicateInput::from_filter(&spec.filter)?;
+                let text = serde_json::to_string(&encoded)
+                    .map_err(|_| Error::InvalidInput("saved predicate serialization"))?;
+                ("composite", text)
+            }
             _ => return Err(Error::InvalidInput("unsupported saved query filter")),
         };
-        let term = term.trim();
-        if term.is_empty() || term.len() > 800 {
+        if term.is_empty() || term.len() > if kind == "composite" { 4_096 } else { 800 } {
             return Err(Error::InvalidInput("saved query search term"));
         }
         let tx = self
@@ -353,7 +367,8 @@ impl Store {
                     "contains" => QueryFilter::LabelContains(term.into()),
                     "exact" => QueryFilter::ExactLabel(term.into()),
                     "fulltext" => QueryFilter::FullTextPhrase(term.into()),
-                    _ => QueryFilter::ClaimFullTextPhrase(term.into()),
+                    "claimtext" => QueryFilter::ClaimFullTextPhrase(term.into()),
+                    _ => spec.filter.clone(),
                 },
                 ..spec.clone()
             },
@@ -411,6 +426,15 @@ impl Store {
                 "exact" => QueryFilter::ExactLabel(term),
                 "fulltext" => QueryFilter::FullTextPhrase(term),
                 "claimtext" => QueryFilter::ClaimFullTextPhrase(term),
+                "composite" => {
+                    let dto: PredicateInput = serde_json::from_str(&term)
+                        .map_err(|_| Error::InvalidInput("saved predicate JSON"))?;
+                    let mut nodes = 0;
+                    let filter = dto.into_filter(world_id, 0, &mut nodes)?;
+                    let mut checked = 0;
+                    validate_predicate(&filter, world_id, 0, &mut checked)?;
+                    filter
+                }
                 _ => return Err(Error::InvalidInput("saved query filter kind")),
             };
             result.push(SavedLabelQuery {
