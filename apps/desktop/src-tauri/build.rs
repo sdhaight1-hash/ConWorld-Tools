@@ -10,6 +10,7 @@ fn main() {
             "workspace_search",
             "workspace_discover_mentions",
             "workspace_review_mention",
+            "workspace_save_person_alias",
             "workspace_saved_queries",
             "workspace_save_query",
             "workspace_query_path",

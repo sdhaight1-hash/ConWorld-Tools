@@ -8,7 +8,7 @@ use atlas_store::{
     ActionOutcome, AuthorRevision, Change, ClaimAudience, Command, Definition, EventDate,
     EventRole, ObjectData, ObjectId, ObjectRef, Record, Scope, Store, ValidInterval, VersionRef,
     ViewContext, World, WorldDay, WorldId,
-    discovery::{MentionDisposition, ReviewMention},
+    discovery::{MentionDisposition, ReviewMention, SavePersonAlias},
     query::{
         Direction, PredicateInput, QUERY_SCHEMA_VERSION, QueryFilter, QuerySpec,
         SaveNamedLabelQuery,
@@ -85,6 +85,30 @@ pub struct SavedQuerySummary {
 }
 
 #[derive(Deserialize)]
+pub struct PersonAliasInput {
+    world_id: String,
+    expected_revision: i64,
+    day: i64,
+    person_id: String,
+    alias_id: Option<String>,
+    label: String,
+    starts_at: Option<i64>,
+    ends_before: Option<i64>,
+    active: bool,
+}
+
+#[derive(Serialize)]
+pub struct PersonAliasSummary {
+    id: String,
+    person_id: String,
+    label: String,
+    starts_at: Option<i64>,
+    ends_before: Option<i64>,
+    active: bool,
+    recorded_at: i64,
+}
+
+#[derive(Deserialize)]
 pub struct ReviewMentionInput {
     world_id: String,
     day: i64,
@@ -109,6 +133,7 @@ pub struct MentionDiscoveryRow {
     statement: String,
     target_id: String,
     target_label: String,
+    matched_label: String,
     start_byte: usize,
     end_byte: usize,
     collisions: usize,
@@ -182,6 +207,7 @@ pub struct WorkspaceSnapshot {
     relationships: Vec<RelationshipSummary>,
     events: Vec<EventSummary>,
     definitions: Vec<DefinitionSummary>,
+    aliases: Vec<PersonAliasSummary>,
 }
 
 #[derive(Serialize)]
@@ -522,6 +548,30 @@ impl AuthorWorkspace {
         Ok(saved.id.to_string())
     }
 
+    fn save_person_alias(&self, input: PersonAliasInput) -> Result<String, String> {
+        let world = WorldId(id(&input.world_id)?);
+        let mut store = self.lock()?;
+        let saved = store
+            .save_person_alias(SavePersonAlias {
+                world,
+                person: ObjectRef {
+                    world,
+                    id: ObjectId(id(&input.person_id)?),
+                },
+                day: WorldDay(input.day),
+                expected: AuthorRevision(input.expected_revision),
+                alias_id: input.alias_id.as_deref().map(id).transpose()?,
+                label: &input.label,
+                starts_at: input.starts_at.map(WorldDay),
+                ends_before: input.ends_before.map(WorldDay),
+                active: input.active,
+                command_id: Uuid::new_v4(),
+                scope: Scope::Author,
+            })
+            .map_err(|error| error.to_string())?;
+        Ok(saved.id.to_string())
+    }
+
     fn review_mention(&self, input: ReviewMentionInput) -> Result<i64, String> {
         let decision = match input.decision.as_str() {
             "approved" => MentionDisposition::Approved,
@@ -594,6 +644,7 @@ impl AuthorWorkspace {
                     statement: candidate.statement,
                     target_id: candidate.target.id.0.to_string(),
                     target_label: candidate.target_label,
+                    matched_label: candidate.matched_label,
                     start_byte: candidate.start_byte,
                     end_byte: candidate.end_byte,
                     collisions: candidate.collisions,
@@ -926,6 +977,20 @@ impl AuthorWorkspace {
         people.sort_by(|a, b| a.label.cmp(&b.label).then(a.id.cmp(&b.id)));
         relationships.sort_by(|a, b| a.kind.cmp(&b.kind).then(a.id.cmp(&b.id)));
         definitions.sort_by(|a, b| a.category.cmp(b.category).then(a.label.cmp(&b.label)));
+        let aliases = store
+            .person_aliases(context)
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .map(|alias| PersonAliasSummary {
+                id: alias.id.to_string(),
+                person_id: alias.person.id.0.to_string(),
+                label: alias.label,
+                starts_at: alias.starts_at.map(|day| day.0),
+                ends_before: alias.ends_before.map(|day| day.0),
+                active: alias.active,
+                recorded_at: alias.recorded_at.0,
+            })
+            .collect();
         Ok(WorkspaceSnapshot {
             world: summary(world),
             view_revision: context.revision.0,
@@ -934,6 +999,7 @@ impl AuthorWorkspace {
             relationships,
             events,
             definitions,
+            aliases,
         })
     }
 
@@ -1610,6 +1676,14 @@ pub fn workspace_search(
     limit: usize,
 ) -> Result<SearchSummary, String> {
     workspace.search(&world_id, day, revision, &mode, &term, limit)
+}
+
+#[tauri::command]
+pub fn workspace_save_person_alias(
+    workspace: State<'_, AuthorWorkspace>,
+    request: PersonAliasInput,
+) -> Result<String, String> {
+    workspace.save_person_alias(request)
 }
 
 #[tauri::command]
