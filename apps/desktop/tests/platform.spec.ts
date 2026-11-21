@@ -79,5 +79,5 @@ test("wgpu renders, pans, zooms and recovers from device loss", async ({ page })
 test("the browser-only preview does not expose native author history", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("region", { name: "Scrollable diagram" })).toBeVisible();
-  await expect(page.getByRole("region", { name: "Northbridge relationship history" })).toBeHidden();
+  await expect(page.locator("#history")).toBeHidden();
 });
