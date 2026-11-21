@@ -1,6 +1,6 @@
 //! Versioned composite query definitions: typed ASTs, not cached results.
 use atlas_store::{
-    query::{ObjectKindFilter, QUERY_SCHEMA_VERSION, QueryFilter, QuerySpec, SaveNamedLabelQuery},
+    query::{ObjectKindFilter, ParameterBinding, ParameterValue, QUERY_SCHEMA_VERSION, QueryFilter, QuerySpec, SaveNamedLabelQuery},
     *,
 };
 use tempfile::tempdir;
@@ -362,6 +362,59 @@ fn schema_fourteen_upgrade_preserves_saved_predicates_and_marks_compatibility() 
         reopened.saved_label_queries(world.id, saved.recorded_at, Scope::Author)?[0].spec,
         original
     );
+    reopened.verify_foreign_keys(Scope::Author)?;
+    Ok(())
+}
+
+#[test]
+fn saved_parameter_defaults_overrides_and_history_survive_reopen() -> Result<(), Error> {
+    let dir = tempdir()?;
+    let path = dir.path().join("parameters.sqlite");
+    let mut store = Store::open(&path)?;
+    let world = store.create_world("Parameterized archive", Scope::Author)?;
+    let other = store.create_world("Other archive", Scope::Author)?;
+    let alice = ObjectRef::new(world.id);
+    let bob = ObjectRef::new(world.id);
+    let created = store.apply(&command(
+        &world, world.revision,
+        vec![
+            Change::Create(alice, record("Alice", ObjectData::Person, None)),
+            Change::Create(bob, record("Bob", ObjectData::Person, None)),
+        ],
+    ))?;
+    let original = spec(QueryFilter::And(vec![
+        QueryFilter::Kind(ObjectKindFilter::Person),
+        QueryFilter::FullTextPhrase("Alice".into()),
+    ]));
+    let saved = store.save_named_parameterized_query(SaveNamedLabelQuery {
+        world_id: world.id, expected: created, query_id: None,
+        name: "Find a person", spec: &original, command_id: Uuid::new_v4(), scope: Scope::Author,
+    })?;
+    assert_eq!(saved.parameters.len(), 2);
+    let context = view(&world, saved.recorded_at);
+    let binding = ParameterBinding {
+        name: "label_phrase_2".into(),
+        value: ParameterValue::Text { value: "Bob".into() },
+    };
+    assert_eq!(store.execute_query(&saved.bind(context, &[])?, context)?.rows[0].object, alice);
+    assert_eq!(store.execute_query(&saved.bind(context, std::slice::from_ref(&binding))?, context)?.rows[0].object, bob);
+    assert!(saved.bind(context, &[binding.clone(), binding.clone()]).is_err());
+    let wrong = ParameterBinding { name: binding.name.clone(), value: ParameterValue::ObjectKind { value: ObjectKindFilter::Person } };
+    assert!(saved.bind(context, &[wrong]).is_err());
+    let unknown = ParameterBinding { name: "unknown".into(), ..binding.clone() };
+    assert!(saved.bind(context, &[unknown]).is_err());
+    assert!(matches!(saved.bind(view(&world, created), &[]), Err(Error::InvalidRevision)));
+    assert!(matches!(saved.bind(view(&other, other.revision), &[]), Err(Error::WrongWorld)));
+    assert!(matches!(saved.bind(ViewContext { scope: Scope::Public, ..context }, &[]), Err(Error::CapabilityDenied)));
+    let revised = save(&mut store, &world, saved.recorded_at, Some(saved.id), "Literal only", &original)?;
+    assert!(revised.parameters.is_empty());
+    drop(store);
+    let reopened = Store::open(&path)?;
+    let old = reopened.saved_label_queries(world.id, saved.recorded_at, Scope::Author)?.remove(0);
+    assert_eq!(old.parameters, saved.parameters);
+    assert_eq!(reopened.execute_query(&old.bind(context, &[binding])?, context)?.rows[0].object, bob);
+    let current = reopened.saved_label_queries(world.id, revised.recorded_at, Scope::Author)?.remove(0);
+    assert!(current.parameters.is_empty());
     reopened.verify_foreign_keys(Scope::Author)?;
     Ok(())
 }
