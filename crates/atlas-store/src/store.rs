@@ -3159,3 +3159,41 @@ fn read_version(
         },
     })
 }
+
+#[cfg(test)]
+mod query_control_tests {
+    use super::*;
+
+    #[test]
+    fn sqlite_progress_handler_interrupts_and_is_removed() -> Result<(), Error> {
+        let store = Store::open(":memory:")?;
+        let control = QueryControl::new(Duration::from_secs(5))?;
+        let result = store.with_query_control(&control, |store| {
+            control.cancel();
+            let interrupted = store.conn.query_row(
+                "WITH RECURSIVE seq(n) AS (
+                    SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 1000000
+                 ) SELECT sum(n) FROM seq",
+                [],
+                |row| row.get::<_, i64>(0),
+            );
+            assert!(matches!(
+                &interrupted,
+                Err(rusqlite::Error::SqliteFailure(error, _))
+                    if error.code == rusqlite::ErrorCode::OperationInterrupted
+            ));
+            interrupted.map_err(Error::from)
+        });
+        assert!(matches!(result, Err(Error::QueryCancelled)));
+        assert!(store.query_control.borrow().is_none());
+        let count = store.conn.query_row(
+            "WITH RECURSIVE seq(n) AS (
+                SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 10000
+             ) SELECT count(*) FROM seq",
+            [],
+            |row| row.get::<_, i64>(0),
+        )?;
+        assert_eq!(count, 10_000);
+        Ok(())
+    }
+}
