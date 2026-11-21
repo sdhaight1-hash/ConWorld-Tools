@@ -17,7 +17,7 @@ use crate::query::{
 use crate::*;
 
 pub(crate) const APPLICATION_ID: i64 = 0x4357_4c44; // CWLD
-pub(crate) const SCHEMA_VERSION: i64 = 14;
+pub(crate) const SCHEMA_VERSION: i64 = 15;
 
 pub struct Store {
     conn: Connection,
@@ -89,6 +89,10 @@ impl Store {
         }
         if version < 14 {
             tx.execute_batch(include_str!("../migrations/0014.sql"))?;
+        }
+        // Version 15 adds saved predicate operators, not tables. An older
+        // binary must reject the database before reading unknown AST variants.
+        if version < SCHEMA_VERSION {
             verify_foreign_keys(&tx)?;
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }

@@ -127,6 +127,8 @@
               <fieldset>
                 <legend>Combine historical object filters</legend>
                 <label>Label contains <input name="name" maxlength="800" placeholder="Optional label text" /></label>
+                <label>Indexed label phrase <input name="label_phrase" maxlength="800" placeholder="Optional literal phrase" /></label>
+                <label>Indexed claim phrase <input name="claim_phrase" maxlength="800" placeholder="Optional sourced statement phrase" /></label>
                 <label>Object kind
                   <select name="kind">
                     <option value="">Any kind</option>
@@ -146,7 +148,7 @@
                 </label>
                 <label><input name="negate" type="checkbox" /> Exclude matches (NOT)</label>
                 <button type="submit">Run combined query</button>
-                <p class="hint">Bounded author snapshot query (up to 2,000 objects). Results are not published.</p>
+                <p class="hint">Indexed positive filters can narrow the search without a full snapshot. Unanchored filters are limited to 2,000 visible objects. Author results only.</p>
               </fieldset>
             </form>
             <section id="author-mention-discovery" aria-label="Mention discovery" class="mention-discovery">
