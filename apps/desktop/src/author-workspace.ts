@@ -512,17 +512,14 @@ export async function showAuthorWorkspace(
       : "World loaded. Edits are saved locally.";
   }
 
-  queryForm.addEventListener("submit", (event) => {
-    event.preventDefault();
+  function runSearch(mode: string, term: string) {
     if (!snapshot || saving) return;
     const sequence = ++querySequence;
     const worldId = snapshot.world.id;
     const day = snapshot.day;
     const revision = selectedRevision();
-    const term = field<HTMLInputElement>(queryForm, "term").value.trim();
-    const mode = field<HTMLSelectElement>(queryForm, "mode").value;
     queryResults.replaceChildren();
-    queryStatus.textContent = "Searching historical records…";
+    queryStatus.textContent = mode === "backlinks" ? "Finding incoming references…" : "Searching historical records…";
     void (async () => {
       try {
         const result = await invoke<SearchResult>("workspace_search", { worldId, day, revision, mode, term, limit: 100 });
@@ -546,6 +543,13 @@ export async function showAuthorWorkspace(
             text.textContent = description;
             item.append(text);
           }
+          const references = document.createElement("button");
+          references.type = "button";
+          references.className = "query-references";
+          references.textContent = "Find references";
+          references.setAttribute("aria-label", "Find references to " + row.label + " " + row.id);
+          references.addEventListener("click", () => runSearch("backlinks", row.id));
+          item.append(references);
           queryResults.append(item);
         }
         queryStatus.textContent = result.rows.length + " match(es) at author revision " + result.revision +
@@ -554,6 +558,12 @@ export async function showAuthorWorkspace(
         if (sequence === querySequence) queryStatus.textContent = "Search failed: " + String(error);
       }
     })();
+  }
+
+  queryForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    runSearch(field<HTMLSelectElement>(queryForm, "mode").value,
+      field<HTMLInputElement>(queryForm, "term").value.trim());
   });
 
   async function refreshWorlds(preferred = worldSelect.value) {
