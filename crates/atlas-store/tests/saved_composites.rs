@@ -533,7 +533,10 @@ fn schema_eighteen_upgrade_keeps_literal_definitions_and_scopes_sources() -> Res
             source_id: Uuid::new_v4().to_string(),
         },
     };
-    assert!(matches!(saved.bind(context, &[foreign]), Err(Error::WrongWorld)));
+    assert!(matches!(
+        saved.bind(context, &[foreign]),
+        Err(Error::WrongWorld)
+    ));
     let replacement = ObjectRef::new(world.id);
     let local = ParameterBinding {
         name: "source_1".into(),

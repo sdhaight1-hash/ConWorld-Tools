@@ -1312,6 +1312,13 @@ test("saved parameters use typed bindings and server-side saved identity", async
   await parameter.fill("Bob");
   await saved.getByRole("button", { name: "Run saved search" }).click();
   await expect(page.locator("#author-query-results")).toContainText("Bob");
+  if (process.env.ATLAS_CAPTURE_PHASE3 === "1") {
+    const timestamp = new Date().toISOString().slice(0, 19).replace("T", "_").replaceAll(":", "-") + "Z";
+    await saved.screenshot({
+      path: "../../Development-Screenshots/" + timestamp + "_phase-03_query_saved-parameter-override_01.png",
+      animations: "disabled",
+    });
+  }
   const calls = await page.evaluate(() => (window as unknown as { __parameterCalls: unknown[] }).__parameterCalls);
   expect(calls).toMatchObject([
     { operation: "save", parameterize: true, term: "Alice" },

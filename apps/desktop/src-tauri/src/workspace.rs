@@ -11,8 +11,8 @@ use atlas_store::{
     VersionRef, ViewContext, World, WorldDay, WorldId,
     discovery::{MentionDisposition, ReviewMention, SavePersonAlias},
     query::{
-        Direction, ParameterBinding, PredicateInput, QUERY_SCHEMA_VERSION, QueryControl, QueryCursor,
-        QueryFilter, QueryParameter, QuerySpec, SaveNamedLabelQuery,
+        Direction, ParameterBinding, PredicateInput, QUERY_SCHEMA_VERSION, QueryControl,
+        QueryCursor, QueryFilter, QueryParameter, QuerySpec, SaveNamedLabelQuery,
     },
 };
 use serde::{Deserialize, Serialize};

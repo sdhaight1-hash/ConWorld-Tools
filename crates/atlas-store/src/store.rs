@@ -1218,18 +1218,22 @@ impl Store {
             )?;
             statement
                 .query_map(
-                    params![world_id.0.as_bytes(), revision.0, query_id.as_ref().map(Uuid::as_bytes)],
+                    params![
+                        world_id.0.as_bytes(),
+                        revision.0,
+                        query_id.as_ref().map(Uuid::as_bytes)
+                    ],
                     |row| {
-                    Ok((
-                        Uuid::from_bytes(row.get(0)?),
-                        row.get::<_, String>(1)?,
-                        row.get::<_, i64>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, String>(4)?,
-                        row.get::<_, i64>(5)?,
-                        row.get::<_, i64>(6)?,
-                        row.get::<_, Option<String>>(7)?,
-                    ))
+                        Ok((
+                            Uuid::from_bytes(row.get(0)?),
+                            row.get::<_, String>(1)?,
+                            row.get::<_, i64>(2)?,
+                            row.get::<_, String>(3)?,
+                            row.get::<_, String>(4)?,
+                            row.get::<_, i64>(5)?,
+                            row.get::<_, i64>(6)?,
+                            row.get::<_, Option<String>>(7)?,
+                        ))
                     },
                 )?
                 .collect::<Result<Vec<_>, _>>()?
