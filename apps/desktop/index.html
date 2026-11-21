@@ -88,10 +88,12 @@
                   <option value="contains">Contains text</option>
                   <option value="exact">Exact name (show duplicates)</option>
                   <option value="fulltext">Full-text label phrase (indexed)</option>
+                  <option value="claimtext">Full-text sourced claim statement (indexed, author only)</option>
                 </select>
               </label>
               <button type="submit">Search history</button>
             </form>
+            <p class="hint">Claim-text results display the recorded statement and citation to authors; a statement is not independent proof of its contents.</p>
             <form id="author-save-query-form" class="query-form saved-query-form">
               <label>Saved search <select name="query_id" aria-label="Saved search"><option value="">New saved search</option></select></label>
               <label>Saved search name <input name="name" maxlength="200" required placeholder="My historical search" /></label>

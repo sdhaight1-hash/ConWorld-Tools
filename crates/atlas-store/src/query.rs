@@ -23,6 +23,8 @@ pub enum QueryFilter {
     ExactLabel(String),
     /// Literal token phrase over versioned object labels, indexed with FTS5.
     FullTextPhrase(String),
+    /// Literal token phrase in versioned, source-backed claim statements.
+    ClaimFullTextPhrase(String),
     Backlinks(ObjectRef),
     EventRole {
         event: ObjectRef,
@@ -81,14 +83,22 @@ impl Store {
         if spec.schema_version != QUERY_SCHEMA_VERSION || !(1..=500).contains(&spec.limit) {
             return Err(Error::InvalidInput("query schema or result limit"));
         }
-        if let QueryFilter::FullTextPhrase(phrase) = &spec.filter {
-            return self.indexed_phrase_at(phrase, view, spec.limit);
+        match &spec.filter {
+            QueryFilter::FullTextPhrase(phrase) => {
+                return self.indexed_phrase_at(phrase, view, spec.limit);
+            }
+            QueryFilter::ClaimFullTextPhrase(phrase) => {
+                return self.indexed_claim_phrase_at(phrase, view, spec.limit);
+            }
+            _ => {}
         }
         let objects = self.objects_at(view, 2_000)?;
         let visible: HashSet<_> = objects.iter().map(|version| version.object).collect();
         let mut truncated = false;
         let mut rows: Vec<_> = match &spec.filter {
-            QueryFilter::FullTextPhrase(_) => unreachable!("handled by the FTS5 query path"),
+            QueryFilter::FullTextPhrase(_) | QueryFilter::ClaimFullTextPhrase(_) => {
+                unreachable!("handled by the indexed FTS5 query path")
+            }
             QueryFilter::LabelContains(text) | QueryFilter::ExactLabel(text) => {
                 let needle = search_label(text)?;
                 let exact = matches!(spec.filter, QueryFilter::ExactLabel(_));
