@@ -109,7 +109,7 @@ test("native author form refuses a missing historical day instead of silently sa
           }
           if (command === "workspace_worlds") return [world];
           if (command === "workspace_snapshot") {
-            return { world, day: 0, view_revision: 0, people, relationships: [] };
+            return { world, day: 0, view_revision: 0, people, relationships: [], events: [] };
           }
           if (command === "workspace_create_relationship") {
             writes.push(command);
@@ -127,7 +127,8 @@ test("native author form refuses a missing historical day instead of silently sa
   await expect(form.locator('select[name="target"]')).toHaveValue("00000000-0000-4000-8000-000000000003");
   const day = page.locator("#author-day");
   await day.fill("");
-  await form.getByRole("button", { name: "Create relationship at selected day" }).click();
+  await day.blur();
+  await expect(form.getByRole("button", { name: "Create relationship at selected day" })).toBeDisabled();
   await expect(page.locator("#author-status")).toContainText("Enter a whole-number historical day.");
   const writes = await page.evaluate(() => (window as unknown as { __authorTestWrites: string[] }).__authorTestWrites);
   expect(writes).toEqual([]);
@@ -142,4 +143,100 @@ test("native author form refuses a missing historical day instead of silently sa
   await revision.fill("");
   await revision.blur();
   await expect(form.getByRole("button", { name: "Create relationship at selected day" })).toBeEnabled();
+});
+
+test("saved world graph follows the author view and submits a specific causing actor", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "archive", name: "River Archive", revision: 4 };
+    const people = [{ id: "alice", label: "Alice" }, { id: "beatrice", label: "Beatrice" }];
+    const requests: unknown[] = [];
+    Object.assign(window, {
+      isTauri: true,
+      __eventRequests: requests,
+      __TAURI_INTERNALS__: {
+        invoke: async (command: string, payload: { day: number; revision: number | null; request?: unknown }) => {
+          if (command === "platform_scene") return { target: "native bridge test", smoke: false, scene: { nodes: [], edges: [] } };
+          if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+          if (command === "workspace_worlds") return [world];
+          if (command === "workspace_record_event") {
+            requests.push(payload.request);
+            return null;
+          }
+          if (command === "workspace_snapshot") {
+            const later = payload.day >= 10 && payload.revision !== 3;
+            return {
+              world, day: payload.day, view_revision: payload.revision ?? 4, people,
+              relationships: [{
+                id: "bond", subject_id: "alice", target_id: "beatrice", kind: "friendship",
+                trust: later ? 12 : 90, tags: [later ? "estranged" : "friends"], starts_at: later ? 10 : 0,
+                cause: later ? {
+                  event_id: "letter", day: 10, event: "Disclosed letter", actor: "Beatrice",
+                  action: "Disclose", outcome: "succeeded", intent: "Publicize", source: "Folio 14",
+                  explanation: "A confidence was broken", before_trust: 90, before_tags: ["friends"],
+                  after_trust: 12, after_tags: ["estranged"],
+                } : null,
+              }],
+              events: later ? [{
+                id: "letter", label: "Disclosed letter", day: 10, citation: "Folio 14",
+                participants: [{ person_id: "alice", role: "actor" }, { person_id: "beatrice", role: "actor" }],
+                actions: [
+                  { id: "prevent", person_id: "alice", action: "Prevent", outcome: "failed", intent: "Protect the letter" },
+                  { id: "disclose", person_id: "beatrice", action: "Disclose", outcome: "succeeded", intent: "Publicize" },
+                ],
+              }] : [],
+            };
+          }
+          throw new Error("Unexpected mock command: " + command);
+        },
+      },
+    });
+  });
+  await page.goto("/");
+  const graph = page.getByRole("region", { name: "Saved world graph" });
+  await expect(graph).toBeVisible();
+  const day = page.locator("#author-day");
+  await day.fill("8");
+  await day.blur();
+  await expect(page.locator("#author-world-info")).toContainText("historical day 8");
+
+  const editor = page.locator("#author-record-event");
+  await editor.getByLabel("Event name").fill("Council dispute");
+  await editor.getByLabel("Source citation").fill("Council minutes");
+  for (const [i, person] of ["alice", "beatrice"].entries()) {
+    await editor.getByRole("button", { name: "Add participant" }).click();
+    const row = editor.locator("#event-participants fieldset").nth(i);
+    await row.getByLabel("Person").selectOption(person);
+    await row.getByLabel("Action", { exact: true }).fill(i === 0 ? "Object" : "Disclose");
+    await row.getByLabel("Intent").fill("Settle the dispute");
+  }
+  await editor.getByLabel("Record a relationship effect").check();
+  await editor.getByLabel("Causing action").selectOption({ label: "Beatrice · Disclose" });
+  await editor.getByLabel("Explanation").fill("Disclosure broke confidence");
+  await editor.getByRole("button", { name: "Save event" }).click();
+  await expect(page.locator("#author-status")).toHaveText("Saved to local world history.");
+  expect(await page.evaluate(() => (window as unknown as { __eventRequests: unknown[] }).__eventRequests)).toMatchObject([{
+    expected_revision: 4, day: 8,
+    participants: [{ person_id: "alice" }, { person_id: "beatrice" }],
+    effect: { relationship_id: "bond", actor_row: 1 },
+  }]);
+
+  await day.fill("10");
+  await day.blur();
+  await graph.locator("#nodes button[data-node=bond]").click();
+  const inspector = graph.getByRole("complementary", { name: "Node inspector" });
+  await expect(inspector).toContainText("Before Trust 90 · friends");
+  await expect(inspector).toContainText("After Trust 12 · estranged");
+  await inspector.getByRole("button", { name: "Inspect source event" }).click();
+  await expect(inspector).toContainText("Alice · Prevent (failed)");
+  await expect(inspector).toContainText("Beatrice · Disclose (succeeded)");
+  await inspector.getByRole("button", { name: "Edit this event" }).click();
+  await expect(editor.getByLabel("Event name")).toHaveValue("Disclosed letter");
+  await editor.getByRole("button", { name: "Correct action: Prevent" }).click();
+  await expect(editor.locator("#event-participants").getByLabel("Action", { exact: true })).toHaveValue("Prevent");
+
+  const revision = page.locator("#author-revision");
+  await revision.fill("3");
+  await revision.blur();
+  await expect(graph.locator("#nodes button[data-node=letter]")).toHaveCount(0);
+  await expect(editor.getByRole("button", { name: "Save event" })).toBeDisabled();
 });

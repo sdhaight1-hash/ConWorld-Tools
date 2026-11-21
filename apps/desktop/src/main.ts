@@ -1,6 +1,7 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import northbridge from "./northbridge.json";
 import "./style.css";
+import { showAuthorWorkspace } from "./author-workspace";
 import { benchmarkHeight, benchmarkTriangles, benchmarkWidth, createGpuGraph, makeBenchmark, type GpuGraph } from "./graph-benchmark";
 
 export type Scene = typeof northbridge;
@@ -38,9 +39,11 @@ async function start() {
   }
   const graph = showScene(benchmark ? makeBenchmark() : response.scene, benchmark);
   const historyVerified = await showHistory(response.smoke);
-  if (!response.smoke) await showAuthorWorkspace();
+  if (!response.smoke && !benchmark && isTauri() && graph) {
+    await showAuthorWorkspace(response.scene, graph.setScene, graph.select);
+  }
   const webgpu = await probeWebGpu();
-  if (graph) renderer.textContent = `Canvas2D · ${webGpuLabels[webgpu]}`;
+  if (graph?.hasCanvas) renderer.textContent = `Canvas2D · ${webGpuLabels[webgpu]}`;
   if (benchmark && graph && webgpu === "available") void graph.tryGpu();
   if (response.smoke) {
     const inspector = document.querySelector<HTMLButtonElement>("#nodes button[data-node='beatrice']");
@@ -102,224 +105,22 @@ async function showHistory(smoke: boolean): Promise<boolean> {
 }
 
 
-type AuthorWorld = { id: string; name: string; revision: number };
-type AuthorPerson = { id: string; label: string };
-type AuthorCause = {
-  day: number; event: string; actor: string | null;
-  action: string | null; intent: string | null; outcome: string | null; source: string;
-};
-type AuthorRelationship = {
-  id: string; subject_id: string; target_id: string; kind: string;
-  trust: number | null; tags: string[]; starts_at: number | null;
-  cause: AuthorCause | null;
-};
-type AuthorSnapshot = {
-  world: AuthorWorld; day: number; view_revision: number;
-  people: AuthorPerson[]; relationships: AuthorRelationship[];
-};
-
-// Phase Two editor calls native Rust and keeps no independent world database.
-async function showAuthorWorkspace() {
-  if (!isTauri()) return;
-  const section = document.querySelector<HTMLElement>("#author-workspace")!;
-  const worldSelect = document.querySelector<HTMLSelectElement>("#author-world")!;
-  const dayInput = document.querySelector<HTMLInputElement>("#author-day")!;
-  const revisionInput = document.querySelector<HTMLInputElement>("#author-revision")!;
-  const content = document.querySelector<HTMLElement>("#author-world-content")!;
-  const info = document.querySelector<HTMLElement>("#author-world-info")!;
-  const status = document.querySelector<HTMLElement>("#author-status")!;
-  const peopleList = document.querySelector<HTMLUListElement>("#author-people")!;
-  const relationshipList = document.querySelector<HTMLUListElement>("#author-relationships")!;
-  const worldForm = document.querySelector<HTMLFormElement>("#author-create-world")!;
-  const personForm = document.querySelector<HTMLFormElement>("#author-create-person")!;
-  const relationshipForm = document.querySelector<HTMLFormElement>("#author-create-relationship")!;
-  const eventForm = document.querySelector<HTMLFormElement>("#author-record-event")!;
-  section.hidden = false;
-  let requestSequence = 0;
-  const value = (form: HTMLFormElement, name: string) =>
-    (form.elements.namedItem(name) as HTMLInputElement | HTMLSelectElement).value;
-  const score = (raw: string): number | null => raw.trim() === "" ? null : Number(raw);
-  const currentDay = () => {
-    const raw = dayInput.value.trim();
-    if (!/^-?\d+$/.test(raw)) throw new Error("Enter a whole-number historical day.");
-    const day = Number(raw);
-    if (!Number.isSafeInteger(day)) throw new Error("Historical day is outside the supported range.");
-    return day;
-  };
-  const selectedRevision = () => {
-    const raw = revisionInput.value.trim();
-    if (!raw) return null;
-    if (!/^\d+$/.test(raw) || !Number.isSafeInteger(Number(raw))) {
-      throw new Error("Enter a non-negative, whole-number author revision.");
-    }
-    return Number(raw);
-  };
-  function options(select: HTMLSelectElement, values: Array<{ id: string; label: string }>) {
-    const previous = select.value;
-    select.replaceChildren(...values.map(({ id, label }) => {
-      const option = document.createElement("option");
-      option.value = id;
-      option.textContent = label;
-      return option;
-    }));
-    if (values.some((item) => item.id === previous)) select.value = previous;
-  }
-  async function refresh() {
-    const sequence = ++requestSequence;
-    const worldId = worldSelect.value;
-    content.hidden = !worldId;
-    if (!worldId) return;
-    const snapshot = await invoke<AuthorSnapshot>("workspace_snapshot", {
-      worldId, day: currentDay(), revision: selectedRevision(),
-    });
-    if (sequence !== requestSequence) return;
-    info.textContent = snapshot.world.name + " · viewing author revision " +
-      snapshot.view_revision + " / " + snapshot.world.revision + " · historical day " + snapshot.day;
-    const people = new Map(snapshot.people.map((person) => [person.id, person.label]));
-    const personOptions = snapshot.people.map((person) => ({ id: person.id, label: person.label }));
-    for (const form of [relationshipForm, eventForm]) {
-      for (const field of ["subject", "target", "actor"]) {
-        const select = form.elements.namedItem(field);
-        if (select instanceof HTMLSelectElement) options(select, personOptions);
-      }
-    }
-    const subjectSelection = relationshipForm.elements.namedItem("subject") as HTMLSelectElement;
-    const targetSelection = relationshipForm.elements.namedItem("target") as HTMLSelectElement;
-    if (personOptions.length > 1 && subjectSelection.value === targetSelection.value) {
-      targetSelection.value = personOptions.find((item) => item.id !== subjectSelection.value)!.id;
-    }
-    options(eventForm.elements.namedItem("relationship") as HTMLSelectElement,
-      snapshot.relationships.map((bond) => ({
-        id: bond.id,
-        label: (people.get(bond.subject_id) ?? bond.subject_id) + " → " +
-          (people.get(bond.target_id) ?? bond.target_id) + " (" + bond.kind + ")",
-      })));
-    peopleList.replaceChildren(...snapshot.people.map((person) => {
-      const item = document.createElement("li");
-      item.textContent = person.label;
-      return item;
-    }));
-    relationshipList.replaceChildren(...snapshot.relationships.map((bond) => {
-      const item = document.createElement("li");
-      const description = document.createElement("p");
-      description.textContent = (people.get(bond.subject_id) ?? bond.subject_id) + " → " +
-        (people.get(bond.target_id) ?? bond.target_id) + " · " + bond.kind +
-        " · trust " + (bond.trust ?? "unscored") + " · " +
-        (bond.tags.join(", ") || "no tags") + " · since day " + (bond.starts_at ?? "unknown");
-      item.append(description);
-      if (bond.cause) {
-        const evidence = document.createElement("p");
-        evidence.className = "hint";
-        evidence.textContent = "Why it changed (day " + bond.cause.day + "): " +
-          bond.cause.event + (bond.cause.actor ? " · " + bond.cause.actor : "") +
-          (bond.cause.action ? " · " + bond.cause.action : "") +
-          (bond.cause.outcome ? " (" + bond.cause.outcome + ")" : "") +
-          (bond.cause.intent ? " · intent: " + bond.cause.intent : "") +
-          " · source: " + bond.cause.source;
-        item.append(evidence);
-      }
-      return item;
-    }));
-    const readOnly = selectedRevision() !== null;
-    personForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = readOnly;
-    relationshipForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled =
-      readOnly || snapshot.people.length < 2;
-    eventForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled =
-      readOnly || snapshot.people.length === 0 || snapshot.relationships.length === 0;
-    status.textContent = readOnly
-      ? "Read-only author revision. Clear the author revision field to resume editing."
-      : "World loaded. Edits are saved to the local SQLite database.";
-  }
-  async function refreshWorlds(preferred?: string) {
-    const worlds = await invoke<AuthorWorld[]>("workspace_worlds");
-    options(worldSelect, worlds.map((world) => ({ id: world.id, label: world.name })));
-    if (preferred && worlds.some((world) => world.id === preferred)) worldSelect.value = preferred;
-    await refresh();
-  }
-  function bind(form: HTMLFormElement, action: () => Promise<void>) {
-    form.addEventListener("submit", (event) => {
-      event.preventDefault();
-      void (async () => {
-        const button = form.querySelector<HTMLButtonElement>('button[type="submit"]')!;
-        button.disabled = true;
-        try {
-          if (form !== worldForm && selectedRevision() !== null) {
-            throw new Error("Archived author revisions are read-only. Clear the revision field before editing.");
-          }
-          await action();
-          revisionInput.value = "";
-          await refresh();
-          form.querySelectorAll<HTMLInputElement>('input[name="name"], input[name="event"], input[name="citation"]').forEach((input) => { input.value = ""; });
-          status.textContent = "Saved to local world history.";
-        } catch (error) {
-          status.textContent = "Unable to save: " + String(error);
-        } finally {
-          const pinned = form !== worldForm && revisionInput.value.trim() !== "";
-          button.disabled = pinned || (form === relationshipForm
-            ? (relationshipForm.elements.namedItem("subject") as HTMLSelectElement).options.length < 2
-            : form === eventForm
-              ? (eventForm.elements.namedItem("relationship") as HTMLSelectElement).options.length === 0
-              : false);
-        }
-      })();
-    });
-  }
-  bind(worldForm, async () => {
-    const world = await invoke<AuthorWorld>("workspace_create_world", { name: value(worldForm, "name") });
-    await refreshWorlds(world.id);
-  });
-  bind(personForm, async () => {
-    await invoke("workspace_create_person", { worldId: worldSelect.value, name: value(personForm, "name") });
-  });
-  bind(relationshipForm, async () => {
-    await invoke("workspace_create_relationship", { request: {
-      world_id: worldSelect.value,
-      subject_id: value(relationshipForm, "subject"),
-      target_id: value(relationshipForm, "target"),
-      kind: value(relationshipForm, "kind"),
-      trust: score(value(relationshipForm, "trust")),
-      tags: value(relationshipForm, "tags"),
-      day: currentDay(),
-    } });
-  });
-  bind(eventForm, async () => {
-    await invoke("workspace_record_event", { request: {
-      world_id: worldSelect.value,
-      relationship_id: value(eventForm, "relationship"),
-      actor_id: value(eventForm, "actor"),
-      day: currentDay(),
-      event_label: value(eventForm, "event"),
-      action: value(eventForm, "action"),
-      intent: value(eventForm, "intent"),
-      outcome: value(eventForm, "outcome"),
-      source_citation: value(eventForm, "citation"),
-      trust: score(value(eventForm, "trust")),
-      tags: value(eventForm, "tags"),
-    } });
-  });
-  worldSelect.addEventListener("change", () => { void refresh().catch((error) => { status.textContent = String(error); }); });
-  dayInput.addEventListener("change", () => { void refresh().catch((error) => { status.textContent = String(error); }); });
-  revisionInput.addEventListener("change", () => { void refresh().catch((error) => { status.textContent = String(error); }); });
-  try {
-    await refreshWorlds();
-  } catch (error) {
-    status.textContent = "Author workspace unavailable: " + String(error);
-  }
-}
-
 function showScene(scene: Scene, benchmark: boolean) {
-  const width = benchmark ? benchmarkWidth : 680;
-  const height = benchmark ? benchmarkHeight : 475;
+  let width = benchmark ? benchmarkWidth : 680;
+  let height = benchmark ? benchmarkHeight : 475;
+  let savedWorld = false;
+  let inspectRecord: ((id: string, panel: HTMLElement) => void) | undefined;
   const plot = document.querySelector<HTMLElement>("#plot")!;
   const list = document.querySelector<HTMLUListElement>("#nodes")!;
   const connections = document.querySelector<HTMLUListElement>("#connections")!;
+  const details = document.querySelector<HTMLElement>("#record-details")!;
   const selection = document.querySelector<HTMLElement>("#selection")!;
   const canvas = document.querySelector<HTMLCanvasElement>("#graph")!;
   const context = canvas.getContext("2d");
   const zoomOut = document.querySelector<HTMLButtonElement>("#zoom-out")!;
   const zoomIn = document.querySelector<HTMLButtonElement>("#zoom-in")!;
   const reset = document.querySelector<HTMLButtonElement>("#reset-zoom")!;
-  const nodes = new Map(scene.nodes.map((node) => [node.id, node]));
+  const nodes = new Map<string, Scene["nodes"][number]>();
   const buttons = new Map<string, HTMLButtonElement>();
   let active = "";
   let zoom = 100;
@@ -376,7 +177,7 @@ function showScene(scene: Scene, benchmark: boolean) {
 
   function draw() {
     if (!context) return;
-    const fitWidth = benchmark ? width : Math.min(plot.clientWidth, (plot.offsetHeight * width) / height);
+    const fitWidth = benchmark || (savedWorld && width > 680) ? width : Math.min(plot.clientWidth, (plot.offsetHeight * width) / height);
     canvas.width = Math.floor((Math.max(440, fitWidth) * zoom) / 100);
     canvas.height = Math.round((canvas.width * height) / width);
     context.setTransform(canvas.width / width, 0, 0, canvas.height / height, 0, 0);
@@ -427,8 +228,9 @@ function showScene(scene: Scene, benchmark: boolean) {
       context.strokeStyle = "#13272d";
       context.lineWidth = 4;
       const y = node.y + (benchmark ? 16 : 28);
-      context.strokeText(node.label, node.x, y);
-      context.fillText(node.label, node.x, y);
+      const labelWidth = savedWorld ? 132 : undefined;
+      context.strokeText(node.label, node.x, y, labelWidth);
+      context.fillText(node.label, node.x, y, labelWidth);
     }
   }
 
@@ -446,35 +248,80 @@ function showScene(scene: Scene, benchmark: boolean) {
       const to = nodes.get(edge.target);
       if (!from || !to) continue;
       const item = document.createElement("li");
-      item.textContent = `${from.label} · ${edge.label} · ${to.label}`;
+      const label = `${from.label} · ${edge.label} · ${to.label}`;
+      if (savedWorld) {
+        const link = document.createElement("button");
+        link.type = "button";
+        link.textContent = label;
+        link.addEventListener("click", () => {
+          const neighbor = edge.source === id ? edge.target : edge.source;
+          select(neighbor);
+          buttons.get(neighbor)?.focus();
+        });
+        item.append(link);
+      } else {
+        item.textContent = label;
+      }
       items.push(item);
     }
     connections.replaceChildren(...items);
+    details.replaceChildren();
+    inspectRecord?.(id, details);
     draw();
   }
 
-  for (const node of scene.nodes) {
-    const item = document.createElement("li");
-    const button = document.createElement("button");
-    const kind = document.createElement("span");
-    button.type = "button";
-    button.dataset.node = node.id;
-    button.setAttribute("aria-pressed", "false");
-    button.textContent = node.label;
-    kind.textContent = node.kind;
-    button.append(kind);
-    button.addEventListener("click", () => select(node.id));
-    buttons.set(node.id, button);
-    item.append(button);
-    list.append(item);
+  function setScene(next: Scene, inspect?: typeof inspectRecord) {
+    const sameWorld = savedWorld && inspect !== undefined;
+    const focused = document.activeElement instanceof HTMLButtonElement
+      ? document.activeElement.dataset.node
+      : undefined;
+    scene = next;
+    inspectRecord = inspect;
+    savedWorld = inspect !== undefined;
+    if (!benchmark) {
+      width = Math.max(680, ...scene.nodes.map((node) => node.x + 78));
+      height = Math.max(475, ...scene.nodes.map((node) => node.y + 62));
+    }
+    if (!sameWorld) {
+      zoom = 100;
+      plot.scrollTo(0, 0);
+    }
+    nodes.clear();
+    buttons.clear();
+    list.replaceChildren();
+    for (const node of scene.nodes) {
+      nodes.set(node.id, node);
+      const item = document.createElement("li");
+      const button = document.createElement("button");
+      const kind = document.createElement("span");
+      button.type = "button";
+      button.dataset.node = node.id;
+      button.setAttribute("aria-pressed", "false");
+      button.textContent = node.label;
+      kind.textContent = node.kind;
+      button.append(kind);
+      button.addEventListener("click", () => select(node.id));
+      buttons.set(node.id, button);
+      item.append(button);
+      list.append(item);
+    }
+    if (nodes.size) {
+      select(sameWorld && nodes.has(active) ? active : scene.nodes[0].id);
+      if (focused) buttons.get(focused)?.focus();
+    } else {
+      active = "";
+      selection.textContent = "No records at this date and revision";
+      connections.replaceChildren();
+      details.replaceChildren();
+      draw();
+    }
+    setZoom(zoom);
   }
-  select(scene.nodes[0]?.id ?? "");
 
   if (!context) {
     plot.hidden = true;
     zoomOut.parentElement!.hidden = true;
     renderer.textContent = "HTML node list · Canvas unavailable";
-    return;
   }
 
   function setZoom(level: number) {
@@ -498,12 +345,15 @@ function showScene(scene: Scene, benchmark: boolean) {
     if (node) select(node.id);
   });
   new ResizeObserver(draw).observe(plot);
-  setZoom(100);
+  setScene(scene);
   return {
+    hasCanvas: Boolean(context),
+    setScene,
+    select,
     tryGpu,
     visibleNode(id: string) {
       const node = nodes.get(id);
-      if (!node) return false;
+      if (!node || !context) return false;
       const x = Math.round((node.x * canvas.width) / width);
       const y = Math.round((node.y * canvas.height) / height);
       const [red, green, blue, alpha] = context.getImageData(x, y, 1, 1).data;
