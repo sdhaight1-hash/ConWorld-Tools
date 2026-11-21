@@ -1750,4 +1750,80 @@ mod tests {
         );
         Ok(())
     }
+    #[test]
+    fn phase_3_typed_relationship_paths_are_dated_bounded_and_directional()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let workspace = AuthorWorkspace::open(":memory:")?;
+        let world = workspace.create_world("Path fixture")?;
+        for name in ["Alice", "Beatrice", "Cara"] {
+            workspace.create_person(&world.id, name)?;
+        }
+        let people = workspace.snapshot(&world.id, 0, None)?.people;
+        let person = |name: &str| {
+            people.iter().find(|item| item.label == name).unwrap().id.clone()
+        };
+        for (from, to) in [("Alice", "Beatrice"), ("Beatrice", "Cara")] {
+            workspace.create_relationship(RelationshipInput {
+                world_id: world.id.clone(),
+                subject_id: person(from),
+                target_id: person(to),
+                kind: "friendship".into(),
+                trust: None,
+                tags: String::new(),
+                day: 10,
+            })?;
+        }
+        let request = PathQueryInput {
+            world_id: world.id.clone(),
+            day: 10,
+            revision: None,
+            start_id: person("Alice"),
+            kind: "friendship".into(),
+            direction: "outgoing".into(),
+            max_depth: 2,
+            max_visited: 3,
+            limit: 20,
+        };
+        let found = workspace.query_path(request.clone())?;
+        assert_eq!(found.revision, 5);
+        let ids: HashSet<_> = found.rows.iter().map(|row| row.id.clone()).collect();
+        assert_eq!(ids, HashSet::from([person("Beatrice"), person("Cara")]));
+        assert!(!found.truncated);
+        assert_eq!(
+            workspace.query_path(PathQueryInput { max_depth: 1, ..request.clone() })?.rows.len(),
+            1
+        );
+        let limited = workspace.query_path(PathQueryInput {
+            max_visited: 2,
+            ..request.clone()
+        })?;
+        assert_eq!(limited.rows.len(), 1);
+        assert!(limited.truncated);
+        assert!(
+            workspace.query_path(PathQueryInput { day: 9, ..request.clone() })?.rows.is_empty()
+        );
+        assert!(
+            workspace.query_path(PathQueryInput { revision: Some(3), ..request.clone() })?.rows.is_empty()
+        );
+        let reverse = workspace.query_path(PathQueryInput {
+            start_id: person("Cara"),
+            direction: "incoming".into(),
+            ..request.clone()
+        })?;
+        assert_eq!(reverse.rows.len(), 2);
+        assert!(
+            workspace.query_path(PathQueryInput { direction: "sideways".into(), ..request.clone() }).is_err()
+        );
+        assert!(
+            workspace.query_path(PathQueryInput { max_depth: 0, ..request.clone() }).is_err()
+        );
+        assert!(
+            workspace.query_path(PathQueryInput { max_visited: 0, ..request.clone() }).is_err()
+        );
+        assert!(
+            workspace.query_path(PathQueryInput { start_id: "not-a-uuid".into(), ..request }).is_err()
+        );
+        Ok(())
+    }
+
 }
