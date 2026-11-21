@@ -275,10 +275,12 @@ impl Store {
             QueryFilter::RelationshipPath { .. } => {
                 return self.indexed_relationship_path_at(view, &spec.filter, spec.limit);
             }
+            QueryFilter::Backlinks(target) => {
+                return self.indexed_backlinks_at(view, *target, spec.limit);
+            }
             _ => {}
         }
         let objects = self.objects_at(view, 2_000)?;
-        let visible: HashSet<_> = objects.iter().map(|version| version.object).collect();
         let mut rows: Vec<_> = match &spec.filter {
             QueryFilter::ExactAlias(_)
             | QueryFilter::FullTextPhrase(_)
@@ -305,23 +307,7 @@ impl Store {
                     })
                     .collect()
             }
-            QueryFilter::Backlinks(target) => {
-                same_world(*target, view)?;
-                let approved = if visible.contains(target) {
-                    self.approved_mention_sources_at(view, *target)?
-                } else {
-                    HashSet::new()
-                };
-                objects
-                    .into_iter()
-                    .filter(|item| {
-                        visible.contains(target)
-                            && (item.record.source == Some(*target)
-                                || refers_to(&item.record.data, *target)
-                                || approved.contains(&item.object))
-                    })
-                    .collect()
-            }
+            QueryFilter::Backlinks(_) => unreachable!("handled by indexed backlinks"),
             QueryFilter::EventRole { .. } | QueryFilter::ParticipantEvents { .. } => {
                 unreachable!("handled by indexed event participation path")
             }
@@ -547,7 +533,7 @@ fn predicate_matches(filter: &QueryFilter, version: &Version, plan: &PredicatePl
     }
 }
 
-fn refers_to(data: &ObjectData, target: ObjectRef) -> bool {
+pub(crate) fn refers_to(data: &ObjectData, target: ObjectRef) -> bool {
     match data {
         ObjectData::Relationship {
             subject,
@@ -567,14 +553,6 @@ fn refers_to(data: &ObjectData, target: ObjectRef) -> bool {
         } => *event == target || *actor == target || *other == Some(target),
         ObjectData::Claim { subject, .. } => *subject == target,
         _ => false,
-    }
-}
-
-fn same_world(object: ObjectRef, view: ViewContext) -> Result<(), Error> {
-    if object.world == view.world {
-        Ok(())
-    } else {
-        Err(Error::WrongWorld)
     }
 }
 

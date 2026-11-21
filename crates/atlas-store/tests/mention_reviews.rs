@@ -464,3 +464,173 @@ fn review_decisions_do_not_escape_into_alternate_history_branches() -> Result<()
     ));
     Ok(())
 }
+
+#[test]
+fn indexed_backlinks_remain_exact_above_snapshot_budget() -> Result<(), Error> {
+    let dir = tempdir()?;
+    let db = dir.path().join("backlinks.sqlite");
+    let mut store = Store::open(&db)?;
+    let world = store.create_world("Archive", Scope::Author)?;
+    let person = ObjectRef::new(world.id);
+    let other = ObjectRef::new(world.id);
+    let event = ObjectRef::new(world.id);
+    let source = ObjectRef::new(world.id);
+    let claim = ObjectRef::new(world.id);
+    let bond = ObjectRef::new(world.id);
+    let initial = store.apply(&command(
+        &world,
+        world.revision,
+        vec![
+            Change::Create(person, record("Morgan Vale", ObjectData::Person)),
+            Change::Create(other, record("Alice", ObjectData::Person)),
+            Change::Create(
+                event,
+                record(
+                    "Meeting",
+                    ObjectData::HistoricalEvent {
+                        occurrence: EventDate::Exact(WorldDay(10)),
+                    },
+                ),
+            ),
+            Change::Create(
+                source,
+                record(
+                    "Ledger",
+                    ObjectData::Source {
+                        citation: "Folio 4".into(),
+                    },
+                ),
+            ),
+        ],
+    ))?;
+    let claim_record = |statement: &str, citation| Record {
+        source: citation,
+        ..record(
+            "Statement",
+            ObjectData::Claim {
+                subject: event,
+                predicate: "presence".into(),
+                statement: statement.into(),
+                audience: ClaimAudience::Author,
+            },
+        )
+    };
+    let linked = store.apply(&command(
+        &world,
+        initial,
+        vec![
+            Change::Create(claim, claim_record("Morgan Vale attended.", Some(source))),
+            Change::Create(
+                bond,
+                Record {
+                    valid: ValidInterval {
+                        start: Some(WorldDay(0)),
+                        end_exclusive: None,
+                    },
+                    ..record(
+                        "Friendship",
+                        ObjectData::Relationship {
+                            subject: other,
+                            target: person,
+                            kind: "friendship".into(),
+                            trust: None,
+                            tags: vec![],
+                        },
+                    )
+                },
+            ),
+        ],
+    ))?;
+    let candidate = store
+        .discover_mentions(view(&world, linked), 100)?
+        .rows
+        .remove(0);
+    let approved = store.review_mention(ReviewMention {
+        view: view(&world, linked),
+        expected: linked,
+        source: candidate.source,
+        target: person,
+        start_byte: candidate.start_byte,
+        end_byte: candidate.end_byte,
+        decision: MentionDisposition::Approved,
+        command_id: Uuid::new_v4(),
+    })?;
+    let changes = (0..2_005)
+        .map(|i| {
+            Change::Create(
+                ObjectRef::new(world.id),
+                record(&format!("Resident {i}"), ObjectData::Person),
+            )
+        })
+        .collect();
+    let large = store.apply(&command(&world, approved, changes))?;
+    assert!(matches!(
+        store.objects_at(view(&world, large), 2_000),
+        Err(Error::QueryBudgetExceeded)
+    ));
+    assert_eq!(
+        references(&store, &world, large, person)?,
+        vec![bond, claim]
+    );
+    assert_eq!(references(&store, &world, large, source)?, vec![claim]);
+    assert_eq!(references(&store, &world, large, event)?, vec![claim]);
+    let limited = store.execute_query(
+        &QuerySpec {
+            schema_version: QUERY_SCHEMA_VERSION,
+            filter: QueryFilter::Backlinks(person),
+            limit: 1,
+        },
+        view(&world, large),
+    )?;
+    assert!(limited.truncated);
+    assert_eq!(limited.rows[0].object, bond);
+
+    let corrected = store.apply(&command(
+        &world,
+        large,
+        vec![Change::Correct(
+            claim,
+            claim_record("Nobody recognizable attended.", Some(source)),
+        )],
+    ))?;
+    assert_eq!(references(&store, &world, corrected, person)?, vec![bond]);
+    assert_eq!(
+        references(&store, &world, large, person)?,
+        vec![bond, claim]
+    );
+    assert!(matches!(
+        store.execute_query(
+            &QuerySpec {
+                schema_version: QUERY_SCHEMA_VERSION,
+                filter: QueryFilter::Backlinks(person),
+                limit: 100,
+            },
+            ViewContext {
+                scope: Scope::Public,
+                ..view(&world, large)
+            }
+        ),
+        Err(Error::CapabilityDenied)
+    ));
+    drop(store);
+    let conn = rusqlite::Connection::open(&db)?;
+    conn.execute_batch(
+        "DROP INDEX object_source_backlink_idx;
+         DROP INDEX involvement_role_backlink_idx;
+         DROP INDEX action_actor_backlink_idx;
+         DROP INDEX action_target_backlink_idx;
+         PRAGMA user_version = 17;",
+    )?;
+    drop(conn);
+    let reopened = Store::open(&db)?;
+    assert_eq!(
+        references(&reopened, &world, large, person)?,
+        vec![bond, claim]
+    );
+    assert_eq!(
+        references(&reopened, &world, corrected, person)?,
+        vec![bond]
+    );
+    reopened.verify_foreign_keys(Scope::Author)?;
+    Ok(())
+}
