@@ -5,10 +5,10 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 use atlas_store::{
-    query::{QueryFilter, QuerySpec, QUERY_SCHEMA_VERSION},
     ActionOutcome, AuthorRevision, Change, ClaimAudience, Command, Definition, EventDate,
     EventRole, ObjectData, ObjectId, ObjectRef, Record, Scope, Store, ValidInterval, ViewContext,
     World, WorldDay, WorldId,
+    query::{QUERY_SCHEMA_VERSION, QueryFilter, QuerySpec},
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -1678,7 +1678,8 @@ mod tests {
         Ok(())
     }
     #[test]
-    fn phase_3_search_respects_author_revision_and_keeps_ambiguous_names() -> Result<(), Box<dyn std::error::Error>> {
+    fn phase_3_search_respects_author_revision_and_keeps_ambiguous_names()
+    -> Result<(), Box<dyn std::error::Error>> {
         let workspace = AuthorWorkspace::open(":memory:")?;
         let world = workspace.create_world("Search fixture")?;
         workspace.create_person(&world.id, "Alice Vale")?;
@@ -1689,12 +1690,35 @@ mod tests {
         assert_eq!(matches.rows.len(), 2);
         assert_ne!(matches.rows[0].id, matches.rows[1].id);
         assert!(matches.rows.iter().all(|row| row.kind == "person"));
-        assert_eq!(workspace.search(&world.id, 0, Some(1), "contains", "alice", 20)?.rows.len(), 1);
-        assert_eq!(workspace.search(&world.id, 0, Some(0), "contains", "alice", 20)?.rows.len(), 0);
-        assert!(workspace.search(&world.id, 0, None, "unexpected", "alice", 20).is_err());
-        assert!(workspace.search(&world.id, 0, None, "exact", "  ", 20).is_err());
-        assert!(workspace.search(&world.id, 0, None, "contains", "alice", 0).is_err());
+        assert_eq!(
+            workspace
+                .search(&world.id, 0, Some(1), "contains", "alice", 20)?
+                .rows
+                .len(),
+            1
+        );
+        assert_eq!(
+            workspace
+                .search(&world.id, 0, Some(0), "contains", "alice", 20)?
+                .rows
+                .len(),
+            0
+        );
+        assert!(
+            workspace
+                .search(&world.id, 0, None, "unexpected", "alice", 20)
+                .is_err()
+        );
+        assert!(
+            workspace
+                .search(&world.id, 0, None, "exact", "  ", 20)
+                .is_err()
+        );
+        assert!(
+            workspace
+                .search(&world.id, 0, None, "contains", "alice", 0)
+                .is_err()
+        );
         Ok(())
     }
-
 }
