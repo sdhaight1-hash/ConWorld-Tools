@@ -234,16 +234,44 @@ fn visit_parameter_leaves(
     visit: &mut impl FnMut(&str, &mut ParameterValue) -> Result<(), Error>,
 ) -> Result<(), Error> {
     let (prefix, mut value) = match filter {
-        QueryFilter::LabelContains(text) => ("contains", ParameterValue::Text { value: text.clone() }),
-        QueryFilter::ExactLabel(text) => ("exact", ParameterValue::Text { value: text.clone() }),
-        QueryFilter::ExactAlias(text) => ("alias", ParameterValue::Text { value: text.clone() }),
-        QueryFilter::FullTextPhrase(text) => ("label_phrase", ParameterValue::Text { value: text.clone() }),
-        QueryFilter::ClaimFullTextPhrase(text) => ("claim_phrase", ParameterValue::Text { value: text.clone() }),
+        QueryFilter::LabelContains(text) => (
+            "contains",
+            ParameterValue::Text {
+                value: text.clone(),
+            },
+        ),
+        QueryFilter::ExactLabel(text) => (
+            "exact",
+            ParameterValue::Text {
+                value: text.clone(),
+            },
+        ),
+        QueryFilter::ExactAlias(text) => (
+            "alias",
+            ParameterValue::Text {
+                value: text.clone(),
+            },
+        ),
+        QueryFilter::FullTextPhrase(text) => (
+            "label_phrase",
+            ParameterValue::Text {
+                value: text.clone(),
+            },
+        ),
+        QueryFilter::ClaimFullTextPhrase(text) => (
+            "claim_phrase",
+            ParameterValue::Text {
+                value: text.clone(),
+            },
+        ),
         QueryFilter::Kind(kind) => ("object_kind", ParameterValue::ObjectKind { value: *kind }),
-        QueryFilter::HasSource(source) => ("source", ParameterValue::Source {
-            world_id: source.world.0.to_string(),
-            source_id: source.id.0.to_string(),
-        }),
+        QueryFilter::HasSource(source) => (
+            "source",
+            ParameterValue::Source {
+                world_id: source.world.0.to_string(),
+                source_id: source.id.0.to_string(),
+            },
+        ),
         QueryFilter::And(children) | QueryFilter::Or(children) => {
             for child in children {
                 visit_parameter_leaves(child, visit)?;
@@ -255,27 +283,41 @@ fn visit_parameter_leaves(
     };
     visit(prefix, &mut value)?;
     match (filter, value) {
-        (QueryFilter::LabelContains(text)
-        | QueryFilter::ExactLabel(text)
-        | QueryFilter::ExactAlias(text)
-        | QueryFilter::FullTextPhrase(text)
-        | QueryFilter::ClaimFullTextPhrase(text), ParameterValue::Text { value }) => {
+        (
+            QueryFilter::LabelContains(text)
+            | QueryFilter::ExactLabel(text)
+            | QueryFilter::ExactAlias(text)
+            | QueryFilter::FullTextPhrase(text)
+            | QueryFilter::ClaimFullTextPhrase(text),
+            ParameterValue::Text { value },
+        ) => {
             *text = value;
         }
         (QueryFilter::Kind(kind), ParameterValue::ObjectKind { value }) => *kind = value,
-        (QueryFilter::HasSource(source), ParameterValue::Source { world_id, source_id }) => {
+        (
+            QueryFilter::HasSource(source),
+            ParameterValue::Source {
+                world_id,
+                source_id,
+            },
+        ) => {
             if Uuid::parse_str(&world_id).ok() != Some(source.world.0) {
                 return Err(Error::WrongWorld);
             }
-            source.id = crate::ObjectId(Uuid::parse_str(&source_id)
-                .map_err(|_| Error::InvalidInput("parameter source ID"))?);
+            source.id = crate::ObjectId(
+                Uuid::parse_str(&source_id)
+                    .map_err(|_| Error::InvalidInput("parameter source ID"))?,
+            );
         }
         _ => return Err(Error::InvalidInput("query parameter type")),
     }
     Ok(())
 }
 
-pub(crate) fn query_parameters(spec: &QuerySpec, world: WorldId) -> Result<Vec<QueryParameter>, Error> {
+pub(crate) fn query_parameters(
+    spec: &QuerySpec,
+    world: WorldId,
+) -> Result<Vec<QueryParameter>, Error> {
     let mut nodes = 0;
     validate_predicate(&spec.filter, world, 0, &mut nodes)?;
     let mut parameters = Vec::new();
@@ -292,7 +334,11 @@ pub(crate) fn query_parameters(spec: &QuerySpec, world: WorldId) -> Result<Vec<Q
 impl SavedLabelQuery {
     /// Materialize a normal typed query with overrides, using defaults for
     /// omitted parameters. No caller-supplied operator or context is accepted.
-    pub fn bind(&self, view: ViewContext, bindings: &[ParameterBinding]) -> Result<QuerySpec, Error> {
+    pub fn bind(
+        &self,
+        view: ViewContext,
+        bindings: &[ParameterBinding],
+    ) -> Result<QuerySpec, Error> {
         if view.scope != Scope::Author {
             return Err(Error::CapabilityDenied);
         }
@@ -318,7 +364,10 @@ impl SavedLabelQuery {
         }
         let mut remaining = HashMap::new();
         for binding in bindings {
-            if remaining.insert(binding.name.as_str(), &binding.value).is_some() {
+            if remaining
+                .insert(binding.name.as_str(), &binding.value)
+                .is_some()
+            {
                 return Err(Error::InvalidInput("duplicate query parameter"));
             }
         }

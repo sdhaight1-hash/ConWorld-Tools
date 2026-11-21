@@ -1145,7 +1145,12 @@ impl Store {
             tx.execute(
                 "INSERT INTO saved_query_parameters (world_id, query_id, revision, declarations)
                  VALUES (?1, ?2, ?3, ?4)",
-                params![world_id.0.as_bytes(), id.as_bytes(), revision, parameter_json],
+                params![
+                    world_id.0.as_bytes(),
+                    id.as_bytes(),
+                    revision,
+                    parameter_json
+                ],
             )?;
         }
         tx.commit()?;
@@ -1229,8 +1234,9 @@ impl Store {
                 limit: limit as usize,
             };
             let parameters = if let Some(declarations) = declarations {
-                let decoded = serde_json::from_str::<Vec<crate::query::QueryParameter>>(&declarations)
-                    .map_err(|_| Error::InvalidInput("saved parameter JSON"))?;
+                let decoded =
+                    serde_json::from_str::<Vec<crate::query::QueryParameter>>(&declarations)
+                        .map_err(|_| Error::InvalidInput("saved parameter JSON"))?;
                 if decoded != query_parameters(&spec, world_id)? {
                     return Err(Error::InvalidInput("saved parameter schema"));
                 }
