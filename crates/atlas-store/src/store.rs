@@ -98,7 +98,11 @@ impl Store {
                 WHERE b.world_id = ?1 AND b.id = ?2
                   AND (b.is_main = 1 OR f.created_revision <= ?3)
             )",
-            params![view.world.0.as_bytes(), view.branch.0.as_bytes(), view.revision.0],
+            params![
+                view.world.0.as_bytes(),
+                view.branch.0.as_bytes(),
+                view.revision.0
+            ],
             |row| row.get(0),
         )?;
         if !exists {
