@@ -5,7 +5,42 @@
 
 use uuid::Uuid;
 
-use crate::{AuthorRevision, Error, ObjectData, ObjectRef, Scope, Store, VersionRef, ViewContext};
+use crate::{AuthorRevision, Error, ObjectData, ObjectRef, Scope, Store, VersionRef, ViewContext, WorldDay, WorldId};
+
+/// Explicitly authored historical name metadata for a stable person identity,
+/// not a claim or evidence that a relationship exists.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PersonAlias {
+    pub id: Uuid,
+    pub person: ObjectRef,
+    pub label: String,
+    pub starts_at: Option<WorldDay>,
+    pub ends_before: Option<WorldDay>,
+    pub active: bool,
+    pub recorded_at: AuthorRevision,
+}
+
+impl PersonAlias {
+    pub(crate) fn matches_day(&self, day: WorldDay) -> bool {
+        self.active
+            && self.starts_at.is_none_or(|from| day >= from)
+            && self.ends_before.is_none_or(|until| day < until)
+    }
+}
+
+pub struct SavePersonAlias<'a> {
+    pub world: WorldId,
+    pub person: ObjectRef,
+    pub day: WorldDay,
+    pub expected: AuthorRevision,
+    pub alias_id: Option<Uuid>,
+    pub label: &'a str,
+    pub starts_at: Option<WorldDay>,
+    pub ends_before: Option<WorldDay>,
+    pub active: bool,
+    pub command_id: Uuid,
+    pub scope: Scope,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MentionDisposition {
@@ -36,6 +71,8 @@ pub struct MentionCandidate {
     pub statement: String,
     pub target: ObjectRef,
     pub target_label: String,
+    /// Exact matched name or alias, distinct from the target's canonical label.
+    pub matched_label: String,
     pub start_byte: usize,
     pub end_byte: usize,
     /// Number of distinct possible identities for this exact source span.
@@ -79,6 +116,19 @@ impl Store {
             })
             .collect();
 
+        // The current alias registry is main-branch author metadata, and
+        // explicitly returns no values on an alternate historical branch.
+        let aliases = self.person_aliases(view)?;
+        let mut names = Vec::new();
+        for person in &people {
+            names.push((person.object, person.record.label.as_str()));
+        }
+        for alias in &aliases {
+            if alias.matches_day(view.day) && people.iter().any(|person| person.object == alias.person) {
+                names.push((alias.person, alias.label.as_str()));
+            }
+        }
+
         const MAX_COMPARISONS: usize = 100_000;
         const MAX_CANDIDATES: usize = 2_000;
         let mut comparisons = 0_usize;
@@ -87,18 +137,22 @@ impl Store {
             if statement.len() > 10_000 {
                 return Err(Error::QueryBudgetExceeded);
             }
-            for person in &people {
+            for (person_id, matching_label) in &names {
                 comparisons += 1;
                 if comparisons > MAX_COMPARISONS {
                     return Err(Error::QueryBudgetExceeded);
                 }
-                for (start_byte, end_byte) in matching_spans(statement, &person.record.label) {
+                let Some(person) = people.iter().find(|person| person.object == *person_id) else {
+                    continue;
+                };
+                for (start_byte, end_byte) in matching_spans(statement, matching_label) {
                     rows.push(MentionCandidate {
                         source: claim.reference(),
                         source_label: claim.record.label.clone(),
                         statement: statement.to_string(),
                         target: person.object,
                         target_label: person.record.label.clone(),
+                        matched_label: (*matching_label).into(),
                         start_byte,
                         end_byte,
                         collisions: 1,
@@ -120,6 +174,14 @@ impl Store {
                 .then(a.start_byte.cmp(&b.start_byte))
                 .then(a.end_byte.cmp(&b.end_byte))
                 .then(a.target.id.0.cmp(&b.target.id.0))
+        });
+        // Two aliases (or a canonical label and alias) can denote the same
+        // person and source span; this is one candidate, not a collision.
+        rows.dedup_by(|a, b| {
+            a.source == b.source
+                && a.start_byte == b.start_byte
+                && a.end_byte == b.end_byte
+                && a.target == b.target
         });
         let mut group = 0;
         while group < rows.len() {

@@ -37,6 +37,7 @@ fn save(
     store.save_person_alias(SavePersonAlias {
         world: world.id,
         person,
+        day: WorldDay(20),
         expected,
         alias_id,
         label,
@@ -134,7 +135,7 @@ fn aliases_preserve_revision_and_valid_day_collisions_with_reviewed_backlinks() 
         branch: fork.id, ..view(&world, fork.created_revision, 20)
     })?.is_empty(), "main-line alias metadata must never leak to a fork");
     assert!(matches!(store.save_person_alias(SavePersonAlias {
-        world: world.id, person: alice, expected: fork.created_revision,
+        world: world.id, person: alice, day: WorldDay(20), expected: fork.created_revision,
         alias_id: None, label: "Fork name", starts_at: None, ends_before: None,
         active: true, command_id: Uuid::new_v4(), scope: Scope::Public,
     }), Err(Error::CapabilityDenied)));

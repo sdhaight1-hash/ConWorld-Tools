@@ -6,7 +6,9 @@ use std::time::Duration;
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use uuid::Uuid;
 
-use crate::discovery::{MentionCandidate, MentionDisposition, ReviewMention, matching_spans};
+use crate::discovery::{
+    MentionCandidate, MentionDisposition, PersonAlias, ReviewMention, SavePersonAlias, matching_spans,
+};
 use crate::query::{
     PredicateInput, QUERY_SCHEMA_VERSION, QueryFilter, QuerySpec, SaveNamedLabelQuery,
     SavedLabelQuery, validate_predicate,
@@ -14,7 +16,7 @@ use crate::query::{
 use crate::*;
 
 pub(crate) const APPLICATION_ID: i64 = 0x4357_4c44; // CWLD
-pub(crate) const SCHEMA_VERSION: i64 = 13;
+pub(crate) const SCHEMA_VERSION: i64 = 14;
 
 pub struct Store {
     conn: Connection,
@@ -83,6 +85,9 @@ impl Store {
         }
         if version < 13 {
             tx.execute_batch(include_str!("../migrations/0013.sql"))?;
+        }
+        if version < 14 {
+            tx.execute_batch(include_str!("../migrations/0014.sql"))?;
             verify_foreign_keys(&tx)?;
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
@@ -116,6 +121,102 @@ impl Store {
             return Err(Error::NotFound);
         }
         Ok(())
+    }
+
+
+    /// Latest alias metadata known by the selected author revision.
+    /// Aliases are main-branch author metadata until branch-aware alias
+    /// inheritance is specified; no alias rows are projected into forks.
+    pub fn person_aliases(&self, view: ViewContext) -> Result<Vec<PersonAlias>, Error> {
+        require_author(view.scope)?;
+        self.validate_query_view(view)?;
+        let world = load_world(&self.conn, view.world)?;
+        if view.branch != world.main {
+            return Ok(Vec::new());
+        }
+        active_alias_versions(&self.conn, view)
+    }
+
+    /// Create/revise an author-owned alias with optimistic author history.
+    /// An alias does not change canonical label, identity or relationships.
+    pub fn save_person_alias(
+        &mut self,
+        request: SavePersonAlias<'_>,
+    ) -> Result<PersonAlias, Error> {
+        require_author(request.scope)?;
+        if request.person.world != request.world {
+            return Err(Error::WrongWorld);
+        }
+        let label = request.label.trim();
+        if label.is_empty() || label.len() > 200 {
+            return Err(Error::InvalidInput("person alias label"));
+        }
+        if let (Some(start), Some(end)) = (request.starts_at, request.ends_before)
+            && start >= end
+        {
+            return Err(Error::InvalidInterval);
+        }
+        let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let world = load_world(&tx, request.world)?;
+        let person = resolve_object(
+            &tx,
+            request.person,
+            world.main,
+            request.expected,
+            request.day,
+        )?.ok_or(Error::NotFound)?;
+        if !matches!(person.record.data, ObjectData::Person) {
+            return Err(Error::WrongKind);
+        }
+        let id = request.alias_id.unwrap_or_else(Uuid::new_v4);
+        if request.alias_id.is_some() {
+            let existing: Option<[u8; 16]> = tx.query_row(
+                "SELECT person_id FROM person_aliases WHERE world_id = ?1 AND id = ?2",
+                params![world.id.0.as_bytes(), id.as_bytes()],
+                |row| row.get(0),
+            ).optional()?;
+            if existing != Some(*request.person.id.0.as_bytes()) {
+                return Err(Error::NotFound);
+            }
+        }
+        let revision = append_revision(
+            &tx,
+            &world,
+            world.main,
+            request.expected,
+            request.command_id,
+            ("Local author", "Save person name alias"),
+        )?;
+        if request.alias_id.is_none() {
+            tx.execute(
+                "INSERT INTO person_aliases (world_id, id, person_id) VALUES (?1, ?2, ?3)",
+                params![world.id.0.as_bytes(), id.as_bytes(), request.person.id.0.as_bytes()],
+            )?;
+        }
+        tx.execute(
+            "INSERT INTO person_alias_versions
+                (world_id, alias_id, revision, label, starts_at, ends_before, active)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                world.id.0.as_bytes(),
+                id.as_bytes(),
+                revision,
+                label,
+                request.starts_at.map(|d| d.0),
+                request.ends_before.map(|d| d.0),
+                request.active,
+            ],
+        )?;
+        tx.commit()?;
+        Ok(PersonAlias {
+            id,
+            person: request.person,
+            label: label.into(),
+            starts_at: request.starts_at,
+            ends_before: request.ends_before,
+            active: request.active,
+            recorded_at: AuthorRevision(revision),
+        })
     }
 
     /// Reconstruct disposable label and claim statement indexes from canonical versions.
@@ -1041,12 +1142,21 @@ impl Store {
         if !matches!(target.record.data, ObjectData::Person) {
             return Err(Error::WrongKind);
         }
-        if !matching_spans(statement, &target.record.label)
-            .contains(&(review.start_byte, review.end_byte))
-        {
-            return Err(Error::InvalidInput(
-                "mention does not match selected person",
-            ));
+        let matches_name = matching_spans(statement, &target.record.label)
+            .contains(&(review.start_byte, review.end_byte));
+        let matches_alias = if matches_name {
+            false
+        } else {
+            active_alias_versions(&tx, view)?
+                .iter()
+                .filter(|alias| alias.person == review.target && alias.matches_day(view.day))
+                .any(|alias| {
+                    matching_spans(statement, &alias.label)
+                        .contains(&(review.start_byte, review.end_byte))
+                })
+        };
+        if !matches_name && !matches_alias {
+            return Err(Error::InvalidInput("mention does not match selected person or alias"));
         }
         let revision = append_revision(
             &tx,
@@ -1848,6 +1958,45 @@ fn validate_text(value: &str, field: &'static str) -> Result<(), Error> {
         return Err(Error::InvalidInput(field));
     }
     Ok(())
+}
+
+
+fn active_alias_versions(conn: &Connection, view: ViewContext) -> Result<Vec<PersonAlias>, Error> {
+    const MAX_ALIASES: i64 = 2_000;
+    let aliases = {
+        let mut statement = conn.prepare(
+            "SELECT a.id, a.person_id, v.label, v.starts_at, v.ends_before, v.active, v.revision
+             FROM person_aliases a
+             JOIN person_alias_versions v ON v.world_id = a.world_id AND v.alias_id = a.id
+             WHERE a.world_id = ?1 AND v.revision = (
+                 SELECT MAX(prev.revision) FROM person_alias_versions prev
+                 WHERE prev.world_id = a.world_id AND prev.alias_id = a.id
+                   AND prev.revision <= ?2
+             )
+             ORDER BY a.id LIMIT ?3",
+        )?;
+        statement.query_map(
+            params![view.world.0.as_bytes(), view.revision.0, MAX_ALIASES + 1],
+            |row| {
+                Ok(PersonAlias {
+                    id: Uuid::from_bytes(row.get(0)?),
+                    person: ObjectRef {
+                        world: view.world,
+                        id: ObjectId(Uuid::from_bytes(row.get(1)?)),
+                    },
+                    label: row.get(2)?,
+                    starts_at: row.get::<_, Option<i64>>(3)?.map(WorldDay),
+                    ends_before: row.get::<_, Option<i64>>(4)?.map(WorldDay),
+                    active: row.get(5)?,
+                    recorded_at: AuthorRevision(row.get(6)?),
+                })
+            },
+        )?.collect::<Result<Vec<_>, _>>()?
+    };
+    if aliases.len() > MAX_ALIASES as usize {
+        return Err(Error::QueryBudgetExceeded);
+    }
+    Ok(aliases)
 }
 
 fn load_world(conn: &Connection, id: WorldId) -> Result<World, Error> {
