@@ -5,6 +5,7 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 use atlas_store::{
+    query::{QueryFilter, QuerySpec, QUERY_SCHEMA_VERSION},
     ActionOutcome, AuthorRevision, Change, ClaimAudience, Command, Definition, EventDate,
     EventRole, ObjectData, ObjectId, ObjectRef, Record, Scope, Store, ValidInterval, ViewContext,
     World, WorldDay, WorldId,
@@ -22,6 +23,20 @@ pub struct WorldSummary {
     id: String,
     name: String,
     revision: i64,
+}
+
+#[derive(Serialize)]
+pub struct SearchRow {
+    id: String,
+    label: String,
+    kind: &'static str,
+}
+
+#[derive(Serialize)]
+pub struct SearchSummary {
+    revision: i64,
+    truncated: bool,
+    rows: Vec<SearchRow>,
 }
 
 #[derive(Serialize)]
@@ -323,6 +338,62 @@ impl AuthorWorkspace {
             .create_world(&name, Scope::Author)
             .map(summary)
             .map_err(|error| error.to_string())
+    }
+
+    fn search(
+        &self,
+        world_id: &str,
+        day: i64,
+        revision: Option<i64>,
+        mode: &str,
+        term: &str,
+        limit: usize,
+    ) -> Result<SearchSummary, String> {
+        let store = self.lock()?;
+        let world = store
+            .world(WorldId(id(world_id)?), Scope::Author)
+            .map_err(|error| error.to_string())?;
+        let view = ViewContext {
+            revision: AuthorRevision(revision.unwrap_or(world.revision.0)),
+            ..view(&world, day)
+        };
+        let filter = match mode {
+            "contains" => QueryFilter::LabelContains(term.into()),
+            "exact" => QueryFilter::ExactLabel(term.into()),
+            _ => return Err("Unknown historical search mode".into()),
+        };
+        let result = store
+            .execute_query(
+                &QuerySpec {
+                    schema_version: QUERY_SCHEMA_VERSION,
+                    filter,
+                    limit,
+                },
+                view,
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(SearchSummary {
+            revision: result.revision.0,
+            truncated: result.truncated,
+            rows: result
+                .rows
+                .into_iter()
+                .map(|version| SearchRow {
+                    id: version.object.id.0.to_string(),
+                    label: version.record.label,
+                    kind: match version.record.data {
+                        ObjectData::Person => "person",
+                        ObjectData::Definition { .. } => "definition",
+                        ObjectData::Relationship { .. } => "relationship",
+                        ObjectData::EventInvolvement { .. } => "event_involvement",
+                        ObjectData::ActorAction { .. } => "actor_action",
+                        ObjectData::HistoricalEvent { .. } => "historical_event",
+                        ObjectData::Source { .. } => "source",
+                        ObjectData::Claim { .. } => "claim",
+                    },
+                })
+                .collect(),
+        })
     }
 
     fn snapshot(
@@ -1143,6 +1214,19 @@ pub fn workspace_snapshot(
     revision: Option<i64>,
 ) -> Result<WorkspaceSnapshot, String> {
     workspace.snapshot(&world_id, day, revision)
+}
+
+#[tauri::command]
+pub fn workspace_search(
+    workspace: State<'_, AuthorWorkspace>,
+    world_id: String,
+    day: i64,
+    revision: Option<i64>,
+    mode: String,
+    term: String,
+    limit: usize,
+) -> Result<SearchSummary, String> {
+    workspace.search(&world_id, day, revision, &mode, &term, limit)
 }
 
 #[tauri::command]
