@@ -258,3 +258,113 @@ fn fts_narrow_queries_work_past_the_temporary_two_thousand_object_listing_limit(
     assert_eq!(ids(&store, &world, revision, "Obsidian")?, vec![needle]);
     Ok(())
 }
+
+#[test]
+fn query_pages_bind_exact_context_and_preserve_duplicate_labels() -> Result<(), Error> {
+    let mut store = Store::open(":memory:")?;
+    let world = store.create_world("Paged archive", Scope::Author)?;
+    let other = store.create_world("Other archive", Scope::Author)?;
+    let mut expected = Vec::new();
+    let mut changes = Vec::new();
+    for i in 0..525 {
+        let object = ObjectRef {
+            world: world.id,
+            id: ObjectId(Uuid::from_u128(10_000 + i)),
+        };
+        expected.push(object);
+        changes.push(Change::Create(object, person("Duplicate Vale")));
+    }
+    let revision = store.apply(&command(&world, world.revision, changes))?;
+    let spec = QuerySpec {
+        limit: 100,
+        ..phrase("Duplicate Vale")
+    };
+    let historical = view(&world, revision, 20);
+    let first = store.execute_query_page(&spec, historical, None)?;
+    assert_eq!(first.revision, revision);
+    assert_eq!(first.rows.len(), 100);
+    assert_eq!(first.rows[0].object, expected[0]);
+    let cursor = first.next_cursor.as_ref().unwrap();
+    for incompatible in [
+        ViewContext {
+            day: WorldDay(21),
+            ..historical
+        },
+        ViewContext {
+            world: other.id,
+            branch: other.main,
+            ..historical
+        },
+    ] {
+        assert!(matches!(
+            store.execute_query_page(&spec, incompatible, Some(cursor)),
+            Err(Error::InvalidInput("query cursor context"))
+        ));
+    }
+    assert!(matches!(
+        store.execute_query_page(
+            &QuerySpec {
+                limit: 99,
+                ..spec.clone()
+            },
+            historical,
+            Some(cursor)
+        ),
+        Err(Error::InvalidInput("query cursor context"))
+    ));
+    assert!(matches!(
+        store.execute_query_page(&phrase("Different"), historical, Some(cursor)),
+        Err(Error::InvalidInput("query cursor context"))
+    ));
+    assert!(matches!(
+        store.execute_query_page(
+            &spec,
+            ViewContext {
+                scope: Scope::Public,
+                ..historical
+            },
+            Some(cursor)
+        ),
+        Err(Error::CapabilityDenied)
+    ));
+    let corrected = store.apply(&command(
+        &world,
+        revision,
+        vec![Change::Correct(expected[100], person("Corrected"))],
+    ))?;
+    assert!(matches!(
+        store.execute_query_page(&spec, view(&world, corrected, 20), Some(cursor)),
+        Err(Error::InvalidInput("query cursor context"))
+    ));
+    store.rebuild_search_index(Scope::Author)?;
+    let mut actual: Vec<_> = first.rows.into_iter().map(|row| row.object).collect();
+    let mut continuation = first.next_cursor;
+    while let Some(cursor) = continuation {
+        let page = store.execute_query_page(&spec, historical, Some(&cursor))?;
+        assert_eq!(page.revision, revision);
+        assert!(page.rows.len() <= spec.limit);
+        actual.extend(page.rows.into_iter().map(|row| row.object));
+        continuation = page.next_cursor;
+    }
+    assert_eq!(actual, expected);
+    let latest = store.execute_query_page(
+        &QuerySpec {
+            limit: 500,
+            ..spec.clone()
+        },
+        view(&world, corrected, 20),
+        None,
+    )?;
+    assert_eq!(latest.rows.len(), 500);
+    let last = store.execute_query_page(
+        &QuerySpec {
+            limit: 500,
+            ..spec
+        },
+        view(&world, corrected, 20),
+        latest.next_cursor.as_ref(),
+    )?;
+    assert_eq!(last.rows.len(), 24);
+    assert!(last.next_cursor.is_none());
+    Ok(())
+}
