@@ -438,3 +438,56 @@ fn controlled_reads_cancel_expire_and_release_the_connection() -> Result<(), Err
     store.verify_foreign_keys(Scope::Author)?;
     Ok(())
 }
+
+#[test]
+fn future_and_uninherited_index_hits_cannot_exhaust_historical_budget() -> Result<(), Error> {
+    let mut store = Store::open(":memory:")?;
+    let world = store.create_world("Pinned lineage", Scope::Author)?;
+    let original = ObjectRef::new(world.id);
+    let initial = store.apply(&command(
+        &world,
+        world.revision,
+        vec![Change::Create(original, person("Common navigator"))],
+    ))?;
+    let fork = store.fork(&ForkCommand {
+        world: world.id,
+        parent: world.main,
+        day: WorldDay(20),
+        expected: initial,
+        id: Uuid::new_v4(),
+        author: "FTS test".into(),
+        rationale: "Pin the original index candidates".into(),
+        scope: Scope::Author,
+    })?;
+    let changes = (0..10_001)
+        .map(|number| {
+            Change::Create(
+                ObjectRef::new(world.id),
+                person(&format!("Common navigator {number}")),
+            )
+        })
+        .collect();
+    let latest = store.apply(&command(&world, fork.created_revision, changes))?;
+    let spec = phrase("Common navigator");
+    assert_eq!(
+        ids(&store, &world, initial, "Common navigator")?,
+        vec![original]
+    );
+    let child = ViewContext {
+        branch: fork.id,
+        ..view(&world, latest, 20)
+    };
+    let page = store.execute_query_page(&spec, child, None)?;
+    assert_eq!(page.rows.len(), 1);
+    assert_eq!(page.rows[0].object, original);
+    assert!(page.next_cursor.is_none());
+    assert!(matches!(
+        store.execute_query(&spec, view(&world, latest, 20)),
+        Err(Error::QueryBudgetExceeded)
+    ));
+    store.rebuild_search_index(Scope::Author)?;
+    let after_rebuild = store.execute_query(&spec, child)?;
+    assert_eq!(after_rebuild.rows.len(), 1);
+    assert_eq!(after_rebuild.rows[0].object, original);
+    Ok(())
+}
