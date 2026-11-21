@@ -15,19 +15,35 @@ if ($RendererBenchmark) {
         Select-Object Name, DriverVersion |
         ConvertTo-Json -Compress | ForEach-Object { Write-Output "ATLAS_VIDEO_CONTROLLERS $_" }
 }
-$stdout = New-TemporaryFile
-$stderr = New-TemporaryFile
+# Own the process handle so its ExitCode stays readable in Windows PowerShell.
+$startInfo = New-Object System.Diagnostics.ProcessStartInfo
+$startInfo.FileName = $exe
+$startInfo.Arguments = $arguments -join " "
+$startInfo.UseShellExecute = $false
+$startInfo.CreateNoWindow = $true
+$startInfo.RedirectStandardOutput = $true
+$startInfo.RedirectStandardError = $true
+$process = New-Object System.Diagnostics.Process
+$process.StartInfo = $startInfo
 try {
-    $process = Start-Process -FilePath $exe -ArgumentList $arguments -NoNewWindow -PassThru `
-        -RedirectStandardOutput $stdout.FullName -RedirectStandardError $stderr.FullName
+    if (!$process.Start()) { throw "Could not launch the native platform test." }
+    $stdout = $process.StandardOutput.ReadToEndAsync()
+    $stderr = $process.StandardError.ReadToEndAsync()
     $finished = $process.WaitForExit(60000)
     if (!$finished) {
-        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+        try {
+            $process.Kill()
+        } catch [System.InvalidOperationException] {
+            if (!$process.HasExited) { throw }
+        }
         $process.WaitForExit()
     }
-    $lines = @(Get-Content -Path $stdout.FullName)
+    if (![System.Threading.Tasks.Task]::WaitAll([System.Threading.Tasks.Task[]]@($stdout, $stderr), 5000)) {
+        throw "The native platform test did not close its output streams."
+    }
+    $lines = $stdout.GetAwaiter().GetResult() -split '\r?\n'
     $lines | Write-Output
-    Get-Content -Path $stderr.FullName | Write-Output
+    $stderr.GetAwaiter().GetResult() | Write-Output
     if (!$finished) { throw "The embedded WebView did not complete its platform smoke test in 60 seconds." }
     $reports = @($lines | Where-Object { $_.StartsWith("ATLAS_PLATFORM_SMOKE ") })
     if ($reports.Count -ne 1) { throw "Expected one native platform smoke report." }
@@ -42,5 +58,5 @@ try {
         throw "Windows scene, Canvas2D or history verification failed."
     }
 } finally {
-    Remove-Item $stdout.FullName, $stderr.FullName
+    $process.Dispose()
 }

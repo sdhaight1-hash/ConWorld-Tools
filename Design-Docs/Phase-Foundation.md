@@ -4,7 +4,7 @@
 
 The baseline was [main at 4447975](https://github.com/sdhaight1-hash/ConWorld-Tools/tree/444797563488dfcefa75670d4062ed0dbafe5141). Its 17 tracked files were documentation. GitHub showed one branch, ten open roadmap issues, no closed issues, and no pull requests. The feature and research folders contained index/process documents. The first code therefore establishes the Rust workspace, migration, persistence API, and repeatable checks from scratch.
 
-[Phase Zero #1](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/1) remains open. The desktop foundation is merged with a verified Canvas2D/DOM fallback on the hosted Linux and Windows paths. Hardware WebView2 acceleration and recovery remain a separate verification gate. The [persistence ADR](ADRs/phase-1-persistence-slice.md) records choices that affect downstream phases.
+[Phase Zero #1](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/1) tracks the platform acceptance evidence. The desktop foundation is merged with a verified Canvas2D/DOM fallback on the hosted Linux and Windows paths. Physical Windows WebView2 acceleration and recovery are verified in the [Phase Zero log](Phase-0-Verification.md). The [persistence ADR](ADRs/phase-1-persistence-slice.md) records choices that affect downstream phases.
 
 ## Phase handoffs
 
@@ -12,7 +12,7 @@ The first fixture in each row is the smallest dependency-ready slice. Keep stabl
 
 | Phase | Inherited implementation | First fixture and gate |
 | --- | --- | --- |
-| [0 — Platform](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/1) | Cargo workspace, Tauri desktop, Canvas2D and an accessible inspector | Run the 2,000-node benchmark on a GPU-capable Windows WebView2 host. Record zoom, pan and forced device-loss recovery (AT-32). |
+| [0 — Platform](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/1) | Cargo workspace, Tauri desktop, Canvas2D and an accessible inspector | The 2,000-node benchmark verified zoom, pan and device-loss recovery on an RTX 2060 (AT-32). |
 | [1 — Persistence](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/2) | World-scoped SQLite migrations, pinned forks, versioned calendars, sourced claims and atomic effects | Reuse the migration/reopen and failed-command suites when introducing new record kinds (AT-01, AT-14–16, AT-26, AT-33). |
 | [2 — Relationships and event history](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/3) | Saved directed relationships, action-specific effects and a day/revision graph inspector | Extend the Northbridge letter disclosure with configured definitions, sourced claims and viewer-specific evidence. Prove a failed action remains failed even when a witness says otherwise (AT-03–05, AT-08–09, AT-13 core). |
 | [3 — Query and discovery](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/4) | Explicit read context, stable revisions, typed records and committed invalidations | Add a bounded, versioned Rust QuerySpec. First fixture combines an event-role filter, dated graph traversal and ambiguous name discovery. Compare incremental and rebuilt results (AT-21, AT-23–24, AT-35). |
@@ -54,4 +54,4 @@ cargo test -p atlas-store --locked
 | Successive fictional states | A later fictional name preserves the earlier interval at the same author revision. Corrections and schema-v1 migration retain prior author views. |
 | Migration guard | Refused a newer schema without rewriting its version |
 
-Phase Two adds the relationship and actor-action workflow on these storage contracts. Calendar discontinuities, branch merging, full archive roundtrip and public projections remain outside this foundation. Phase Zero hardware validation remains tracked in issue #1.
+Phase Two adds the relationship and actor-action workflow on these storage contracts. Calendar discontinuities, branch merging, full archive roundtrip and public projections remain outside this foundation. Phase Zero hardware results are recorded in the [platform verification log](Phase-0-Verification.md).

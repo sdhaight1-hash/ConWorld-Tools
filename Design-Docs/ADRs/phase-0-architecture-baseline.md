@@ -4,7 +4,7 @@
 
 ## Native shell and rendering
 
-**ADR-002.** Tauri 2 embeds a local Vite-built web app. Use an accessible HTML node list and Canvas2D graph in a shared view so users can inspect and select nodes with or without an accelerated renderer. The shell probes browser WebGPU for diagnostics. The Northbridge scene uses Canvas2D. The renderer benchmark adds a Rust/wgpu WASM adapter for node and edge geometry, with Canvas2D labels and the existing inspector. A device-loss notification switches the same view to Canvas2D and enables a retry. The benchmark uses generated public fixture data. Any production graph still needs a Rust-authorized scene DTO. Hardware acceleration and loss recovery in Windows WebView2 are open.
+**ADR-002.** Tauri 2 embeds a local Vite-built web app. Use an accessible HTML node list and Canvas2D graph in a shared view so users can inspect and select nodes with or without an accelerated renderer. The shell probes browser WebGPU for diagnostics. The Northbridge scene uses Canvas2D. The renderer benchmark adds a Rust/wgpu WASM adapter for node and edge geometry, with Canvas2D labels and the existing inspector. A device-loss notification switches the same view to Canvas2D and enables a retry. The benchmark uses generated public fixture data. Any production graph still needs a Rust-authorized scene DTO. Physical Windows WebView2 rendered on an RTX 2060 and recovered from forced device loss. The verification log records the test and frame intervals.
 
 **ADR-011.** Start with vanilla TypeScript and semantic HTML. The platform slice has one view and a local fixture, so the additional UI framework dependency has no present use. Revisit this choice when studio workflows need a shared component lifecycle.
 
