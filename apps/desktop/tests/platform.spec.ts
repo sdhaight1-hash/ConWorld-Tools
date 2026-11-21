@@ -720,3 +720,62 @@ test("native indexed claim search shows author-only statement provenance and rep
   await expect(result).toHaveCount(0);
   await expect(savedForm.getByRole("button", { name: "Save search definition" })).toBeDisabled();
 });
+
+
+test("native author queries historical events by person and recorded role", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "world", name: "Event roles", revision: 3 };
+    const calls: unknown[] = [];
+    Object.assign(window, {
+      isTauri: true,
+      __participantQueries: calls,
+      __TAURI_INTERNALS__: {
+        invoke: async (command: string, args: Record<string, unknown>) => {
+          if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+          if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+          if (command === "workspace_worlds") return [world];
+          if (command === "workspace_saved_queries") return [];
+          if (command === "workspace_snapshot") return {
+            world, day: args.day, view_revision: args.revision ?? world.revision,
+            people: [{ id: "alice", label: "Alice Vale" }, { id: "bob", label: "Bob Thorne" }],
+            relationships: [],
+            events: Number(args.day) >= 10 ?
+              [{ id: "meeting", label: "Guild meeting", day: 10, citation: null,
+                 participants: [], actions: [] }] : [],
+            definitions: [{ id: "role-uuid", label: "Mediator", category: "role",
+              description: "", reverse_label: null, symmetric: false }],
+          };
+          if (command === "workspace_query_participant_events") {
+            const request = args.request as { day: number; revision: number | null };
+            calls.push(request);
+            return { revision: request.revision ?? world.revision, truncated: false,
+              rows: request.day >= 10 ? [{ id: "meeting", label: "Guild meeting", kind: "historical_event" }] : [] };
+          }
+          throw new Error("Unexpected mock command: " + command);
+        },
+      },
+    });
+  });
+  await page.goto("/");
+  const form = page.locator("#author-participant-events-form");
+  await expect(form.getByRole("button", { name: "Find participant events" })).toBeEnabled();
+  await page.locator("#author-day").fill("10");
+  await page.locator("#author-day").blur();
+  await form.getByLabel("Participant person").selectOption("alice");
+  await form.getByLabel("Recorded event role").selectOption("actor");
+  await form.getByRole("button", { name: "Find participant events" }).click();
+  await expect(page.locator("#author-query-results").getByRole("button", { name: /^Guild meeting ·/ })).toBeVisible();
+  await form.getByLabel("Recorded event role").selectOption("definition:role-uuid");
+  await form.getByRole("button", { name: "Find participant events" }).click();
+  const calls = await page.evaluate(() => (window as unknown as { __participantQueries: unknown[] }).__participantQueries);
+  expect(calls).toEqual([
+    { world_id: "world", day: 10, revision: null, participant_id: "alice", role: "actor", limit: 100 },
+    { world_id: "world", day: 10, revision: null, participant_id: "alice",
+      role: "definition:role-uuid", limit: 100 },
+  ]);
+  await page.locator("#author-revision").fill("1");
+  await page.locator("#author-revision").blur();
+  await expect(page.locator("#author-query-results li")).toHaveCount(0);
+  await form.getByRole("button", { name: "Find participant events" }).click();
+  await expect(page.locator("#author-query-status")).toContainText("author revision 1");
+});
