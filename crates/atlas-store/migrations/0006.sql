@@ -65,3 +65,15 @@ CREATE TABLE actor_action_versions (
     FOREIGN KEY (world_id, target_id) REFERENCES objects(world_id, id)
 ) STRICT;
 CREATE INDEX action_event_idx ON actor_action_versions(world_id, event_id);
+
+-- Explicitly link a particular actor action to an existing event-caused change.
+CREATE TABLE action_effect_links (
+    world_id BLOB NOT NULL, target_id BLOB NOT NULL, branch_id BLOB NOT NULL,
+    effect_revision INTEGER NOT NULL, action_id BLOB NOT NULL, action_branch BLOB NOT NULL,
+    action_state_revision INTEGER NOT NULL, action_revision INTEGER NOT NULL,
+    PRIMARY KEY (world_id, target_id, branch_id, effect_revision),
+    FOREIGN KEY (world_id, target_id, branch_id, effect_revision)
+        REFERENCES historical_effects(world_id, target_id, branch_id, revision),
+    FOREIGN KEY (world_id, action_id, action_branch, action_state_revision, action_revision)
+        REFERENCES object_versions(world_id, object_id, branch_id, state_revision, revision)
+) STRICT;

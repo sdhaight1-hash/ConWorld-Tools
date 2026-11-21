@@ -288,7 +288,8 @@ impl Store {
                 Change::Create(object, record)
                 | Change::Correct(object, record)
                 | Change::RecordState(object, record) => (*object, record),
-                Change::EventEffect { target, record, .. } => (*target, record),
+                Change::EventEffect { target, record, .. }
+                | Change::ActionEffect { target, record, .. } => (*target, record),
             };
             if object.world != world.id {
                 return Err(Error::WrongWorld);
@@ -297,7 +298,7 @@ impl Store {
                 return Err(Error::RepeatedObject);
             }
             let effect = match change {
-                Change::EventEffect { event, .. } => {
+                Change::EventEffect { event, .. } | Change::ActionEffect { event, .. } => {
                     if event.world != object.world {
                         return Err(Error::WrongWorld);
                     }
@@ -316,14 +317,35 @@ impl Store {
                         ObjectData::HistoricalEvent { .. } => return Err(Error::InvalidOccurrence),
                         _ => return Err(Error::WrongKind),
                     }
+                    let action = match change {
+                        Change::ActionEffect { action, .. } => {
+                            if action.world != object.world {
+                                return Err(Error::WrongWorld);
+                            }
+                            if *action == object {
+                                return Err(Error::InvalidInput("action cannot cause its own state change"));
+                            }
+                            let version = resolve_object(&tx, *action, branch, AuthorRevision(revision), day)?
+                                .ok_or(Error::NotFound)?;
+                            match &version.record.data {
+                                ObjectData::ActorAction { event: action_event, .. }
+                                    if *action_event == *event => Some(version.reference()),
+                                ObjectData::ActorAction { .. } => {
+                                    return Err(Error::InvalidInput("action belongs to another event"));
+                                }
+                                _ => return Err(Error::WrongKind),
+                            }
+                        }
+                        _ => None,
+                    };
                     let before = resolve_object(&tx, object, branch, world.revision, day)?
                         .ok_or(Error::NotFound)?;
-                    Some((origin.reference(), before.reference(), day))
+                    Some((origin.reference(), before.reference(), day, action))
                 }
                 _ => None,
             };
             apply_change(&tx, branch, fork, revision, change, object, record)?;
-            if let Some((event, before, day)) = effect {
+            if let Some((event, before, day, action)) = effect {
                 tx.execute(
                     "INSERT INTO historical_effects (world_id, target_id, branch_id, revision,
                          event_id, event_branch, event_state_revision, event_revision,
@@ -344,6 +366,17 @@ impl Store {
                         day.0
                     ],
                 )?;
+                if let Some(action) = action {
+                    tx.execute(
+                        "INSERT INTO action_effect_links
+                         (world_id, target_id, branch_id, effect_revision,
+                          action_id, action_branch, action_state_revision, action_revision)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                        params![object.world.0.as_bytes(), object.id.0.as_bytes(), branch.0.as_bytes(),
+                            revision, action.object.id.0.as_bytes(), action.branch.0.as_bytes(),
+                            action.state_revision.0, action.recorded_at.0],
+                    )?;
+                }
             }
             tx.execute(
                 "INSERT INTO invalidations (world_id, revision, object_id) VALUES (?1, ?2, ?3)",
@@ -387,9 +420,14 @@ impl Store {
         };
         // Corrections retain the provenance of the state they update.
         Ok(self.conn.query_row(
-            "SELECT event_id, event_branch, event_state_revision, event_revision,
-                    before_branch, before_state_revision, before_revision, day
-             FROM historical_effects WHERE world_id = ?1 AND target_id = ?2 AND branch_id = ?3 AND revision = ?4",
+            "SELECT e.event_id, e.event_branch, e.event_state_revision, e.event_revision,
+                    e.before_branch, e.before_state_revision, e.before_revision, e.day,
+                    a.action_id, a.action_branch, a.action_state_revision, a.action_revision
+             FROM historical_effects AS e
+             LEFT JOIN action_effect_links AS a
+                ON a.world_id = e.world_id AND a.target_id = e.target_id
+                AND a.branch_id = e.branch_id AND a.effect_revision = e.revision
+             WHERE e.world_id = ?1 AND e.target_id = ?2 AND e.branch_id = ?3 AND e.revision = ?4",
             params![target.world.0.as_bytes(), target.id.0.as_bytes(), after.branch.0.as_bytes(), after.state_revision.0],
             |row| Ok(HistoricalEffect {
                 event: VersionRef {
@@ -405,6 +443,14 @@ impl Store {
                 },
                 after: VersionRef { recorded_at: after.state_revision, ..after },
                 day: WorldDay(row.get(7)?),
+                action: row.get::<_, Option<[u8; 16]>>(8)?.map(|id| {
+                    Ok::<_, rusqlite::Error>(VersionRef {
+                        object: ObjectRef { world: target.world, id: ObjectId(Uuid::from_bytes(id)) },
+                        branch: BranchId(Uuid::from_bytes(row.get(9)?)),
+                        state_revision: AuthorRevision(row.get(10)?),
+                        recorded_at: AuthorRevision(row.get(11)?),
+                    })
+                }).transpose()?,
             }),
         ).optional()?)
     }
@@ -764,7 +810,7 @@ fn apply_change(
         }
         if current.is_none() {
             new_override = Some(match change {
-                Change::RecordState(..) | Change::EventEffect { .. } => {
+                Change::RecordState(..) | Change::EventEffect { .. } | Change::ActionEffect { .. } => {
                     record.valid.start.ok_or(Error::InvalidInterval)?
                 }
                 _ => fork.day,
@@ -784,7 +830,7 @@ fn apply_change(
             }
             state
         }
-        (Change::RecordState(..) | Change::EventEffect { .. }, Some((state, mut previous))) => {
+        (Change::RecordState(..) | Change::EventEffect { .. } | Change::ActionEffect { .. }, Some((state, mut previous))) => {
             let start = record.valid.start.ok_or(Error::InvalidInterval)?;
             if previous
                 .record
