@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use crate::graph::walk;
-use crate::{AuthorRevision, Error, EventRole, ObjectData, ObjectRef, Store, Version, ViewContext};
+use crate::{AuthorRevision, Error, EventRole, ObjectData, ObjectRef, Scope, Store, Version, ViewContext, WorldId};
 
 pub const QUERY_SCHEMA_VERSION: u16 = 1;
 
@@ -43,6 +43,18 @@ pub enum Direction {
 
 /// Author-owned, versioned definition. Running it always reevaluates the
 /// QuerySpec with the caller's current ViewContext; no results are persisted.
+/// An explicit, author-scoped write with optimistic concurrency and an
+/// idempotency identity. Query results are never saved in this command.
+pub struct SaveNamedLabelQuery<'a> {
+    pub world_id: WorldId,
+    pub expected: AuthorRevision,
+    pub query_id: Option<Uuid>,
+    pub name: &'a str,
+    pub spec: &'a QuerySpec,
+    pub command_id: Uuid,
+    pub scope: Scope,
+}
+
 #[derive(Clone, Debug)]
 pub struct SavedLabelQuery {
     pub id: Uuid,
