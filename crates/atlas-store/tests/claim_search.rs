@@ -327,7 +327,10 @@ fn claim_fts_rebuild_backup_migration_and_saved_replay() -> Result<(), Error> {
     let preserved = upgraded.saved_label_queries(world.id, current, Scope::Author)?;
     assert_eq!(preserved.len(), 1);
     assert_eq!(preserved[0].id, legacy.id);
-    assert!(matches!(preserved[0].spec.filter, QueryFilter::FullTextPhrase(_)));
+    assert!(matches!(
+        preserved[0].spec.filter,
+        QueryFilter::FullTextPhrase(_)
+    ));
     upgraded.verify_foreign_keys(Scope::Author)?;
     Ok(())
 }
