@@ -97,6 +97,7 @@ test("native author form refuses a missing historical day instead of silently sa
     ];
     const writes: string[] = [];
     Object.assign(window, {
+      isTauri: true,
       __authorTestWrites: writes,
       __TAURI_INTERNALS__: {
         invoke: async (command: string) => {
