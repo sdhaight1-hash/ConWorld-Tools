@@ -357,10 +357,7 @@ fn query_pages_bind_exact_context_and_preserve_duplicate_labels() -> Result<(), 
     )?;
     assert_eq!(latest.rows.len(), 500);
     let last = store.execute_query_page(
-        &QuerySpec {
-            limit: 500,
-            ..spec
-        },
+        &QuerySpec { limit: 500, ..spec },
         view(&world, corrected, 20),
         latest.next_cursor.as_ref(),
     )?;
