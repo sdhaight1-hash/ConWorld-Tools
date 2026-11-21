@@ -1,8 +1,8 @@
 //! Main-branch authored layouts and explicit, revocable publication.
 use super::*;
 use crate::layout::{
-    DisplayContent, DisplayElement, EntryTextSearch, LayoutDocument, PublicPageMatch,
-    PublicPageSearch,
+    DisplayContent, DisplayElement, EntryBacklink, EntryBacklinks, EntryTextSearch,
+    LayoutDocument, PublicPageMatch, PublicPageSearch,
 };
 
 impl Store {
@@ -56,6 +56,7 @@ impl Store {
             ],
         )?;
         replace_public_page_index(&tx, document, published, revision)?;
+        index_entry_links(&tx, document, revision)?;
         tx.commit()?;
         Ok(AuthorRevision(revision))
     }
@@ -110,10 +111,106 @@ impl Store {
         view: ViewContext,
         entry: ObjectRef,
     ) -> Result<Option<DisplayElement>, Error> {
+        if view.scope != Scope::Author {
+            let tx = self.conn.unchecked_transaction()?;
+            let Some((document, _)) = read_layout_at(&tx, view, entry)? else {
+                return Ok(None);
+            };
+            return document.compile(self, view);
+        }
         let Some((document, _)) = self.read_layout(view, entry)? else {
             return Ok(None);
         };
         document.compile(self, view)
+    }
+
+    /// Readers can navigate only to a released destination in their own scope.
+    /// Never compile the destination: cyclic navigation must not recurse.
+    pub(crate) fn entry_link_target_visible(
+        &self,
+        view: ViewContext,
+        target: ObjectRef,
+    ) -> Result<bool, Error> {
+        if view.world != target.world {
+            return Err(Error::WrongWorld);
+        }
+        if view.scope == Scope::Author {
+            self.validate_query_view(view)?;
+            return Ok(resolve_object(
+                &self.conn,
+                target,
+                view.branch,
+                view.revision,
+                view.day,
+            )?
+            .is_some());
+        }
+        Ok(read_layout_at(&self.conn, view, target)?.is_some_and(|(document, _)| {
+            crate::access::can_view(view.scope, document.root.audience)
+        }))
+    }
+
+    /// Explicit presentation references, not semantic graph edges.
+    pub fn entry_backlinks(
+        &self,
+        view: ViewContext,
+        target: ObjectRef,
+        limit: usize,
+        control: &QueryControl,
+    ) -> Result<EntryBacklinks, Error> {
+        if !(1..=50).contains(&limit) {
+            return Err(Error::InvalidInput("entry backlink limit"));
+        }
+        self.with_query_control(control, |store| {
+            let tx = store.conn.unchecked_transaction()?;
+            let world = load_world(&tx, view.world)?;
+            if world.main != view.branch {
+                return Err(Error::CapabilityDenied);
+            }
+            let mut result = EntryBacklinks {
+                matches: Vec::new(),
+                truncated: false,
+            };
+            if !store.entry_link_target_visible(view, target)? {
+                return Ok(result);
+            }
+            let mut stmt = tx.prepare(
+                "SELECT DISTINCT l.entry_id FROM entry_link_index l
+                 WHERE l.world_id=?1 AND l.target_id=?2 AND l.revision<=?3
+                   AND l.revision=(SELECT MAX(v.revision) FROM entry_layout_versions v
+                       WHERE v.world_id=l.world_id AND v.entry_id=l.entry_id AND v.revision<=?3)
+                 ORDER BY l.entry_id",
+            )?;
+            let ids = stmt.query_map(
+                params![view.world.0.as_bytes(), target.id.0.as_bytes(), view.revision.0],
+                |row| row.get::<_, [u8; 16]>(0),
+            )?;
+            for id in ids {
+                store.check_query_control()?;
+                let source = ObjectRef {
+                    world: view.world,
+                    id: ObjectId(Uuid::from_bytes(id?)),
+                };
+                let Some((document, _)) = read_layout_at(&tx, view, source)? else {
+                    continue;
+                };
+                for (element, link) in document.visible_links(view.scope) {
+                    if link.target != target {
+                        continue;
+                    }
+                    if result.matches.len() == limit {
+                        result.truncated = true;
+                        return Ok(result);
+                    }
+                    result.matches.push(EntryBacklink {
+                        source,
+                        element,
+                        label: link.label.clone(),
+                    });
+                }
+            }
+            Ok(result)
+        })
     }
 
     /// Find literal, case-insensitive text within a single authorized entry.
@@ -357,6 +454,54 @@ pub(super) fn rebuild_public_page_index(conn: &Connection) -> Result<(), Error> 
             return Err(Error::Integrity("layout entry mismatch".into()));
         }
         replace_public_page_index(conn, &document, true, revision)?;
+    }
+    Ok(())
+}
+
+fn index_entry_links(
+    conn: &Connection,
+    document: &LayoutDocument,
+    revision: i64,
+) -> Result<(), Error> {
+    document.validate()?;
+    for (element, link) in document.visible_links(Scope::Author) {
+        conn.execute(
+            "INSERT INTO entry_link_index(world_id,entry_id,revision,element_id,target_id)
+             VALUES (?1,?2,?3,?4,?5)",
+            params![
+                document.entry.world.0.as_bytes(),
+                document.entry.id.0.as_bytes(),
+                revision,
+                element.0.as_bytes(),
+                link.target.id.0.as_bytes()
+            ],
+        )?;
+    }
+    Ok(())
+}
+
+pub(super) fn rebuild_entry_link_index(conn: &Connection) -> Result<(), Error> {
+    conn.execute("DELETE FROM entry_link_index", [])?;
+    let mut stmt = conn.prepare(
+        "SELECT world_id,entry_id,revision,document FROM entry_layout_versions
+         ORDER BY world_id,entry_id,revision",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            Uuid::from_bytes(row.get(0)?),
+            Uuid::from_bytes(row.get(1)?),
+            row.get::<_, i64>(2)?,
+            row.get::<_, String>(3)?,
+        ))
+    })?;
+    for row in rows {
+        let (world, entry, revision, json) = row?;
+        let document: LayoutDocument = serde_json::from_str(&json)
+            .map_err(|_| Error::Integrity("invalid stored entry layout".into()))?;
+        if document.entry.world.0 != world || document.entry.id.0 != entry {
+            return Err(Error::Integrity("layout entry mismatch".into()));
+        }
+        index_entry_links(conn, &document, revision)?;
     }
     Ok(())
 }

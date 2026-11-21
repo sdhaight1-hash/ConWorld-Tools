@@ -37,6 +37,27 @@ pub enum ElementContent {
     Text(String),
     Query(QuerySpec),
     SavedQuery(SavedQueryBinding),
+    ObjectLink(ObjectLink),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObjectLink {
+    pub target: ObjectRef,
+    pub label: String,
+}
+
+#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct EntryBacklink {
+    pub source: ObjectRef,
+    pub element: ElementId,
+    pub label: String,
+}
+
+#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct EntryBacklinks {
+    pub matches: Vec<EntryBacklink>,
+    pub truncated: bool,
 }
 
 /// Pin the definition, not its results. Runtime data follows the layout's view.
@@ -81,6 +102,7 @@ pub struct DisplayElement {
 pub enum DisplayContent {
     Stack(Vec<DisplayElement>),
     Text(String),
+    ObjectLink(ObjectLink),
     QueryRows {
         records: Vec<(ObjectRef, String)>,
         truncated: bool,
@@ -139,6 +161,14 @@ impl LayoutDocument {
                 ElementContent::Text(text) if text.len() > 16_384 => {
                     return Err(Error::InvalidInput("layout text length"));
                 }
+                ElementContent::ObjectLink(link) => {
+                    if link.target.world != self.entry.world {
+                        return Err(Error::WrongWorld);
+                    }
+                    if link.label.trim().is_empty() || link.label.len() > 800 {
+                        return Err(Error::InvalidInput("layout link label"));
+                    }
+                }
                 ElementContent::SavedQuery(binding) => {
                     if binding.world != self.entry.world {
                         return Err(Error::WrongWorld);
@@ -169,7 +199,7 @@ impl LayoutDocument {
                 ElementContent::Stack(children) => {
                     pending.extend(children.iter().map(|child| (child, audience)))
                 }
-                ElementContent::Text(_) => {}
+                ElementContent::Text(_) | ElementContent::ObjectLink(_) => {}
             }
         }
         Ok(())
@@ -197,12 +227,30 @@ impl LayoutDocument {
                     text.push_str(&block.to_lowercase().replace('\0', " "));
                     text.push('\n');
                 }
+                // Destination-dependent captions are excluded from static text search.
+                ElementContent::ObjectLink(_) => {}
                 ElementContent::Query(_) | ElementContent::SavedQuery(_) => {
                     return Err(Error::CapabilityDenied);
                 }
             }
         }
         Ok(Some(text))
+    }
+
+    pub(crate) fn visible_links(&self, scope: Scope) -> Vec<(ElementId, &ObjectLink)> {
+        let mut links = Vec::new();
+        let mut pending = vec![&self.root];
+        while let Some(element) = pending.pop() {
+            if !can_view(scope, element.audience) {
+                continue;
+            }
+            match &element.content {
+                ElementContent::Stack(children) => pending.extend(children.iter().rev()),
+                ElementContent::ObjectLink(link) => links.push((element.id, link)),
+                _ => {}
+            }
+        }
+        links
     }
 
     pub fn reparent(&mut self, id: ElementId, target: ElementId) -> Result<(), Error> {
@@ -307,6 +355,12 @@ fn project(
                 return Err(Error::InvalidInput("layout text length"));
             }
             DisplayContent::Text(text.clone())
+        }
+        ElementContent::ObjectLink(link) => {
+            if !store.entry_link_target_visible(view, link.target)? {
+                return Ok(None);
+            }
+            DisplayContent::ObjectLink(link.clone())
         }
         ElementContent::Query(_) | ElementContent::SavedQuery(_) => {
             if view.scope != Scope::Author {

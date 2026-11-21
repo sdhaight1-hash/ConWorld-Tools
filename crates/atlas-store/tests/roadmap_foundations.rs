@@ -1261,3 +1261,107 @@ fn saved_canvas_binding_pins_definition_and_replays_live_author_history() -> Res
     assert!(rows(&store, author)?.is_empty());
     Ok(())
 }
+
+#[test]
+fn authored_links_follow_publication_and_historical_backlinks() -> Result<(), Error> {
+    use atlas_store::{layout::ObjectLink, query::QueryControl};
+
+    let mut store = Store::open(":memory:")?;
+    let world = seed(&mut store)?;
+    let mut author = view(&world, 13);
+    let alice = id(&world, 1);
+    let beatrice = id(&world, 2);
+    let block = |audience, content| LayoutElement {
+        id: ElementId(Uuid::new_v4()),
+        audience,
+        content,
+    };
+    let link = |target, label: &str| {
+        ElementContent::ObjectLink(ObjectLink {
+            target,
+            label: label.into(),
+        })
+    };
+    let public = |view| ViewContext {
+        scope: Scope::Public,
+        ..view
+    };
+    let target = LayoutDocument {
+        schema_version: LAYOUT_SCHEMA_VERSION,
+        entry: beatrice,
+        root: block(
+            ClaimAudience::Public,
+            ElementContent::Stack(vec![block(
+                ClaimAudience::Public,
+                link(alice, "Return to Alice"),
+            )]),
+        ),
+    };
+    let visible = block(ClaimAudience::Public, link(beatrice, "Read Beatrice"));
+    let element = visible.id;
+    let mut source = LayoutDocument {
+        schema_version: LAYOUT_SCHEMA_VERSION,
+        entry: alice,
+        root: block(
+            ClaimAudience::Public,
+            ElementContent::Stack(vec![
+                visible,
+                block(
+                    ClaimAudience::Author,
+                    ElementContent::Stack(vec![block(
+                        ClaimAudience::Public,
+                        link(beatrice, "Hidden reference"),
+                    )]),
+                ),
+            ]),
+        ),
+    };
+    let control = QueryControl::new(std::time::Duration::from_secs(10))?;
+    let find = |store: &Store, context, limit| {
+        store.entry_backlinks(context, beatrice, limit, &control)
+    };
+    author.revision = store.save_entry_layout(author, &source, true, Uuid::new_v4())?;
+    assert!(find(&store, public(author), 1)?.matches.is_empty());
+    let display = store.display_entry(public(author), alice)?.unwrap();
+    assert!(matches!(display.content, DisplayContent::Stack(children) if children.is_empty()));
+    author.revision = store.save_entry_layout(author, &target, true, Uuid::new_v4())?;
+    let pinned = author;
+    let found = find(&store, public(author), 1)?;
+    assert_eq!(found.matches.len(), 1);
+    assert_eq!(found.matches[0].element, element);
+    assert_eq!(found.matches[0].source, alice);
+    assert!(!found.truncated);
+    let private = find(&store, author, 1)?;
+    assert!(private.truncated);
+    assert_eq!(private.matches, found.matches);
+    let page = store.display_entry(public(author), alice)?.unwrap();
+    let DisplayContent::Stack(children) = page.content else {
+        panic!("expected stack")
+    };
+    assert_eq!(children.len(), 1);
+    assert_eq!(
+        children[0].content,
+        DisplayContent::ObjectLink(ObjectLink {
+            target: beatrice,
+            label: "Read Beatrice".into(),
+        })
+    );
+    assert!(store.display_entry(public(author), beatrice)?.is_some());
+    author.revision = store.save_entry_layout(author, &target, false, Uuid::new_v4())?;
+    assert!(find(&store, public(author), 50)?.matches.is_empty());
+    assert_eq!(find(&store, author, 50)?.matches.len(), 2);
+    assert!(matches!(
+        find(&store, public(pinned), 50),
+        Err(Error::InvalidRevision)
+    ));
+    if let ElementContent::Stack(children) = &mut source.root.content {
+        children.clear();
+    }
+    author.revision = store.save_entry_layout(author, &source, true, Uuid::new_v4())?;
+    assert!(find(&store, author, 50)?.matches.is_empty());
+    let historical = find(&store, pinned, 50)?;
+    assert_eq!(historical.matches.len(), 2);
+    store.rebuild_search_index(Scope::Author)?;
+    assert_eq!(find(&store, pinned, 50)?, historical);
+    Ok(())
+}
