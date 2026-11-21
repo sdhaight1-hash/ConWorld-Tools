@@ -490,8 +490,7 @@ impl Store {
                     world: view.world,
                     id: ObjectId(Uuid::from_bytes(id)),
                 };
-                let Some(edge) =
-                    resolve_object(&tx, object, view.branch, view.revision, view.day)?
+                let Some(edge) = resolve_object(&tx, object, view.branch, view.revision, view.day)?
                 else {
                     continue;
                 };
