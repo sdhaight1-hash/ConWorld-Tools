@@ -3,6 +3,8 @@
 //! Proposals have no write authority: text similarity is not a relationship,
 //! membership, parentage, or proven historical fact.
 
+use std::collections::HashSet;
+
 use uuid::Uuid;
 
 use crate::{
@@ -124,13 +126,13 @@ impl Store {
         let aliases = self.person_aliases(view)?;
         let mut names = Vec::new();
         for person in &people {
-            names.push((person.object, person.record.label.as_str()));
+            names.push((*person, person.record.label.as_str()));
         }
         for alias in &aliases {
             if alias.matches_day(view.day)
-                && people.iter().any(|person| person.object == alias.person)
+                && let Some(person) = people.iter().find(|person| person.object == alias.person)
             {
-                names.push((alias.person, alias.label.as_str()));
+                names.push((*person, alias.label.as_str()));
             }
         }
 
@@ -142,15 +144,17 @@ impl Store {
             if statement.len() > 10_000 {
                 return Err(Error::QueryBudgetExceeded);
             }
-            for (person_id, matching_label) in &names {
+            let mut seen = HashSet::new();
+            for (person, matching_label) in &names {
                 comparisons += 1;
                 if comparisons > MAX_COMPARISONS {
                     return Err(Error::QueryBudgetExceeded);
                 }
-                let Some(person) = people.iter().find(|person| person.object == *person_id) else {
-                    continue;
-                };
                 for (start_byte, end_byte) in matching_spans(statement, matching_label) {
+                    // Count distinct identities and spans, not duplicate authored aliases.
+                    if !seen.insert((person.object, start_byte, end_byte)) {
+                        continue;
+                    }
                     rows.push(MentionCandidate {
                         source: claim.reference(),
                         source_label: claim.record.label.clone(),
@@ -179,14 +183,6 @@ impl Store {
                 .then(a.start_byte.cmp(&b.start_byte))
                 .then(a.end_byte.cmp(&b.end_byte))
                 .then(a.target.id.0.cmp(&b.target.id.0))
-        });
-        // Two aliases (or a canonical label and alias) can denote the same
-        // person and source span; this is one candidate, not a collision.
-        rows.dedup_by(|a, b| {
-            a.source == b.source
-                && a.start_byte == b.start_byte
-                && a.end_byte == b.end_byte
-                && a.target == b.target
         });
         let mut group = 0;
         while group < rows.len() {
