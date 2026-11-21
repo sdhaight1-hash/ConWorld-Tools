@@ -612,8 +612,11 @@ mod tests {
         assert_eq!(cause.outcome, Some("succeeded"));
         assert_eq!(cause.day, 10);
         assert_eq!(cause.source, "Northbridge folio 14");
-        assert!(reopened.snapshot(&world_id, 9)?.relationships[0]
-            .cause.is_none());
+        assert!(
+            reopened.snapshot(&world_id, 9)?.relationships[0]
+                .cause
+                .is_none()
+        );
         assert_eq!(
             reopened.snapshot(&world_id, 9)?.relationships[0].trust,
             Some(90)
