@@ -600,23 +600,35 @@ fn controlled_previews_refresh_only_changed_sources_and_match_fresh_reads() -> R
             Change::Create(person, record("Ann", ObjectData::Person)),
             Change::Create(
                 event,
-                record("Meeting", ObjectData::HistoricalEvent {
-                    occurrence: EventDate::Exact(WorldDay(0)),
-                }),
+                record(
+                    "Meeting",
+                    ObjectData::HistoricalEvent {
+                        occurrence: EventDate::Exact(WorldDay(0)),
+                    },
+                ),
             ),
-            Change::Create(source, record("Diary", ObjectData::Source {
-                citation: "Folio 1".into(),
-            })),
+            Change::Create(
+                source,
+                record(
+                    "Diary",
+                    ObjectData::Source {
+                        citation: "Folio 1".into(),
+                    },
+                ),
+            ),
         ],
     ))?;
     let claim = |label: &str, statement: &str| Record {
         source: Some(source),
-        ..record(label, ObjectData::Claim {
-            subject: event,
-            predicate: "reported".into(),
-            statement: statement.into(),
-            audience: ClaimAudience::Author,
-        })
+        ..record(
+            label,
+            ObjectData::Claim {
+                subject: event,
+                predicate: "reported".into(),
+                statement: statement.into(),
+                audience: ClaimAudience::Author,
+            },
+        )
     };
     let written = store.apply(&command(
         &world,
@@ -636,7 +648,11 @@ fn controlled_previews_refresh_only_changed_sources_and_match_fresh_reads() -> R
     };
     let before = read(&store, written, None, 100)?;
     assert_eq!(before.rows.len(), 2);
-    let chosen = before.rows.iter().find(|row| row.source.object == first).unwrap();
+    let chosen = before
+        .rows
+        .iter()
+        .find(|row| row.source.object == first)
+        .unwrap();
     let approved = store.review_mention(ReviewMention {
         view: view(&world, written, 0),
         expected: written,
@@ -648,8 +664,21 @@ fn controlled_previews_refresh_only_changed_sources_and_match_fresh_reads() -> R
         command_id: Uuid::new_v4(),
     })?;
     let updated = read(&store, approved, None, 100)?;
-    assert_eq!(updated.rows, store.discover_mentions(view(&world, approved, 0), 100)?.rows);
-    assert_eq!(updated.rows.iter().find(|row| row.source.object == first).unwrap().disposition, Some(MentionDisposition::Approved));
+    assert_eq!(
+        updated.rows,
+        store
+            .discover_mentions(view(&world, approved, 0), 100)?
+            .rows
+    );
+    assert_eq!(
+        updated
+            .rows
+            .iter()
+            .find(|row| row.source.object == first)
+            .unwrap()
+            .disposition,
+        Some(MentionDisposition::Approved)
+    );
     let corrected = store.apply(&command(
         &world,
         approved,
@@ -658,7 +687,12 @@ fn controlled_previews_refresh_only_changed_sources_and_match_fresh_reads() -> R
     let refreshed = read(&store, corrected, None, 100)?;
     assert_eq!(refreshed.rows.len(), 1);
     assert_eq!(refreshed.rows[0].source.object, second);
-    assert_eq!(refreshed.rows, store.discover_mentions(view(&world, corrected, 0), 100)?.rows);
+    assert_eq!(
+        refreshed.rows,
+        store
+            .discover_mentions(view(&world, corrected, 0), 100)?
+            .rows
+    );
     assert_eq!(read(&store, written, None, 100)?.rows, before.rows);
 
     // Incomplete results cannot serve as complete cached corpora.
@@ -679,7 +713,10 @@ fn controlled_previews_refresh_only_changed_sources_and_match_fresh_reads() -> R
     assert!(read(&store, rename, None, 100)?.rows.is_empty());
     assert!(matches!(
         store.discover_mentions_controlled(
-            ViewContext { scope: Scope::Public, ..view(&world, rename, 0) },
+            ViewContext {
+                scope: Scope::Public,
+                ..view(&world, rename, 0)
+            },
             None,
             100,
             &QueryControl::new(Duration::from_secs(10))?,
