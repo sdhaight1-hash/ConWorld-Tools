@@ -522,16 +522,22 @@ fn indexed_backlinks_remain_exact_above_snapshot_budget() -> Result<(), Error> {
             Change::Create(claim, claim_record("Morgan Vale attended.", Some(source))),
             Change::Create(
                 bond,
-                record(
-                    "Friendship",
-                    ObjectData::Relationship {
-                        subject: other,
-                        target: person,
-                        kind: "friendship".into(),
-                        trust: None,
-                        tags: vec![],
+                Record {
+                    valid: ValidInterval {
+                        start: Some(WorldDay(0)),
+                        end_exclusive: None,
                     },
-                ),
+                    ..record(
+                        "Friendship",
+                        ObjectData::Relationship {
+                            subject: other,
+                            target: person,
+                            kind: "friendship".into(),
+                            trust: None,
+                            tags: vec![],
+                        },
+                    )
+                },
             ),
         ],
     ))?;
