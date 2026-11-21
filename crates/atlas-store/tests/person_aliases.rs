@@ -141,8 +141,22 @@ fn aliases_preserve_revision_and_valid_day_collisions_with_reviewed_backlinks() 
             .rows
             .is_empty()
     );
-    let first = save(&mut store, &world, initial, alice, None, ("Magpie", true, 10, Some(40)))?;
-    let second = save(&mut store, &world, first.recorded_at, bob, None, ("Magpie", true, 10, None))?;
+    let first = save(
+        &mut store,
+        &world,
+        initial,
+        alice,
+        None,
+        ("Magpie", true, 10, Some(40)),
+    )?;
+    let second = save(
+        &mut store,
+        &world,
+        first.recorded_at,
+        bob,
+        None,
+        ("Magpie", true, 10, None),
+    )?;
     assert!(
         store
             .discover_mentions(view(&world, second.recorded_at, 9), 100)?
@@ -182,7 +196,14 @@ fn aliases_preserve_revision_and_valid_day_collisions_with_reviewed_backlinks() 
     })?;
     assert_eq!(backlinks(&store, &world, approved, alice)?, vec![claim]);
     assert!(!backlinks(&store, &world, approved, bob)?.contains(&claim));
-    let renamed = save(&mut store, &world, approved, alice, Some(first.id), ("Bluebird", true, 10, None))?;
+    let renamed = save(
+        &mut store,
+        &world,
+        approved,
+        alice,
+        Some(first.id),
+        ("Bluebird", true, 10, None),
+    )?;
     let latest = store.discover_mentions(view(&world, renamed.recorded_at, 20), 100)?;
     assert_eq!(latest.rows.len(), 1);
     assert_eq!(latest.rows[0].target, bob);
@@ -206,7 +227,14 @@ fn aliases_preserve_revision_and_valid_day_collisions_with_reviewed_backlinks() 
             .disposition,
         Some(MentionDisposition::Approved)
     );
-    let stopped = save(&mut store, &world, renamed.recorded_at, bob, Some(second.id), ("Magpie", false, 10, None))?;
+    let stopped = save(
+        &mut store,
+        &world,
+        renamed.recorded_at,
+        bob,
+        Some(second.id),
+        ("Magpie", false, 10, None),
+    )?;
     assert!(
         store
             .discover_mentions(view(&world, stopped.recorded_at, 20), 100)?
@@ -226,7 +254,14 @@ fn aliases_preserve_revision_and_valid_day_collisions_with_reviewed_backlinks() 
             .any(|a| a.id == first.id && a.label == "Bluebird")
     );
     assert!(matches!(
-        save(&mut store, &world, stopped.recorded_at, ObjectRef::new(other.id), None, ("Foreign", true, 0, None)),
+        save(
+            &mut store,
+            &world,
+            stopped.recorded_at,
+            ObjectRef::new(other.id),
+            None,
+            ("Foreign", true, 0, None)
+        ),
         Err(Error::WrongWorld)
     ));
     assert_eq!(
@@ -318,15 +353,36 @@ fn alias_input_rejects_invalid_intervals_labels_and_stale_writes() -> Result<(),
         )],
     ))?;
     assert!(matches!(
-        save(&mut store, &world, created, person, None, (" ", true, 0, None)),
+        save(
+            &mut store,
+            &world,
+            created,
+            person,
+            None,
+            (" ", true, 0, None)
+        ),
         Err(Error::InvalidInput(_))
     ));
     assert!(matches!(
-        save(&mut store, &world, created, person, None, ("Old name", true, 50, Some(50))),
+        save(
+            &mut store,
+            &world,
+            created,
+            person,
+            None,
+            ("Old name", true, 50, Some(50))
+        ),
         Err(Error::InvalidInterval)
     ));
     assert!(matches!(
-        save(&mut store, &world, AuthorRevision(0), person, None, ("Old name", true, 0, None)),
+        save(
+            &mut store,
+            &world,
+            AuthorRevision(0),
+            person,
+            None,
+            ("Old name", true, 0, None)
+        ),
         Err(Error::RevisionConflict { .. })
     ));
     assert_eq!(store.world(world.id, Scope::Author)?.revision, created);
