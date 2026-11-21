@@ -349,7 +349,7 @@ test("native path explorer uses typed direction, hop and visit budgets at the se
             const request = args.request as { day: number; revision: number | null; max_depth: number; max_visited: number };
             calls.push(request);
             const rows = request.day < 10 || request.revision === 3 ? [] :
-              people.slice(1, request.max_depth === 1 ? 2 : 3).map(person => ({ ...person, kind: "person" }));
+              people.slice(1, request.max_depth === 1 || request.max_visited === 2 ? 2 : 3).map(person => ({ ...person, kind: "person" }));
             return { revision: request.revision ?? 5, truncated: request.max_visited === 2, rows };
           }
           throw new Error("Unexpected mock command: " + command);
@@ -387,7 +387,7 @@ test("native path explorer uses typed direction, hop and visit budgets at the se
   await expect(page.locator("#author-query-status")).toContainText("0 match(es)");
   await revision.fill("");
   await revision.blur();
-  await form.getByLabel("Maximum hops").fill("1");
+  await form.getByLabel("Maximum hops").fill("2");
   await form.getByLabel("Visited budget").fill("2");
   await form.getByRole("button", { name: "Explore connections" }).click();
   await expect(results.getByRole("button", { name: /^Beatrice ·/ })).toBeVisible();
@@ -399,6 +399,6 @@ test("native path explorer uses typed direction, hop and visit budgets at the se
       direction: "outgoing", max_depth: 2, max_visited: 3, limit: 100 },
     { world_id: "world", day: 9, revision: null },
     { world_id: "world", day: 10, revision: 3 },
-    { world_id: "world", day: 10, revision: null, max_depth: 1, max_visited: 2 },
+    { world_id: "world", day: 10, revision: null, max_depth: 2, max_visited: 2 },
   ]);
 });
