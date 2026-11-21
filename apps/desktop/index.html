@@ -121,6 +121,32 @@
               </label>
               <button type="submit">Find participant events</button>
             </form>
+            <form id="author-composite-form" class="query-form composite-query-form">
+              <fieldset>
+                <legend>Combine historical object filters</legend>
+                <label>Label contains <input name="name" maxlength="800" placeholder="Optional label text" /></label>
+                <label>Object kind
+                  <select name="kind">
+                    <option value="">Any kind</option>
+                    <option value="person">Person</option>
+                    <option value="definition">Definition</option>
+                    <option value="relationship">Relationship</option>
+                    <option value="event_involvement">Event involvement</option>
+                    <option value="actor_action">Actor action</option>
+                    <option value="historical_event">Historical event</option>
+                    <option value="source">Source</option>
+                    <option value="claim">Claim</option>
+                  </select>
+                </label>
+                <label>Has cited source ID <input name="source" placeholder="Optional source UUID" /></label>
+                <label>Combine selected filters
+                  <select name="combine"><option value="and">All (AND)</option><option value="or">Any (OR)</option></select>
+                </label>
+                <label><input name="negate" type="checkbox" /> Exclude matches (NOT)</label>
+                <button type="submit">Run combined query</button>
+                <p class="hint">Bounded author snapshot query (up to 2,000 objects). Results are not published.</p>
+              </fieldset>
+            </form>
             <section id="author-mention-discovery" aria-label="Mention discovery" class="mention-discovery">
               <h4>Possible name references in sourced accounts</h4>
               <p class="hint">Review possible references from historical claim statements. Approval records an explicit hyperlink only—not a membership, relationship, or historical fact. Duplicate names must be chosen by stable identity.</p>

@@ -14,6 +14,7 @@ fn main() {
             "workspace_save_query",
             "workspace_query_path",
             "workspace_query_participant_events",
+            "workspace_composite_query",
             "workspace_create_person",
             "workspace_create_relationship",
             "workspace_record_relationship_state",

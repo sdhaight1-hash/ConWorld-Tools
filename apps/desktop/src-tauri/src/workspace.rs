@@ -49,6 +49,79 @@ pub struct ParticipantEventsInput {
     limit: usize,
 }
 
+/// Strict typed predicate input; the authoritative validator lives in atlas-store.
+#[derive(Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
+enum PredicateInput {
+    Contains { text: String },
+    Exact { text: String },
+    ObjectKind { kind: String },
+    HasSource { source_id: String },
+    And { filters: Vec<PredicateInput> },
+    Or { filters: Vec<PredicateInput> },
+    Not { filter: Box<PredicateInput> },
+}
+
+impl PredicateInput {
+    fn into_filter(
+        self,
+        world: WorldId,
+        depth: usize,
+        nodes: &mut usize,
+    ) -> Result<QueryFilter, String> {
+        *nodes += 1;
+        if depth > 4 || *nodes > 32 {
+            return Err("Composite query exceeds the predicate budget".into());
+        }
+        Ok(match self {
+            Self::Contains { text } => QueryFilter::LabelContains(text),
+            Self::Exact { text } => QueryFilter::ExactLabel(text),
+            Self::HasSource { source_id } => QueryFilter::HasSource(ObjectRef {
+                world,
+                id: ObjectId(id(&source_id)?),
+            }),
+            Self::ObjectKind { kind } => QueryFilter::Kind(match kind.as_str() {
+                "person" => atlas_store::query::ObjectKindFilter::Person,
+                "definition" => atlas_store::query::ObjectKindFilter::Definition,
+                "relationship" => atlas_store::query::ObjectKindFilter::Relationship,
+                "event_involvement" => atlas_store::query::ObjectKindFilter::EventInvolvement,
+                "actor_action" => atlas_store::query::ObjectKindFilter::ActorAction,
+                "historical_event" => atlas_store::query::ObjectKindFilter::HistoricalEvent,
+                "source" => atlas_store::query::ObjectKindFilter::Source,
+                "claim" => atlas_store::query::ObjectKindFilter::Claim,
+                _ => return Err("Unknown composite object kind".into()),
+            }),
+            Self::And { filters } | Self::Or { filters } if !(2..=8).contains(&filters.len()) => {
+                return Err("AND/OR needs 2 to 8 children".into());
+            }
+            Self::And { filters } => QueryFilter::And(
+                filters
+                    .into_iter()
+                    .map(|item| item.into_filter(world, depth + 1, nodes))
+                    .collect::<Result<Vec<_>, _>>()?,
+            ),
+            Self::Or { filters } => QueryFilter::Or(
+                filters
+                    .into_iter()
+                    .map(|item| item.into_filter(world, depth + 1, nodes))
+                    .collect::<Result<Vec<_>, _>>()?,
+            ),
+            Self::Not { filter } => {
+                QueryFilter::Not(Box::new(filter.into_filter(world, depth + 1, nodes)?))
+            }
+        })
+    }
+}
+
+#[derive(Deserialize)]
+pub struct CompositeQueryInput {
+    world_id: String,
+    day: i64,
+    revision: Option<i64>,
+    predicate: PredicateInput,
+    limit: usize,
+}
+
 #[derive(Deserialize)]
 pub struct SavedQueryInput {
     world_id: String,
@@ -656,6 +729,21 @@ impl AuthorWorkspace {
                 },
                 role,
             },
+            request.limit,
+        )
+    }
+
+    fn composite_query(&self, request: CompositeQueryInput) -> Result<SearchSummary, String> {
+        let mut nodes = 0;
+        let predicate =
+            request
+                .predicate
+                .into_filter(WorldId(id(&request.world_id)?), 0, &mut nodes)?;
+        self.execute_filter(
+            &request.world_id,
+            request.day,
+            request.revision,
+            predicate,
             request.limit,
         )
     }
@@ -1584,6 +1672,14 @@ pub fn workspace_discover_mentions(
     limit: usize,
 ) -> Result<MentionDiscoverySummary, String> {
     workspace.discover_mentions(&world_id, day, revision, limit)
+}
+
+#[tauri::command]
+pub fn workspace_composite_query(
+    workspace: State<'_, AuthorWorkspace>,
+    request: CompositeQueryInput,
+) -> Result<SearchSummary, String> {
+    workspace.composite_query(request)
 }
 
 #[tauri::command]

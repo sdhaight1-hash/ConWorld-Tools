@@ -63,6 +63,10 @@ This workspace uses the existing Rust `atlas-store` engine and stores `worlds.sq
 
 The native Node author workspace supports historical label and relationship queries, versioned saved searches, discovered name mentions and explicit review of approved source-to-person links. It also offers **indexed full-text searching of sourced claim statements**, with author-visible statement text and source citations. Searches use the selected world, fictional day and author revision; saved definitions never cache results. These are **author-only** tools, not published search or proof that a reported claim is true. Broader query AST, aliases, pagination, Canvas/Display bindings and safe public/character search remain on [Phase 3 issue #4](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/4).
 
+### Phase Three typed combined filters
+
+Node Studio's historical author search also supports a bounded **combined query builder**: select a record kind, optional name text and/or an exact cited source identity, combine predicates with AND/OR and invert with NOT. The Rust query engine validates nested typed predicates before execution, obeying the selected world, branch, day, author revision and permission scope. Nested indexed full-text, backlinks and graph paths are intentionally rejected until a permission-safe candidate-set planner exists. Combined queries currently scan a bounded 2,000-object author snapshot and are not yet persisted as named reusable typed queries.
+
 ### Development screenshots and video evidence
 
 The [**Development-Screenshots**](Development-Screenshots/) directory is the project's chronological archive of **real screenshots and screen recordings** captured during development, debugging, testing, and visual reviews. Its [Dev-Screenshots.md guide](Development-Screenshots/Dev-Screenshots.md) defines the filename convention, documentation requirements, and media index.
