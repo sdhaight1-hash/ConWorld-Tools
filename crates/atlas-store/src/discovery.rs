@@ -25,14 +25,6 @@ pub struct PersonAlias {
     pub recorded_at: AuthorRevision,
 }
 
-impl PersonAlias {
-    pub(crate) fn matches_day(&self, day: WorldDay) -> bool {
-        self.active
-            && self.starts_at.is_none_or(|from| day >= from)
-            && self.ends_before.is_none_or(|until| day < until)
-    }
-}
-
 pub struct SavePersonAlias<'a> {
     pub world: WorldId,
     pub person: ObjectRef,
@@ -165,26 +157,24 @@ impl Store {
                 if affected.len() <= 32 {
                     let mut rows = previous.result.rows;
                     rows.retain(|row| !affected.contains(&row.source.object));
-                    let mut complete = true;
+                    let mut claims = Vec::new();
                     for id in affected {
                         store.check_query_control()?;
-                        let latest = store.discover_mentions_inner(view, Some(id), limit)?;
-                        if latest.truncated {
-                            complete = false;
-                            break;
+                        if let Some(claim) = store.get_object(id, view)? {
+                            claims.push(claim);
                         }
-                        rows.extend(latest.rows);
                     }
-                    if complete {
-                        sort_candidates(&mut rows);
-                        let truncated = rows.len() > limit;
-                        rows.truncate(limit);
-                        return Ok(MentionDiscovery {
-                            revision: view.revision,
-                            rows,
-                            truncated,
-                        });
-                    }
+                    // One scan enforces one comparison and candidate budget for the delta.
+                    let latest = store.scan_mentions(view, claims, limit)?;
+                    rows.extend(latest.rows);
+                    sort_candidates(&mut rows);
+                    let truncated = latest.truncated || rows.len() > limit;
+                    rows.truncate(limit);
+                    return Ok(MentionDiscovery {
+                        revision: view.revision,
+                        rows,
+                        truncated,
+                    });
                 }
             }
             store.discover_mentions_inner(view, source, limit)
@@ -229,13 +219,15 @@ impl Store {
         } else {
             self.discovery_versions_at(view, "claim")?
         };
-        if claims.is_empty() {
-            return Ok(MentionDiscovery {
-                revision: view.revision,
-                rows: Vec::new(),
-                truncated: false,
-            });
-        }
+        self.scan_mentions(view, claims, limit)
+    }
+
+    fn scan_mentions(
+        &self,
+        view: ViewContext,
+        claims: Vec<crate::Version>,
+        limit: usize,
+    ) -> Result<MentionDiscovery, Error> {
         const MAX_COMPARISONS: usize = 100_000;
         const MAX_CANDIDATES: usize = 2_000;
         let mut comparisons = 0_usize;

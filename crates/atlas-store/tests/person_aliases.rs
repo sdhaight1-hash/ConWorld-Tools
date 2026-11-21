@@ -457,6 +457,50 @@ fn repeated_aliases_do_not_exhaust_distinct_candidate_budget() -> Result<(), Err
             && candidate.collisions == 1
             && candidate.matched_label == "Magpie"
     }));
+    // Leave only the authored alias as evidence, with a large unrelated dictionary.
+    let stranger = ObjectRef::new(world.id);
+    revision = store.apply(&command(
+        &world,
+        revision,
+        vec![
+            Change::Correct(person, record("Robin", ObjectData::Person, None)),
+            Change::Create(stranger, record("Other", ObjectData::Person, None)),
+        ],
+    ))?;
+    for _ in 0..2_001 {
+        revision = save(
+            &mut store,
+            &world,
+            revision,
+            stranger,
+            None,
+            ("Unrelated", true, 0, None),
+        )?
+        .recorded_at;
+    }
+    let context = view(&world, revision, 20);
+    let candidates = store.discover_mentions_for_source(context, claim, 100)?;
+    let candidate = &candidates.rows[0];
+    assert_eq!(candidate.matched_label, "MAGPIE");
+    let review = ReviewMention {
+        view: context,
+        expected: revision,
+        source: candidate.source,
+        target: candidate.target,
+        start_byte: candidate.start_byte,
+        end_byte: candidate.end_byte,
+        decision: MentionDisposition::Approved,
+        command_id: Uuid::new_v4(),
+    };
+    assert!(matches!(
+        store.review_mention(ReviewMention {
+            target: stranger,
+            ..review
+        }),
+        Err(Error::InvalidInput(_))
+    ));
+    let approved = store.review_mention(review)?;
+    assert_eq!(backlinks(&store, &world, approved, person)?, vec![claim]);
     Ok(())
 }
 
