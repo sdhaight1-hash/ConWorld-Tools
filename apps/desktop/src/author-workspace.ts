@@ -1003,7 +1003,7 @@ export async function showAuthorWorkspace(
       const raw = value(aliasForm, name).trim();
       if (!raw) return null;
       const parsed = Number(raw);
-      if (!/^-?\\d+$/.test(raw) || !Number.isSafeInteger(parsed)) {
+      if (!/^-?\d+$/.test(raw) || !Number.isSafeInteger(parsed)) {
         throw new Error("Alias dates must be whole-number historical days.");
       }
       return parsed;
