@@ -68,8 +68,10 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
       const found = await invoke<Backlinks>("workspace_author_entry_backlinks",
         { ...args, revision, requestId: crypto.randomUUID() });
       if (!host.isConnected) return;
-      incomingResults.textContent = found.truncated ? "First 50 authored references." :
+      const summary = document.createElement("p");
+      summary.textContent = found.truncated ? "First 50 authored references." :
         found.matches.length + " authored references.";
+      incomingResults.replaceChildren(summary);
       for (const match of found.matches) {
         const button = document.createElement("button");
         button.type = "button";
