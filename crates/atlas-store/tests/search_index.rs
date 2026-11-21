@@ -169,6 +169,7 @@ fn fts_index_rebuild_backup_and_v7_migration_preserve_historical_results() -> Re
     let conn = rusqlite::Connection::open(&path)?;
     conn.execute_batch(
         "DROP TRIGGER object_versions_search_ai;
+         DROP TRIGGER object_versions_search_au;
          DROP TABLE object_search_fts;
          DROP TABLE object_search_documents;
          PRAGMA user_version = 7;",
