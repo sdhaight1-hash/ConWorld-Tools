@@ -46,7 +46,12 @@ fn phrase(text: &str) -> QuerySpec {
     }
 }
 
-fn ids(store: &Store, world: &World, revision: AuthorRevision, text: &str) -> Result<Vec<ObjectRef>, Error> {
+fn ids(
+    store: &Store,
+    world: &World,
+    revision: AuthorRevision,
+    text: &str,
+) -> Result<Vec<ObjectRef>, Error> {
     Ok(store
         .execute_query(&phrase(text), view(world, revision, 20))?
         .rows
@@ -56,7 +61,8 @@ fn ids(store: &Store, world: &World, revision: AuthorRevision, text: &str) -> Re
 }
 
 #[test]
-fn fts_phrase_indexes_current_version_without_resurrecting_corrections_or_other_worlds() -> Result<(), Error> {
+fn fts_phrase_indexes_current_version_without_resurrecting_corrections_or_other_worlds()
+-> Result<(), Error> {
     let mut store = Store::open(":memory:")?;
     let world = store.create_world("Northbridge", Scope::Author)?;
     let other = store.create_world("Not Northbridge", Scope::Author)?;
@@ -119,7 +125,13 @@ fn fts_phrase_indexes_current_version_without_resurrecting_corrections_or_other_
         Err(Error::InvalidInput(_))
     ));
     assert!(matches!(
-        store.execute_query(&QuerySpec { limit: 0, ..phrase("Alice") }, view(&world, second, 20)),
+        store.execute_query(
+            &QuerySpec {
+                limit: 0,
+                ..phrase("Alice")
+            },
+            view(&world, second, 20)
+        ),
         Err(Error::InvalidInput(_))
     ));
     Ok(())
@@ -169,7 +181,8 @@ fn fts_index_rebuild_backup_and_v7_migration_preserve_historical_results() -> Re
 }
 
 #[test]
-fn fts_narrow_queries_work_past_the_temporary_two_thousand_object_listing_limit() -> Result<(), Error> {
+fn fts_narrow_queries_work_past_the_temporary_two_thousand_object_listing_limit()
+-> Result<(), Error> {
     let mut store = Store::open(":memory:")?;
     let world = store.create_world("Large world", Scope::Author)?;
     let needle = ObjectRef::new(world.id);
@@ -183,7 +196,10 @@ fn fts_narrow_queries_work_past_the_temporary_two_thousand_object_listing_limit(
     let revision = store.apply(&command(&world, world.revision, changes))?;
     assert!(matches!(
         store.execute_query(
-            &QuerySpec { filter: QueryFilter::LabelContains("Obsidian".into()), ..phrase("Obsidian") },
+            &QuerySpec {
+                filter: QueryFilter::LabelContains("Obsidian".into()),
+                ..phrase("Obsidian")
+            },
             view(&world, revision, 0),
         ),
         Err(Error::QueryBudgetExceeded)
