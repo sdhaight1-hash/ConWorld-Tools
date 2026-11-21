@@ -5,8 +5,7 @@ use std::sync::{Mutex, MutexGuard};
 
 use atlas_store::{
     ActionOutcome, AuthorRevision, Change, Command, EventDate, EventRole, ObjectData, ObjectId,
-    ObjectRef, Record,
-    Scope, Store, ValidInterval, ViewContext, World, WorldDay, WorldId,
+    ObjectRef, Record, Scope, Store, ValidInterval, ViewContext, World, WorldDay, WorldId,
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -209,12 +208,7 @@ impl AuthorWorkspace {
                     trust,
                     tags,
                 } => relationships.push(RelationshipSummary {
-                    cause: Self::explain(
-                        &store,
-                        context,
-                        version.object,
-                        version.record.source,
-                    )?,
+                    cause: Self::explain(&store, context, version.object, version.record.source)?,
                     id: object_id,
                     subject_id: subject.id.0.to_string(),
                     target_id: target.id.0.to_string(),
