@@ -87,8 +87,14 @@ Strict mode requires a reported non-fallback adapter, successful selected-node G
 | Native automated smoke | Linux WebKitGTK 2.54.0 reported checked inspector and Canvas2D rendering with `api_unavailable` for WebGPU. |
 | Hosted Windows fallback | WebView2 157.0.4341.46 ran the embedded app, verified the scene and selected-node pixels, and reported `adapter_unavailable`. [Windows CI evidence](https://github.com/sdhaight1-hash/ConWorld-Tools/actions/runs/44832568493/job/136620893121). |
 | 2,000-node workload | Three fallback browser tests passed, including selection of the final benchmark node. The [embedded Linux capture](../Development-Screenshots/2026-11-20_23-13-39Z_phase-00_renderer_benchmark-canvas-fallback_01.png) records the full benchmark viewport with WebGPU unavailable. |
-| Accelerated benchmark | The WASM renderer built and passed Clippy for `wasm32-unknown-unknown`. Both local Chromium builds exposed a software adapter and lost the device before stable presentation. A separate minimal WebGPU clear also lost its device in this environment. Hardware rendering, successful recovery and timing measurements are unverified. |
+| Accelerated benchmark | The WASM renderer built and passed Clippy for `wasm32-unknown-unknown`. Both local Chromium builds exposed a software adapter and lost the device before stable presentation. A separate minimal WebGPU clear also lost its device in this environment. The physical Windows result is recorded below. |
 
 A repeat Linux WebKitGTK 2.54.0 run verified 2,000 nodes, 3,910 edges, Canvas2D pixels and preserved selection, zoom and scroll. Strict mode exited with failure as expected when the WebGPU API was unavailable. The Chromium software-adapter test again lost its accelerated canvas before stable presentation.
 
-The Phase Zero exit still requires exercising the wgpu/WASM graph on GPU-capable Windows WebView2, or establishing a target platform limitation and verifying the fallback there. The branch/time, world identity, transaction and publishing choices are documented contracts for later runtime tests.
+## Physical Windows result
+
+The strict benchmark built from `8b9d558` reported an NVIDIA GeForce RTX 2060 with driver `32.0.16.1088`, a non-fallback NVIDIA Turing adapter and WebView2 `156.0.4314.50`. All renderer acceptance fields passed on the 2,000-node, 3,910-edge fixture. The native report verified selected-node GPU pixels, forced device loss, the Canvas2D fallback, successful GPU recovery, and preserved selection, zoom and scroll. The 24 frame intervals had a median of 16.70 ms and a range of 16.60–16.80 ms.
+
+The original Windows PowerShell wrapper printed the native report and then threw with an empty process exit code. The wrapper now owns the .NET process directly and still requires a zero exit code. Windows CI runs it using Windows PowerShell, the shell that reproduced the issue.
+
+The branch/time, world identity, transaction and publishing choices are documented contracts for later runtime tests.

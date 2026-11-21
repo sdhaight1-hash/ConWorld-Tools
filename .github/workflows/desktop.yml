@@ -63,7 +63,7 @@ jobs:
       - run: cargo +stable build --workspace --locked
       - name: Native Windows WebView2 smoke test
         if: runner.os == 'Windows'
-        shell: pwsh
+        shell: powershell
         run: |
           ./apps/desktop/scripts/windows-platform-smoke.ps1 -Binary ./target/debug/atlas-desktop.exe
           ./apps/desktop/scripts/windows-platform-smoke.ps1 -Binary ./target/debug/atlas-desktop.exe -RendererBenchmark
