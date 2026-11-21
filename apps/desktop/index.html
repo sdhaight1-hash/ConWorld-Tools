@@ -14,6 +14,7 @@
       <h1>Northbridge</h1>
       <p class="intro">Explore the people, places, and events in the platform fixture.</p>
       <a id="benchmark-link" href="?benchmark=1">Open renderer benchmark</a>
+      <a id="author-link" href="#author-workspace" hidden>Open author workspace</a>
       <section id="workspace" aria-label="Northbridge scene" hidden>
         <div class="graph">
           <div class="toolbar">
@@ -39,6 +40,7 @@
           <div class="details" aria-live="polite">
             <h3 id="selection"></h3>
             <ul id="connections"></ul>
+            <div id="record-details"></div>
           </div>
         </aside>
       </section>
@@ -87,33 +89,68 @@
               <h3>Create directed relationship</h3>
               <label>From <select name="subject" required></select></label>
               <label>To <select name="target" required></select></label>
-              <label>Kind <input name="kind" maxlength="200" required value="friendship" /></label>
+              <label>Kind <input name="kind" list="relationship-kinds" maxlength="200" required value="friendship" /></label>
               <label>Trust (0–100) <input name="trust" type="number" min="0" max="100" value="75" /></label>
               <label>Tags, comma separated <input name="tags" placeholder="friends, trusted" /></label>
               <button type="submit">Create relationship at selected day</button>
             </form>
-            <form id="author-record-event" class="editor-form">
-              <h3>Record event-driven change</h3>
-              <p class="hint">Select a later historical day than the relationship's previous state. The event, actor, source and effect are committed together.</p>
+            <form id="author-relationship-state" class="editor-form">
+              <h3>Change relationship state</h3>
               <label>Relationship <select name="relationship" required></select></label>
-              <label>Actor <select name="actor" required></select></label>
-              <label>Event <input name="event" required maxlength="200" placeholder="Disclosed letter" /></label>
-              <label>Action <input name="action" required maxlength="200" placeholder="disclose_letter" /></label>
-              <label>Intent <input name="intent" required maxlength="200" /></label>
-              <label>Outcome <select name="outcome">
-                <option value="attempted">Attempted</option>
-                <option value="succeeded">Succeeded</option>
-                <option value="failed">Failed</option>
-              </select></label>
-              <label>Source citation <input name="citation" required maxlength="200" /></label>
-              <label>New trust (0–100) <input name="trust" type="number" min="0" max="100" value="20" /></label>
-              <label>New tags <input name="tags" placeholder="estranged" /></label>
-              <button type="submit">Record event and relationship effect</button>
+              <label>Trust (0–100) <input name="trust" type="number" min="0" max="100" /></label>
+              <label>Tags, comma separated <input name="tags" /></label>
+              <button type="submit">Save state at selected day</button>
             </form>
-          </div>
-          <div class="editor-summary">
-            <div><h3>People</h3><ul id="author-people"></ul></div>
-            <div><h3>Relationships at selected day</h3><ul id="author-relationships"></ul></div>
+            <datalist id="relationship-kinds"></datalist>
+            <form id="author-definition" class="editor-form event-editor">
+              <h3>World definitions</h3>
+              <div class="participant-fields">
+                <label>Category <select name="category">
+                  <option value="relationship">Relationship kind</option>
+                  <option value="tag">Relationship tag</option>
+                  <option value="role">Event participant role</option>
+                </select></label>
+                <label>Definition name <input name="label" maxlength="200" required /></label>
+                <label>Description <input name="description" maxlength="200" required /></label>
+              </div>
+              <fieldset id="relationship-definition">
+                <legend>Relationship direction</legend>
+                <label>Inverse label <input name="reverse_label" maxlength="200" /></label>
+                <label class="check-label"><input type="checkbox" name="symmetric" /> Use the same label in both directions</label>
+              </fieldset>
+              <p class="hint">Save an existing category and name to revise its definition.</p>
+              <button type="submit">Save definition</button>
+              <ul id="world-definitions"></ul>
+            </form>
+            <form id="author-record-event" class="editor-form event-editor">
+              <h3>Event editor</h3>
+              <label>Event to edit <select name="existing"></select></label>
+              <p id="event-date" class="hint">New events use the selected historical day.</p>
+              <label>Event name <input name="event" required maxlength="200" placeholder="Disclosed letter" /></label>
+              <label>Source citation <input name="citation" required maxlength="200" /></label>
+              <div id="existing-event-roles"></div>
+              <div id="event-participants"></div>
+              <button type="button" id="add-participant">Add participant</button>
+              <label class="check-label"><input name="add_effect" type="checkbox" /> Record a relationship effect</label>
+              <fieldset id="event-effect" hidden disabled>
+                <legend>Relationship effect</legend>
+                <label>Relationship <select name="relationship" required></select></label>
+                <label>Causing action <select name="causing_action" required></select></label>
+                <label>Explanation <input name="explanation" maxlength="200" required /></label>
+                <label>New trust (0–100) <input name="trust" type="number" min="0" max="100" /></label>
+                <label>New tags <input name="tags" placeholder="estranged" /></label>
+              </fieldset>
+              <button type="submit">Save event</button>
+            </form>
+            <form id="author-record-evidence" class="editor-form event-editor">
+              <h3>Record a sourced account</h3>
+              <label>Event <select name="event" required></select></label>
+              <label>Reported statement <input name="statement" maxlength="200" required /></label>
+              <label>Source citation <input name="citation" maxlength="200" required /></label>
+              <label>Who knows this? <select name="audience" required></select></label>
+              <p class="hint">The account becomes known on the selected historical day. Public and character previews show the statement only.</p>
+              <button type="submit">Save sourced account</button>
+            </form>
           </div>
         </div>
         <p id="author-status" role="status" aria-live="polite">Select or create a world to begin.</p>

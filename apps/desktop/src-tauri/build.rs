@@ -9,6 +9,10 @@ fn main() {
             "workspace_snapshot",
             "workspace_create_person",
             "workspace_create_relationship",
+            "workspace_record_relationship_state",
+            "workspace_save_definition",
+            "workspace_evidence",
+            "workspace_record_evidence",
             "workspace_record_event",
         ]),
     ))

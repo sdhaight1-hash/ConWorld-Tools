@@ -57,3 +57,32 @@ This pass re-inspected the root README; historical, temporal, agency, storage, q
 ### Outstanding investigations and limitations
 
 The current author workspace remains narrow: no general node graph editing, full event actor roster, authored relationship type catalog, human-friendly calendar input, evidence/claim browser, published perspectives, public search, or end-user backup/export. Northbridge is still a separate platform fixture. Browsing older author revisions is read-only; new edits commit against the current revision through `Store::apply`. GPU-capable WebView2, device-loss and performance measurement retain separate platform acceptance gates. Development screenshots/videos may only be committed from observations of actual running software.
+
+## Saved world graph and multi-actor event editing
+
+- The graph and its keyboard-accessible inspector now use the saved world's author-scoped snapshot. Selecting a historical day or a read-only author revision refreshes people, directed relationship states, event roles, and recorded causal links together. Northbridge remains available from the world selector.
+- The event editor writes one sourced event with zero or more role rows. People may hold several roles or perform several independent actions. Actor rows record intent, optional target, and attempted/succeeded/failed outcome. A relationship effect is optional and requires an explicitly chosen action and explanation. The event, action, and effect write in one transaction.
+- Authors can correct a saved event's title, citation, and existing actions, or add roles and actions. The occurrence day and actor identity stay fixed. The relationship inspector shows the recorded before and after versions and the original action attribution and evidence. A separate relationship state editor appends dated trust and tag changes without inventing an event.
+- These changes use the existing schema 0006 and stable record IDs. Event corrections and dated relationship-state edits check the editor's expected world revision. The author graph uses the existing 2,000-object snapshot bound and the main branch's normalized days. The editor uses built-in roles. Search, publication, and richer perspectives follow the existing delivery roadmap.
+
+### Verification
+
+- The Rust workspace suite passed all 26 tests, including SQLite reopen, action-specific rollback, stale edits, historical and author revision reads, and source retention after event corrections. Formatting and strict workspace Clippy also passed.
+- The frontend production build and Tauri command registration check passed. Chromium headless Playwright passed seven checks, with the optional software WebGPU test skipped.
+- In native Linux WebKitGTK 2.54.0, the editor saved a failed action, a successful action and a witness on one event. The inspector followed the resulting effect and showed independent reverse trust. A later political bond preserved the estrangement. The editor saved a correction without rewriting the original attribution and then appended an unscored relationship state without an event. The archived author revision stayed read-only and showed the earlier trust of 90. [Development captures](../../Development-Screenshots/Dev-Screenshots.md#chronological-development-media-index).
+
+## Phase 2 exit slice
+
+- A world has author-versioned definitions for relationship kinds, relationship tags, and event participant roles. Relationship definitions supply a symmetric label or a separate inverse label for person-to-person links. Trust remains directional and can be left unscored. An event's custom role links to a typed definition ID. Built-in Actor continues to require an explicit action with an independent outcome.
+- A sourced account is a versioned claim attached to a historical event. Recording a claim leaves the action, its outcome and every causal effect intact. Accounts become known on their effective day and default to author-only. An author can deliberately share the statement with a single character or the public. The author inspector's account selector uses a Rust projection that excludes unshared statements, source citations and audience metadata before serialization. A character gets public accounts plus their own. Non-author projections require the current author revision so an old revision cannot replay a withdrawn public account. General world and graph reads remain author-only.
+- Schema 0007 preserves stable IDs, backfills existing claims as author-only, and preserves schema 0006 built-in participation. The catalog is scoped to the world's author history. The registered inverse label changes the interpretation of the incoming relationship; it does not create a second bond or copy trust. Full actor affiliations, extended role histories, multi-character knowledge propagation and publication authorization use their roadmap phases.
+
+| Phase 2 acceptance | Evidence |
+| --- | --- |
+| AT-03–05, INV-02/05/06/08 | Northbridge reconstructs separate directional trust, prior tags, sourced before/after states and later coexisting political cooperation. An unscored relationship state is supported. |
+| AT-08, INV-07/11 | A single event records two actors with different outcomes and assigns independently identified victim, mediator and financier roles. The catalog keeps role identity through revisions and rejects a tag as an event role. |
+| AT-09, INV-14 | A released rumor claiming Alice succeeded leaves the recorded failed action, relationship effect and source intact. |
+| AT-13 core | Author, Alice, Beatrice and public account scopes yield the expected visible statements. Account sources stay in the author projection. The store rejects historical replay of withdrawn access. |
+| Migration and runtime | Opened a copy of a populated schema-0006 database in native WebKitGTK 2.54.0, preserved its existing event and actions, upgraded to 0007, then authored the configured roles and scoped accounts. |
+
+The Linux Rust workspace suite passed 28 tests. The production TypeScript build, strict Clippy and native platform smoke passed. Chromium Playwright passed seven checks, with the optional software WebGPU check skipped. See the [development capture index](../../Development-Screenshots/Dev-Screenshots.md#chronological-development-media-index).

@@ -6,26 +6,28 @@ The baseline was [main at 4447975](https://github.com/sdhaight1-hash/ConWorld-To
 
 [Phase Zero #1](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/1) remains open. The desktop foundation is merged with a verified Canvas2D/DOM fallback on the hosted Linux and Windows paths. Hardware WebView2 acceleration and recovery remain a separate verification gate. The [persistence ADR](ADRs/phase-1-persistence-slice.md) records choices that affect downstream phases.
 
-## Shared contracts and rollout
+## Phase handoffs
 
-| Roadmap phase | Foundation it inherits | First work still required for the phase |
+The first fixture in each row is the smallest dependency-ready slice. Keep stable IDs, the Rust write path and explicit read context across phases. The roadmap and issue acceptance criteria remain authoritative.
+
+| Phase | Inherited implementation | First fixture and gate |
 | --- | --- | --- |
-| [0 — Platform](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/1) | Cargo workspace and Linux/Windows verification workflow | Validate the accelerated path and recovery on GPU-capable Windows hardware |
-| [1 — Persistence](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/2) | World-scoped identity and migrations, pinned forks, versioned calendars, typed claims, and sourced event effects | Consume the storage contracts in the Phase Two relationship and event workflow |
-| [2 — Relationship and event history](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/3) | Historical event identity, source references, atomic multi-object commands, transactional invalidations | Add typed relationships and event/action/effect records, then verify the Northbridge betrayal scenario |
-| [3 — Query and discovery](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/4) | Explicit read context, stable revisions, typed records, committed invalidation rows | Add one bounded query service, an index consumer and deterministic Northbridge query fixtures |
-| [4 — Node, Canvas and Display](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/5) | Stable object references, scope boundary and versioned reads | Bind all three surfaces to the shared query service and verify public projection policies |
-| [5 — Genealogy and organizations](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/6) | Stable person identity, typed endpoint validation pattern and historical records | Add distinct kinds for kinship, organizations, offices and memberships, with cycle and chronology validation |
-| [6 — Agency and conflict](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/7) | Stable event identity and atomic writes with source provenance | Model actions, affiliations, explicit effects and conflict positions feeding a shared impact query |
-| [7 — Evidence and privacy](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/8) | Versioned source records, branch-aware read inputs and a facade that denies public reads | Implement authorization from a trusted host capability, branch overlays, claims/knowledge projections and leak tests |
-| [8 — Synthetic genetics](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/9) | Stable person references and transaction-coupled invalidation | Derive synthetic results from versioned accepted biological parentage and versioned simulation seeds |
-| [9 — Release and portability](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/10) | Schema identity/version, standalone SQLite backup and referential integrity checks | Add a portable manifest and assets, verify migration and export/import, then measure the release build |
+| [0 — Platform](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/1) | Cargo workspace, Tauri desktop, Canvas2D and an accessible inspector | Run the 2,000-node benchmark on a GPU-capable Windows WebView2 host. Record zoom, pan and forced device-loss recovery (AT-32). |
+| [1 — Persistence](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/2) | World-scoped SQLite migrations, pinned forks, versioned calendars, sourced claims and atomic effects | Reuse the migration/reopen and failed-command suites when introducing new record kinds (AT-01, AT-14–16, AT-26, AT-33). |
+| [2 — Relationships and event history](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/3) | Saved directed relationships, action-specific effects and a day/revision graph inspector | Extend the Northbridge letter disclosure with configured definitions, sourced claims and viewer-specific evidence. Prove a failed action remains failed even when a witness says otherwise (AT-03–05, AT-08–09, AT-13 core). |
+| [3 — Query and discovery](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/4) | Explicit read context, stable revisions, typed records and committed invalidations | Add a bounded, versioned Rust QuerySpec. First fixture combines an event-role filter, dated graph traversal and ambiguous name discovery. Compare incremental and rebuilt results (AT-21, AT-23–24, AT-35). |
+| [4 — Node, Canvas and Display](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/5) | Stable object references and the Phase 3 query service | Bind a relationship timeline to a versioned layout element. Reparent it without changing the binding, then verify public compilation excludes a hidden nested query (AT-17–20, AT-34). |
+| [5 — Genealogy and organizations](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/6) | Stable person identity, typed role validation, branch/day/revision reads and shared queries | Create one biological and one adoptive link for the same child. Validate cycles on accepted biological edges and keep public disputes separately queryable (AT-02). |
+| [6 — Agency and conflict](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/7) | Event roles, actor actions, explicit effects and stable memberships from Phase 5 | Model a three-sided strike with one dated defection and one independently authored causal edge. Bound impact traversal and require explicit attribution (AT-10–12). |
+| [7 — Evidence and privacy](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/8) | Source-backed records, pinned forks, baseline evidence projections and publication/query entry points | Exercise one secret across branch, date, viewer, graph paths, snippets, aggregates and cache refresh. Rust must exclude it before serialization (AT-13, AT-20, AT-25, AT-34). |
+| [8 — Synthetic genetics](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/9) | Accepted biological pedigree and revision-coupled invalidation | Pass deterministic, explicitly synthetic fixture inputs to a versioned derived model. Verify a legal-record correction leaves that model untouched and a biological correction invalidates it (AT-28–30). |
+| [9 — Release and portability](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/10) | Schema guard, SQLite backup, referential integrity and desktop fallback | Roundtrip a world with historical records and assets. Record checksums, offline startup and bounded traversal on the target Windows hardware (AT-27, AT-31–32, AT-36). |
 
-The tests introduce a small Northbridge persistence fixture. Extend it as typed relationships, evidence, query, and publication workflows become executable. Keep canonical state in the same Rust/SQLite model and consume its authorized projections from the desktop and renderer.
+The Northbridge fixture is the common scenario. Extend it with each delivered slice and reuse canonical Rust data across desktop, renderer, query and publication surfaces.
 
 ## Desktop workspace integration
 
-The Phase One branch builds on the desktop and WASM renderer from Phase Zero. The root workspace has one lockfile for `atlas-desktop`, `atlas-renderer`, and `atlas-store`. The store remains a Rust library. The desktop still opens the read-only platform fixture through Tauri IPC.
+The Phase One branch builds on the desktop and WASM renderer from Phase Zero. The root workspace has one lockfile for `atlas-desktop`, `atlas-renderer`, and `atlas-store`. The store remains a Rust library. The desktop opens the Northbridge platform fixture and supports persistent author worlds through Tauri IPC.
 
 On Linux, workspace formatting, strict Clippy, the desktop scene test, and the persistence integration tests passed together at workspace integration. The foundation suite has seventeen store tests across persistence, calendars and evidence. The dedicated persistence workflow builds only `atlas-store` so it can also run without native desktop libraries.
 

@@ -31,3 +31,13 @@ test("root Windows launcher starts Vite through Tauri, including first-run npm s
   assert.match(launcher, /call npm run tauri dev/i);
   assert.doesNotMatch(launcher, /target\\debug\\atlas-desktop\.exe/i);
 });
+
+test("desktop command handler, build manifest, and main-window capability agree", () => {
+  const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
+  const handler = read("../src-tauri/src/main.rs").match(/tauri::generate_handler!\[([^\]]+)\]/)[1];
+  const declared = [...read("../src-tauri/build.rs").matchAll(/"([a-z_]+)"/g)].map((match) => match[1]);
+  const registered = handler.split(",").map((command) => command.trim().split("::").at(-1)).filter(Boolean);
+  const capability = JSON.parse(read("../src-tauri/capabilities/platform-shell.json"));
+  assert.deepEqual(declared.sort(), registered.sort());
+  assert.deepEqual(capability.permissions.sort(), registered.map((command) => "allow-" + command.replaceAll("_", "-")).sort());
+});

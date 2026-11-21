@@ -119,6 +119,10 @@ fn main() {
             workspace::workspace_snapshot,
             workspace::workspace_create_person,
             workspace::workspace_create_relationship,
+            workspace::workspace_record_relationship_state,
+            workspace::workspace_save_definition,
+            workspace::workspace_evidence,
+            workspace::workspace_record_evidence,
             workspace::workspace_record_event
         ])
         .run(tauri::generate_context!())

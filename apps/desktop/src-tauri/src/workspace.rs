@@ -1,11 +1,13 @@
 //! Minimal persistent author workspace for Phase Two.
 //! Canonical records live only in atlas-store; the Northbridge fixture is separate.
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 use atlas_store::{
-    ActionOutcome, AuthorRevision, Change, Command, EventDate, EventRole, ObjectData, ObjectId,
-    ObjectRef, Record, Scope, Store, ValidInterval, ViewContext, World, WorldDay, WorldId,
+    ActionOutcome, AuthorRevision, Change, ClaimAudience, Command, Definition, EventDate,
+    EventRole, ObjectData, ObjectId, ObjectRef, Record, Scope, Store, ValidInterval, ViewContext,
+    World, WorldDay, WorldId,
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -43,7 +45,13 @@ pub struct RelationshipSummary {
 #[derive(Serialize)]
 pub struct CauseSummary {
     day: i64,
+    event_id: String,
     event: String,
+    explanation: String,
+    before_trust: Option<u8>,
+    before_tags: Vec<String>,
+    after_trust: Option<u8>,
+    after_tags: Vec<String>,
     actor: Option<String>,
     action: Option<String>,
     intent: Option<String>,
@@ -58,6 +66,83 @@ pub struct WorkspaceSnapshot {
     day: i64,
     people: Vec<PersonSummary>,
     relationships: Vec<RelationshipSummary>,
+    events: Vec<EventSummary>,
+    definitions: Vec<DefinitionSummary>,
+}
+
+#[derive(Serialize)]
+struct DefinitionSummary {
+    id: String,
+    label: String,
+    category: &'static str,
+    description: String,
+    reverse_label: Option<String>,
+    symmetric: bool,
+}
+
+#[derive(Serialize)]
+pub struct EvidenceSummary {
+    statement: String,
+    source: Option<String>,
+    audience: Option<String>,
+    reader_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct DefinitionInput {
+    world_id: String,
+    expected_revision: i64,
+    category: String,
+    label: String,
+    description: String,
+    reverse_label: Option<String>,
+    symmetric: bool,
+}
+
+#[derive(Deserialize)]
+pub struct EvidenceInput {
+    world_id: String,
+    expected_revision: i64,
+    event_id: String,
+    day: i64,
+    statement: String,
+    citation: String,
+    audience: String,
+}
+
+fn definition_category(definition: &Definition) -> &'static str {
+    match definition {
+        Definition::Relationship { .. } => "relationship",
+        Definition::Tag => "tag",
+        Definition::Role => "role",
+    }
+}
+
+#[derive(Serialize)]
+struct EventSummary {
+    id: String,
+    label: String,
+    day: Option<i64>,
+    citation: Option<String>,
+    participants: Vec<ParticipantSummary>,
+    actions: Vec<ActionSummary>,
+}
+
+#[derive(Serialize)]
+struct ParticipantSummary {
+    person_id: String,
+    role: String,
+}
+
+#[derive(Serialize)]
+struct ActionSummary {
+    id: String,
+    person_id: String,
+    target_id: Option<String>,
+    action: String,
+    intent: String,
+    outcome: &'static str,
+    citation: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -72,18 +157,83 @@ pub struct RelationshipInput {
 }
 
 #[derive(Deserialize)]
+pub struct RelationshipStateInput {
+    world_id: String,
+    expected_revision: i64,
+    relationship_id: String,
+    day: i64,
+    trust: Option<u8>,
+    tags: String,
+}
+
+#[derive(Clone, Deserialize)]
 pub struct EventInput {
     world_id: String,
-    relationship_id: String,
-    actor_id: String,
+    expected_revision: i64,
+    event_id: Option<String>,
     day: i64,
     event_label: String,
+    source_citation: String,
+    participants: Vec<ParticipantInput>,
+    effect: Option<EffectInput>,
+}
+
+#[derive(Clone, Deserialize)]
+struct ParticipantInput {
+    person_id: String,
+    role: String,
+    action: Option<ActionInput>,
+}
+
+#[derive(Clone, Deserialize)]
+struct ActionInput {
+    id: Option<String>,
     action: String,
     intent: String,
     outcome: String,
-    source_citation: String,
+    target_id: Option<String>,
+}
+
+#[derive(Clone, Deserialize)]
+struct EffectInput {
+    relationship_id: String,
+    actor_row: usize,
+    explanation: String,
     trust: Option<u8>,
     tags: String,
+}
+
+fn roles() -> [(&'static str, EventRole); 5] {
+    [
+        ("actor", EventRole::Actor),
+        ("witness", EventRole::Witness),
+        ("victim", EventRole::Victim),
+        ("stakeholder", EventRole::Stakeholder),
+        ("sponsor", EventRole::Sponsor),
+    ]
+}
+
+fn outcomes() -> [(&'static str, ActionOutcome); 3] {
+    [
+        ("attempted", ActionOutcome::Attempted),
+        ("succeeded", ActionOutcome::Succeeded),
+        ("failed", ActionOutcome::Failed),
+    ]
+}
+
+fn enum_label<T: PartialEq>(choices: &[(&'static str, T)], value: T) -> &'static str {
+    choices
+        .iter()
+        .find(|(_, item)| *item == value)
+        .expect("complete choices")
+        .0
+}
+
+fn enum_value<T: Copy>(choices: &[(&str, T)], label: &str) -> Option<T> {
+    choices
+        .iter()
+        .find(|(name, _)| *name == label)
+        .map(|(_, value)| *value)
 }
 
 fn id(raw: &str) -> Result<Uuid, String> {
@@ -194,6 +344,10 @@ impl AuthorWorkspace {
             .map_err(|error| error.to_string())?;
         let mut people = Vec::new();
         let mut relationships = Vec::new();
+        let mut events = HashMap::new();
+        let mut participants = Vec::new();
+        let mut definitions = Vec::new();
+        let mut actions = Vec::new();
         for version in versions {
             let object_id = version.object.id.0.to_string();
             match version.record.data {
@@ -201,6 +355,27 @@ impl AuthorWorkspace {
                     id: object_id,
                     label: version.record.label,
                 }),
+                ObjectData::Definition {
+                    definition,
+                    description,
+                } => {
+                    let category = definition_category(&definition);
+                    let (reverse_label, symmetric) = match definition {
+                        Definition::Relationship {
+                            reverse_label,
+                            symmetric,
+                        } => (reverse_label, symmetric),
+                        _ => (None, false),
+                    };
+                    definitions.push(DefinitionSummary {
+                        id: object_id,
+                        label: version.record.label,
+                        description,
+                        category,
+                        reverse_label,
+                        symmetric,
+                    });
+                }
                 ObjectData::Relationship {
                     subject,
                     target,
@@ -217,17 +392,94 @@ impl AuthorWorkspace {
                     tags,
                     starts_at: version.record.valid.start.map(|day| day.0),
                 }),
+                ObjectData::HistoricalEvent { occurrence } => {
+                    events.insert(
+                        version.object,
+                        EventSummary {
+                            id: object_id,
+                            label: version.record.label,
+                            day: occurrence.exact_day().map(|day| day.0),
+                            citation: Self::citation(&store, context, version.record.source)?,
+                            participants: Vec::new(),
+                            actions: Vec::new(),
+                        },
+                    );
+                }
+                ObjectData::EventInvolvement {
+                    event,
+                    participant,
+                    role,
+                } => {
+                    participants.push((
+                        event,
+                        ParticipantSummary {
+                            person_id: participant.id.0.to_string(),
+                            role: match role {
+                                EventRole::Custom(object) => {
+                                    store
+                                        .get_object(object, context)
+                                        .map_err(|error| error.to_string())?
+                                        .ok_or("Event role definition is unavailable")?
+                                        .record
+                                        .label
+                                }
+                                _ => enum_label(&roles(), role).into(),
+                            },
+                        },
+                    ));
+                }
+                ObjectData::ActorAction {
+                    event,
+                    actor,
+                    target,
+                    action,
+                    intent,
+                    outcome,
+                } => {
+                    actions.push((
+                        event,
+                        ActionSummary {
+                            id: object_id,
+                            person_id: actor.id.0.to_string(),
+                            target_id: target.map(|item| item.id.0.to_string()),
+                            action,
+                            intent,
+                            outcome: enum_label(&outcomes(), outcome),
+                            citation: Self::citation(&store, context, version.record.source)?,
+                        },
+                    ));
+                }
                 _ => {}
             }
         }
+        for (event, participant) in participants {
+            if let Some(record) = events.get_mut(&event) {
+                record.participants.push(participant);
+            }
+        }
+        for (event, action) in actions {
+            if let Some(record) = events.get_mut(&event) {
+                record.actions.push(action);
+            }
+        }
+        let mut events: Vec<_> = events.into_values().collect();
+        events.sort_by(|a, b| {
+            a.day
+                .cmp(&b.day)
+                .then(a.label.cmp(&b.label))
+                .then(a.id.cmp(&b.id))
+        });
         people.sort_by(|a, b| a.label.cmp(&b.label).then(a.id.cmp(&b.id)));
         relationships.sort_by(|a, b| a.kind.cmp(&b.kind).then(a.id.cmp(&b.id)));
+        definitions.sort_by(|a, b| a.category.cmp(b.category).then(a.label.cmp(&b.label)));
         Ok(WorkspaceSnapshot {
             world: summary(world),
             view_revision: context.revision.0,
             day,
             people,
             relationships,
+            events,
+            definitions,
         })
     }
 
@@ -247,13 +499,59 @@ impl AuthorWorkspace {
             .get_object(effect.event.object, context)
             .map_err(|error| error.to_string())?
             .ok_or("Source event is not available at this historical day")?;
+        let effect_view = ViewContext {
+            day: effect.day,
+            ..context
+        };
+        let previous = store
+            .get_object(
+                effect.before.object,
+                ViewContext {
+                    revision: effect.before.recorded_at,
+                    ..effect_view
+                },
+            )
+            .map_err(|error| error.to_string())?
+            .ok_or("Prior relationship state is unavailable")?;
+        let after = store
+            .get_object(
+                bond,
+                ViewContext {
+                    revision: effect.after.recorded_at,
+                    ..effect_view
+                },
+            )
+            .map_err(|error| error.to_string())?
+            .ok_or("Recorded relationship effect is unavailable")?;
+        let ObjectData::Relationship {
+            trust: before_trust,
+            tags: before_tags,
+            ..
+        } = previous.record.data
+        else {
+            return Err("Prior state is not a relationship".into());
+        };
+        let ObjectData::Relationship {
+            trust: after_trust,
+            tags: after_tags,
+            ..
+        } = after.record.data
+        else {
+            return Err("Recorded effect is not a relationship".into());
+        };
         let mut actor = None;
         let mut action = None;
         let mut intent = None;
         let mut outcome = None;
         if let Some(link) = effect.action {
             let version = store
-                .get_object(link.object, context)
+                .get_object(
+                    link.object,
+                    ViewContext {
+                        revision: link.recorded_at,
+                        ..effect_view
+                    },
+                )
                 .map_err(|error| error.to_string())?
                 .ok_or("Source actor action is not available at this historical day")?;
             if let ObjectData::ActorAction {
@@ -266,7 +564,7 @@ impl AuthorWorkspace {
             {
                 actor = Some(
                     store
-                        .get_object(actor_id, context)
+                        .get_object(actor_id, effect_view)
                         .map_err(|error| error.to_string())?
                         .ok_or("Event actor is unavailable")?
                         .record
@@ -274,37 +572,53 @@ impl AuthorWorkspace {
                 );
                 action = Some(action_name);
                 intent = Some(action_intent);
-                outcome = Some(match action_outcome {
-                    ActionOutcome::Attempted => "attempted",
-                    ActionOutcome::Succeeded => "succeeded",
-                    ActionOutcome::Failed => "failed",
-                });
+                outcome = Some(enum_label(&outcomes(), action_outcome));
             } else {
                 return Err("Effect references an object that is not an actor action".into());
             }
         }
-        let source = if let Some(source) = source {
-            let source = store
-                .get_object(source, context)
-                .map_err(|error| error.to_string())?
-                .ok_or("Event source is unavailable")?;
-            if let ObjectData::Source { citation } = source.record.data {
-                citation
-            } else {
-                return Err("Event evidence does not reference a source".into());
-            }
-        } else {
-            "No source cited".into()
-        };
+        let source = Self::citation(
+            store,
+            ViewContext {
+                revision: effect.after.recorded_at,
+                ..effect_view
+            },
+            after.record.source.or(source),
+        )?
+        .unwrap_or_else(|| "No source cited".into());
         Ok(Some(CauseSummary {
             day: effect.day.0,
+            event_id: event.object.id.0.to_string(),
             event: event.record.label,
+            explanation: after.record.label,
+            before_trust,
+            before_tags,
+            after_trust,
+            after_tags,
             actor,
             action,
             intent,
             outcome,
             source,
         }))
+    }
+
+    fn citation(
+        store: &Store,
+        context: ViewContext,
+        source: Option<ObjectRef>,
+    ) -> Result<Option<String>, String> {
+        let Some(source) = source else {
+            return Ok(None);
+        };
+        let version = store
+            .get_object(source, context)
+            .map_err(|error| error.to_string())?
+            .ok_or("Event source is unavailable")?;
+        match version.record.data {
+            ObjectData::Source { citation } => Ok(Some(citation)),
+            _ => Err("Event evidence does not reference a source".into()),
+        }
     }
 
     fn create_person(&self, world_id: &str, name: &str) -> Result<(), String> {
@@ -361,51 +675,144 @@ impl AuthorWorkspace {
         )
     }
 
-    fn record_event(&self, request: EventInput) -> Result<(), String> {
-        let event_label = nonempty(&request.event_label, "Event name")?;
-        let action_kind = nonempty(&request.action, "Actor action")?;
-        let intent = nonempty(&request.intent, "Actor intent")?;
-        let citation = nonempty(&request.source_citation, "Source citation")?;
-        let outcome = match request.outcome.as_str() {
-            "attempted" => ActionOutcome::Attempted,
-            "succeeded" => ActionOutcome::Succeeded,
-            "failed" => ActionOutcome::Failed,
-            _ => return Err("Invalid action outcome".into()),
-        };
-        let mut store = self.lock()?;
-        let world = store
-            .world(WorldId(id(&request.world_id)?), Scope::Author)
-            .map_err(|error| error.to_string())?;
-        let relationship = reference(world.id, &request.relationship_id)?;
-        let actor = reference(world.id, &request.actor_id)?;
-        let prior = store
-            .get_object(relationship, view(&world, request.day))
+    fn relationship_state(
+        store: &Store,
+        world: &World,
+        relationship_id: &str,
+        day: i64,
+        trust: Option<u8>,
+        tags_input: &str,
+    ) -> Result<(ObjectRef, Record), String> {
+        let relationship = reference(world.id, relationship_id)?;
+        let mut record = store
+            .get_object(relationship, view(world, day))
             .map_err(|error| error.to_string())?
-            .ok_or("Relationship does not exist at that date")?;
+            .ok_or("Relationship does not exist at that date")?
+            .record;
         let ObjectData::Relationship {
-            subject,
-            target,
-            kind,
+            trust: old_trust,
+            tags: old_tags,
             ..
-        } = prior.record.data
+        } = &mut record.data
         else {
             return Err("Selected object is not a relationship".into());
         };
+        if record
+            .valid
+            .start
+            .is_some_and(|start| start >= WorldDay(day))
+        {
+            return Err("Choose a day later than the relationship's current state".into());
+        }
+        *old_trust = trust;
+        *old_tags = tags(tags_input);
+        record.valid.start = Some(WorldDay(day));
+        record.source = None;
+        Ok((relationship, record))
+    }
+
+    fn edit_world(store: &Store, world_id: &str, expected: i64) -> Result<World, String> {
+        let world = store
+            .world(WorldId(id(world_id)?), Scope::Author)
+            .map_err(|error| error.to_string())?;
+        if world.revision.0 != expected {
+            return Err("The world changed. Refresh the view before saving.".into());
+        }
+        Ok(world)
+    }
+
+    fn record_relationship_state(&self, request: RelationshipStateInput) -> Result<(), String> {
+        let mut store = self.lock()?;
+        let world = Self::edit_world(&store, &request.world_id, request.expected_revision)?;
+        let (relationship, record) = Self::relationship_state(
+            &store,
+            &world,
+            &request.relationship_id,
+            request.day,
+            request.trust,
+            &request.tags,
+        )?;
+        commit(
+            &mut store,
+            &world,
+            vec![Change::RecordState(relationship, record)],
+        )
+    }
+
+    fn save_definition(&self, input: DefinitionInput) -> Result<(), String> {
+        let label = nonempty(&input.label, "Definition name")?;
+        let description = nonempty(&input.description, "Definition description")?;
+        let definition = match input.category.as_str() {
+            "relationship" => Definition::Relationship {
+                reverse_label: input
+                    .reverse_label
+                    .as_deref()
+                    .map(|raw| nonempty(raw, "Inverse label"))
+                    .transpose()?,
+                symmetric: input.symmetric,
+            },
+            "tag" if !label.contains(',') => Definition::Tag,
+            "role"
+                if !roles()
+                    .iter()
+                    .any(|(name, _)| name.eq_ignore_ascii_case(&label)) =>
+            {
+                Definition::Role
+            }
+            _ => return Err("Invalid definition category or reserved name".into()),
+        };
+        let mut store = self.lock()?;
+        let world = Self::edit_world(&store, &input.world_id, input.expected_revision)?;
+        let catalog = store
+            .objects_at(view(&world, 0), 2_000)
+            .map_err(|error| error.to_string())?;
+        let existing = catalog.into_iter().find(|item| {
+            matches!(&item.record.data, ObjectData::Definition { definition, .. }
+                if definition_category(definition) == input.category)
+                && item.record.label.to_lowercase() == label.to_lowercase()
+        });
+        let record = Record {
+            label: existing
+                .as_ref()
+                .map(|item| item.record.label.clone())
+                .unwrap_or(label),
+            valid: ValidInterval::default(),
+            data: ObjectData::Definition {
+                definition,
+                description,
+            },
+            source: None,
+        };
+        let change = match existing {
+            Some(item) if item.record == record => {
+                return Err("Definition is already up to date".into());
+            }
+            Some(item) => Change::Correct(item.object, record),
+            None => Change::Create(ObjectRef::new(world.id), record),
+        };
+        commit(&mut store, &world, vec![change])
+    }
+
+    fn record_evidence(&self, input: EvidenceInput) -> Result<(), String> {
+        let statement = nonempty(&input.statement, "Statement")?;
+        let citation = nonempty(&input.citation, "Citation")?;
+        let mut store = self.lock()?;
+        let world = Self::edit_world(&store, &input.world_id, input.expected_revision)?;
+        let event = reference(world.id, &input.event_id)?;
+        if !store
+            .get_object(event, view(&world, input.day))
+            .map_err(|error| error.to_string())?
+            .is_some_and(|item| matches!(item.record.data, ObjectData::HistoricalEvent { .. }))
+        {
+            return Err("Select an event visible on this day".into());
+        }
+        let audience = match input.audience.as_str() {
+            "author" => ClaimAudience::Author,
+            "public" => ClaimAudience::Public,
+            raw => ClaimAudience::Character(reference(world.id, raw)?),
+        };
         let source = ObjectRef::new(world.id);
-        let event = ObjectRef::new(world.id);
-        let involvement = ObjectRef::new(world.id);
-        let action = ObjectRef::new(world.id);
-        let day = WorldDay(request.day);
-        let occurrence = ValidInterval {
-            start: Some(day),
-            end_exclusive: None,
-        };
-        let sourced = |label: String, data| Record {
-            label,
-            valid: occurrence,
-            data,
-            source: Some(source),
-        };
+        let claim = ObjectRef::new(world.id);
         commit(
             &mut store,
             &world,
@@ -413,63 +820,303 @@ impl AuthorWorkspace {
                 Change::Create(
                     source,
                     Record {
-                        label: format!("{event_label} source"),
+                        label: "Statement source".into(),
                         valid: ValidInterval::default(),
                         data: ObjectData::Source { citation },
                         source: None,
                     },
                 ),
                 Change::Create(
-                    event,
-                    sourced(
-                        event_label.clone(),
-                        ObjectData::HistoricalEvent {
-                            occurrence: EventDate::Exact(day),
+                    claim,
+                    Record {
+                        label: "Reported account".into(),
+                        valid: ValidInterval {
+                            start: Some(WorldDay(input.day)),
+                            end_exclusive: None,
                         },
-                    ),
+                        data: ObjectData::Claim {
+                            subject: event,
+                            predicate: "reported_account".into(),
+                            statement,
+                            audience,
+                        },
+                        source: Some(source),
+                    },
                 ),
-                Change::Create(
-                    involvement,
-                    sourced(
-                        "Actor involvement".into(),
-                        ObjectData::EventInvolvement {
-                            event,
-                            participant: actor,
-                            role: EventRole::Actor,
-                        },
-                    ),
-                ),
-                Change::Create(
-                    action,
-                    sourced(
-                        action_kind.clone(),
-                        ObjectData::ActorAction {
-                            event,
-                            actor,
-                            target: Some(subject),
-                            action: action_kind,
-                            intent,
-                            outcome,
-                        },
-                    ),
-                ),
-                Change::ActionEffect {
-                    event,
-                    action,
-                    target: relationship,
-                    record: sourced(
-                        format!("Relationship changed: {event_label}"),
-                        ObjectData::Relationship {
-                            subject,
-                            target,
-                            kind,
-                            trust: request.trust,
-                            tags: tags(&request.tags),
-                        },
-                    ),
-                },
             ],
         )
+    }
+
+    fn evidence(
+        &self,
+        world_id: &str,
+        event_id: &str,
+        day: i64,
+        revision: Option<i64>,
+        audience: &str,
+    ) -> Result<Vec<EvidenceSummary>, String> {
+        let store = self.lock()?;
+        let world = store
+            .world(WorldId(id(world_id)?), Scope::Author)
+            .map_err(|error| error.to_string())?;
+        let scope = match audience {
+            "author" => Scope::Author,
+            "public" => Scope::Public,
+            raw => Scope::Character(reference(world.id, raw)?),
+        };
+        let context = ViewContext {
+            revision: AuthorRevision(revision.unwrap_or(world.revision.0)),
+            scope,
+            ..view(&world, day)
+        };
+        store
+            .evidence_at(reference(world.id, event_id)?, context)
+            .map(|items| {
+                items
+                    .into_iter()
+                    .map(|item| {
+                        let (audience, reader_id) = match item.audience {
+                            Some(ClaimAudience::Author) => (Some("Author only".into()), None),
+                            Some(ClaimAudience::Public) => (Some("Public".into()), None),
+                            Some(ClaimAudience::Character(reader)) => {
+                                (Some("Character".into()), Some(reader.id.0.to_string()))
+                            }
+                            None => (None, None),
+                        };
+                        EvidenceSummary {
+                            statement: item.statement,
+                            source: item.source,
+                            audience,
+                            reader_id,
+                        }
+                    })
+                    .collect()
+            })
+            .map_err(|error| error.to_string())
+    }
+
+    fn record_event(&self, request: EventInput) -> Result<String, String> {
+        let event_label = nonempty(&request.event_label, "Event name")?;
+        let citation = nonempty(&request.source_citation, "Source citation")?;
+        let mut store = self.lock()?;
+        let world = Self::edit_world(&store, &request.world_id, request.expected_revision)?;
+        let editing = request.event_id.is_some();
+        let event = request
+            .event_id
+            .as_deref()
+            .map(|raw| reference(world.id, raw))
+            .transpose()?
+            .unwrap_or_else(|| ObjectRef::new(world.id));
+        let existing = if editing {
+            Some(
+                store
+                    .get_object(event, view(&world, request.day))
+                    .map_err(|error| error.to_string())?
+                    .ok_or("Event does not exist at this date")?
+                    .record,
+            )
+        } else {
+            None
+        };
+        let day = match existing.as_ref().map(|record| &record.data) {
+            Some(ObjectData::HistoricalEvent { occurrence }) => occurrence
+                .exact_day()
+                .ok_or("Only dated events can be edited here")?,
+            Some(_) => return Err("Selected object is not an event".into()),
+            None => WorldDay(request.day),
+        };
+        let context = view(&world, day.0);
+        let previous_source = existing.as_ref().and_then(|record| record.source);
+        let mut changes = Vec::new();
+        let source = match previous_source {
+            Some(source)
+                if Self::citation(&store, context, Some(source))?.as_deref() == Some(&citation) =>
+            {
+                source
+            }
+            _ => {
+                let source = ObjectRef::new(world.id);
+                changes.push(Change::Create(
+                    source,
+                    Record {
+                        label: format!("{event_label} source"),
+                        valid: ValidInterval::default(),
+                        data: ObjectData::Source { citation },
+                        source: None,
+                    },
+                ));
+                source
+            }
+        };
+        let sourced = |label: String, data| Record {
+            label,
+            valid: ValidInterval {
+                start: Some(day),
+                end_exclusive: None,
+            },
+            data,
+            source: Some(source),
+        };
+        match existing {
+            Some(mut record) => {
+                if record.label != event_label || record.source != Some(source) {
+                    record.label = event_label;
+                    record.source = Some(source);
+                    changes.push(Change::Correct(event, record));
+                }
+            }
+            None => changes.push(Change::Create(
+                event,
+                sourced(
+                    event_label,
+                    ObjectData::HistoricalEvent {
+                        occurrence: EventDate::Exact(day),
+                    },
+                ),
+            )),
+        }
+
+        let mut roles_seen = HashSet::new();
+        if editing {
+            for version in store
+                .objects_at(context, 2_000)
+                .map_err(|error| error.to_string())?
+            {
+                if let ObjectData::EventInvolvement {
+                    event: own_event,
+                    participant,
+                    role,
+                } = version.record.data
+                    && own_event == event
+                {
+                    roles_seen.insert((participant, role));
+                }
+            }
+        }
+        let mut action_ids = Vec::new();
+        for row in request.participants {
+            let person = reference(world.id, &row.person_id)?;
+            let (role, role_label) = if let Some(raw) = row.role.strip_prefix("definition:") {
+                let object = reference(world.id, raw)?;
+                let version = store
+                    .get_object(object, context)
+                    .map_err(|error| error.to_string())?
+                    .ok_or("Unknown event role definition")?;
+                (EventRole::Custom(object), version.record.label)
+            } else {
+                let role = enum_value(&roles(), &row.role).ok_or("Invalid event role")?;
+                (role, enum_label(&roles(), role).into())
+            };
+            let new_role = roles_seen.insert((person, role));
+            if new_role {
+                changes.push(Change::Create(
+                    ObjectRef::new(world.id),
+                    sourced(
+                        role_label,
+                        ObjectData::EventInvolvement {
+                            event,
+                            participant: person,
+                            role,
+                        },
+                    ),
+                ));
+            }
+            let mut action_id = None;
+            match (role, row.action) {
+                (EventRole::Actor, Some(input)) => {
+                    let action = nonempty(&input.action, "Actor action")?;
+                    let intent = nonempty(&input.intent, "Actor intent")?;
+                    let outcome =
+                        enum_value(&outcomes(), &input.outcome).ok_or("Invalid action outcome")?;
+                    let target = input
+                        .target_id
+                        .as_deref()
+                        .map(|raw| reference(world.id, raw))
+                        .transpose()?;
+                    if let Some(target) = target {
+                        let version = store
+                            .get_object(target, context)
+                            .map_err(|error| error.to_string())?;
+                        if !version.is_some_and(|version| {
+                            matches!(version.record.data, ObjectData::Person)
+                        }) {
+                            return Err("Action target must be a person in this world".into());
+                        }
+                    }
+                    let data = ObjectData::ActorAction {
+                        event,
+                        actor: person,
+                        target,
+                        action: action.clone(),
+                        intent,
+                        outcome,
+                    };
+                    let object = if let Some(action_id) = input.id {
+                        if !editing {
+                            return Err("Action corrections require an existing event".into());
+                        }
+                        let object = reference(world.id, &action_id)?;
+                        let mut prior = store
+                            .get_object(object, context)
+                            .map_err(|error| error.to_string())?
+                            .ok_or("Action does not exist at this event date")?
+                            .record;
+                        if !matches!(prior.data, ObjectData::ActorAction { event: owner, actor, .. }
+                            if owner == event && actor == person)
+                        {
+                            return Err("Action belongs to a different event or actor".into());
+                        }
+                        if prior.data != data {
+                            prior.data = data;
+                            prior.label = action;
+                            prior.source = Some(source);
+                            changes.push(Change::Correct(object, prior));
+                        }
+                        object
+                    } else {
+                        let object = ObjectRef::new(world.id);
+                        changes.push(Change::Create(object, sourced(action, data)));
+                        object
+                    };
+                    action_id = Some(object);
+                }
+                (EventRole::Actor, None) => return Err("Every actor row needs an action".into()),
+                (_, Some(_)) => return Err("Choose the actor role to record an action".into()),
+                (_, None) if !new_role => {
+                    return Err("That person already has this event role".into());
+                }
+                (_, None) => {}
+            }
+            action_ids.push(action_id);
+        }
+        if let Some(effect) = request.effect {
+            let action = action_ids
+                .get(effect.actor_row)
+                .copied()
+                .flatten()
+                .ok_or("Choose the specific actor action that caused the change")?;
+            let (target, mut record) = Self::relationship_state(
+                &store,
+                &world,
+                &effect.relationship_id,
+                day.0,
+                effect.trust,
+                &effect.tags,
+            )?;
+            record.label = nonempty(&effect.explanation, "Effect explanation")?;
+            record.source = Some(source);
+            changes.push(Change::ActionEffect {
+                event,
+                action,
+                target,
+                record,
+            });
+        }
+        if changes.is_empty() {
+            return Err("Change the event details or add a role or action before saving".into());
+        }
+        commit(&mut store, &world, changes)?;
+        Ok(event.id.0.to_string())
     }
 }
 
@@ -516,16 +1163,240 @@ pub fn workspace_create_relationship(
 }
 
 #[tauri::command]
+pub fn workspace_record_relationship_state(
+    workspace: State<'_, AuthorWorkspace>,
+    request: RelationshipStateInput,
+) -> Result<(), String> {
+    workspace.record_relationship_state(request)
+}
+
+#[tauri::command]
 pub fn workspace_record_event(
     workspace: State<'_, AuthorWorkspace>,
     request: EventInput,
-) -> Result<(), String> {
+) -> Result<String, String> {
     workspace.record_event(request)
+}
+
+#[tauri::command]
+pub fn workspace_save_definition(
+    workspace: State<'_, AuthorWorkspace>,
+    request: DefinitionInput,
+) -> Result<(), String> {
+    workspace.save_definition(request)
+}
+
+#[tauri::command]
+pub fn workspace_record_evidence(
+    workspace: State<'_, AuthorWorkspace>,
+    request: EvidenceInput,
+) -> Result<(), String> {
+    workspace.record_evidence(request)
+}
+
+#[tauri::command]
+pub fn workspace_evidence(
+    workspace: State<'_, AuthorWorkspace>,
+    world_id: String,
+    event_id: String,
+    day: i64,
+    revision: Option<i64>,
+    audience: String,
+) -> Result<Vec<EvidenceSummary>, String> {
+    workspace.evidence(&world_id, &event_id, day, revision, &audience)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn at_08_09_13_configured_roles_and_reports_preserve_outcomes_and_visibility()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("knowledge.sqlite");
+        let workspace = AuthorWorkspace::open(&path)?;
+        let world = workspace.create_world("Northbridge")?;
+        let id = world.id;
+        workspace.create_person(&id, "Alice")?;
+        workspace.create_person(&id, "Beatrice")?;
+        workspace.create_person(&id, "Morgan")?;
+        let seed = workspace.snapshot(&id, 0, None)?;
+        let alice = seed.people[0].id.clone();
+        let morgan = seed.people[2].id.clone();
+        let definition =
+            |expected_revision, category: &str, label: &str, description: &str| DefinitionInput {
+                world_id: id.clone(),
+                expected_revision,
+                category: category.into(),
+                label: label.into(),
+                description: description.into(),
+                reverse_label: (category == "relationship").then(|| "sponsored by".into()),
+                symmetric: false,
+            };
+        workspace.save_definition(definition(3, "role", "Mediator", "Facilitates negotiation"))?;
+        workspace.save_definition(definition(4, "role", "Financier", "Funds the initiative"))?;
+        workspace.save_definition(definition(5, "tag", "allied", "Shares policy goals"))?;
+        workspace.save_definition(definition(
+            6,
+            "relationship",
+            "sponsors",
+            "Provides material support",
+        ))?;
+        let catalog = workspace.snapshot(&id, 0, None)?.definitions;
+        let role = |label: &str| {
+            format!(
+                "definition:{}",
+                catalog.iter().find(|item| item.label == label).unwrap().id
+            )
+        };
+        let mut request = EventInput {
+            world_id: id.clone(),
+            expected_revision: 7,
+            event_id: None,
+            day: 10,
+            event_label: "Council vote".into(),
+            source_citation: "Official minutes".into(),
+            participants: vec![
+                actor(&alice, "Prevent disclosure", "failed"),
+                ParticipantInput {
+                    person_id: alice.clone(),
+                    role: "victim".into(),
+                    action: None,
+                },
+                ParticipantInput {
+                    person_id: morgan.clone(),
+                    role: role("Mediator"),
+                    action: None,
+                },
+                ParticipantInput {
+                    person_id: morgan.clone(),
+                    role: role("Financier"),
+                    action: None,
+                },
+            ],
+            effect: None,
+        };
+        let label = request.participants[2].role.clone();
+        request.participants[2].role = role("allied");
+        assert!(workspace.record_event(request.clone()).is_err());
+        assert!(workspace.snapshot(&id, 10, None)?.events.is_empty());
+        request.participants[2].role = label;
+        let event_id = workspace.record_event(request)?;
+        workspace.save_definition(definition(8, "role", "Mediator", "Negotiates a settlement"))?;
+        let revised = workspace.snapshot(&id, 10, None)?;
+        let before = workspace.snapshot(&id, 10, Some(8))?;
+        let mediator = |catalog: &[DefinitionSummary]| {
+            let entry = catalog
+                .iter()
+                .find(|item| item.label == "Mediator")
+                .unwrap();
+            (entry.id.clone(), entry.description.clone())
+        };
+        assert_eq!(
+            mediator(&before.definitions).0,
+            mediator(&revised.definitions).0
+        );
+        assert_ne!(
+            mediator(&before.definitions).1,
+            mediator(&revised.definitions).1
+        );
+        for (index, (audience, statement)) in [
+            ("author", "The sealed ledger identifies the sponsor."),
+            (&alice, "Alice privately heard a claim of bribery."),
+            (
+                "public",
+                "Rumor says the effort to prevent disclosure succeeded.",
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            workspace.record_evidence(EvidenceInput {
+                world_id: id.clone(),
+                expected_revision: 9 + index as i64,
+                event_id: event_id.clone(),
+                day: 11,
+                statement: statement.into(),
+                citation: "PRIVATE source notes".into(),
+                audience: audience.into(),
+            })?;
+        }
+        drop(workspace);
+        let workspace = AuthorWorkspace::open(&path)?;
+        let author = workspace.evidence(&id, &event_id, 11, None, "author")?;
+        assert_eq!(author.len(), 3);
+        assert!(
+            author
+                .iter()
+                .all(|item| item.source.as_deref() == Some("PRIVATE source notes"))
+        );
+        let public = workspace.evidence(&id, &event_id, 11, None, "public")?;
+        assert_eq!(public.len(), 1);
+        assert!(public[0].statement.contains("Rumor"));
+        assert!(
+            public[0].source.is_none()
+                && public[0].audience.is_none()
+                && public[0].reader_id.is_none()
+        );
+        let alice_view = workspace.evidence(&id, &event_id, 11, None, &alice)?;
+        assert_eq!(alice_view.len(), 2);
+        assert!(
+            alice_view
+                .iter()
+                .any(|item| item.statement.starts_with("Alice privately"))
+        );
+        assert_eq!(
+            workspace.evidence(&id, &event_id, 11, None, &morgan)?.len(),
+            1
+        );
+        assert!(
+            workspace
+                .evidence(&id, &event_id, 10, None, "public")?
+                .is_empty()
+        );
+        assert!(
+            workspace
+                .evidence(&id, &event_id, 11, Some(11), "public")
+                .is_err()
+        );
+        let event = workspace.snapshot(&id, 11, None)?.events.pop().unwrap();
+        assert_eq!(event.actions[0].outcome, "failed");
+        let roles: HashSet<_> = event
+            .participants
+            .iter()
+            .map(|item| item.role.as_str())
+            .collect();
+        assert_eq!(
+            roles,
+            HashSet::from(["actor", "victim", "Mediator", "Financier"])
+        );
+        let foreign = workspace.create_world("Other world")?;
+        workspace.create_person(&foreign.id, "Unrelated")?;
+        let foreign_id = workspace.snapshot(&foreign.id, 11, None)?.people[0]
+            .id
+            .clone();
+        assert!(
+            workspace
+                .evidence(&id, &event_id, 11, None, &foreign_id)
+                .is_err()
+        );
+        Ok(())
+    }
+
+    fn actor(person_id: &str, action: &str, outcome: &str) -> ParticipantInput {
+        ParticipantInput {
+            person_id: person_id.into(),
+            role: "actor".into(),
+            action: Some(ActionInput {
+                id: None,
+                action: action.into(),
+                intent: "shape the succession dispute".into(),
+                outcome: outcome.into(),
+                target_id: None,
+            }),
+        }
+    }
 
     #[test]
     fn author_workspace_reopens_with_event_attributed_relationship_history()
@@ -567,36 +1438,44 @@ mod tests {
             relationship = workspace.snapshot(&world_id, 0, None)?.relationships[0]
                 .id
                 .clone();
-            workspace.record_event(EventInput {
+            let mut event = EventInput {
                 world_id: world_id.clone(),
-                relationship_id: relationship.clone(),
-                actor_id: beatrice.clone(),
+                expected_revision: 3,
+                event_id: None,
                 day: 10,
                 event_label: "Disclosed letter".into(),
-                action: "disclose_letter".into(),
-                intent: "force a succession dispute".into(),
-                outcome: "succeeded".into(),
                 source_citation: "Northbridge folio 14".into(),
-                trust: Some(12),
-                tags: "estranged".into(),
-            })?;
-            // A second event cannot rewrite the state on the same fictional day.
+                participants: vec![
+                    actor(&alice, "block disclosure", "failed"),
+                    actor(&beatrice, "disclose letter", "succeeded"),
+                    ParticipantInput {
+                        person_id: alice.clone(),
+                        role: "witness".into(),
+                        action: None,
+                    },
+                ],
+                effect: Some(EffectInput {
+                    relationship_id: relationship.clone(),
+                    actor_row: 2,
+                    explanation: "Beatrice broke Alice's confidence".into(),
+                    trust: Some(12),
+                    tags: "estranged".into(),
+                }),
+            };
+            assert!(workspace.record_event(event.clone()).is_err());
+            let rolled_back = workspace.snapshot(&world_id, 10, None)?;
+            assert_eq!(rolled_back.world.revision, 3);
+            assert!(rolled_back.events.is_empty());
+            event.effect.as_mut().unwrap().actor_row = 1;
+            workspace.record_event(event.clone())?;
             assert!(
-                workspace
-                    .record_event(EventInput {
-                        world_id: world_id.clone(),
-                        relationship_id: relationship.clone(),
-                        actor_id: beatrice.clone(),
-                        day: 10,
-                        event_label: "Duplicate".into(),
-                        action: "disclosure".into(),
-                        intent: "repeat".into(),
-                        outcome: "failed".into(),
-                        source_citation: "Northbridge folio 15".into(),
-                        trust: Some(20),
-                        tags: "estranged".into(),
-                    })
-                    .is_err()
+                workspace.record_event(event.clone()).is_err(),
+                "stale form must fail"
+            );
+            event.expected_revision = 4;
+            assert!(
+                workspace.record_event(event).is_err(),
+                "same-day second effect must roll back"
             );
             assert_eq!(
                 workspace.snapshot(&world_id, 9, None)?.relationships[0].trust,
@@ -616,6 +1495,27 @@ mod tests {
         assert_eq!(cause.outcome, Some("succeeded"));
         assert_eq!(cause.day, 10);
         assert_eq!(cause.source, "Northbridge folio 14");
+        assert_eq!(cause.before_trust, Some(90));
+        assert_eq!(cause.before_tags, vec!["friends"]);
+        assert_eq!(cause.after_trust, Some(12));
+        assert_eq!(cause.after_tags, vec!["estranged"]);
+        assert_eq!(after.events.len(), 1);
+        let event = &after.events[0];
+        assert_eq!(cause.event_id, event.id);
+        assert_eq!(event.participants.len(), 3);
+        assert_eq!(event.actions.len(), 2);
+        assert!(
+            event
+                .actions
+                .iter()
+                .any(|action| action.person_id == alice && action.outcome == "failed")
+        );
+        assert!(
+            event
+                .actions
+                .iter()
+                .any(|action| action.person_id == beatrice && action.outcome == "succeeded")
+        );
         assert!(
             reopened.snapshot(&world_id, 9, None)?.relationships[0]
                 .cause
@@ -631,7 +1531,66 @@ mod tests {
         assert_eq!(prior_revision.view_revision, 3);
         assert_eq!(prior_revision.relationships[0].trust, Some(90));
         assert!(prior_revision.relationships[0].cause.is_none());
+        assert!(prior_revision.events.is_empty());
         assert!(reopened.snapshot(&world_id, 10, Some(5)).is_err());
+        let mut correction = actor(&beatrice, "published the letter", "succeeded");
+        correction.action.as_mut().unwrap().id = event
+            .actions
+            .iter()
+            .find(|action| action.person_id == beatrice)
+            .map(|action| action.id.clone());
+        reopened.record_event(EventInput {
+            world_id: world_id.clone(),
+            expected_revision: 4,
+            event_id: Some(event.id.clone()),
+            day: 15,
+            event_label: "Published letter".into(),
+            source_citation: "Revised folio 14".into(),
+            participants: vec![
+                correction,
+                ParticipantInput {
+                    person_id: beatrice.clone(),
+                    role: "sponsor".into(),
+                    action: None,
+                },
+            ],
+            effect: None,
+        })?;
+        let corrected = reopened.snapshot(&world_id, 15, None)?;
+        assert_eq!(corrected.events[0].id, event.id);
+        assert_eq!(corrected.events[0].label, "Published letter");
+        assert_eq!(corrected.events[0].day, Some(10));
+        assert_eq!(corrected.events[0].participants.len(), 4);
+        assert!(
+            corrected.events[0]
+                .actions
+                .iter()
+                .any(|action| action.action == "published the letter")
+        );
+        let original_cause = corrected.relationships[0].cause.as_ref().unwrap();
+        assert_eq!(original_cause.action.as_deref(), Some("disclose letter"));
+        assert_eq!(original_cause.source, "Northbridge folio 14");
+        assert_eq!(
+            reopened.snapshot(&world_id, 15, Some(4))?.events[0].label,
+            "Disclosed letter"
+        );
+        reopened.record_relationship_state(RelationshipStateInput {
+            world_id: world_id.clone(),
+            expected_revision: 5,
+            relationship_id: relationship,
+            day: 16,
+            trust: None,
+            tags: "civil".into(),
+        })?;
+        let amended = reopened.snapshot(&world_id, 16, None)?;
+        assert_eq!(amended.relationships[0].trust, None);
+        assert_eq!(amended.relationships[0].tags, vec!["civil"]);
+        assert!(amended.relationships[0].cause.is_none());
+        assert!(
+            reopened.snapshot(&world_id, 15, None)?.relationships[0]
+                .cause
+                .is_some()
+        );
         Ok(())
     }
 }

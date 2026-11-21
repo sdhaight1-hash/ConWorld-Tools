@@ -110,13 +110,14 @@ impl EventDate {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum EventRole {
     Actor,
     Witness,
     Victim,
     Stakeholder,
     Sponsor,
+    Custom(ObjectRef),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -126,9 +127,37 @@ pub enum ActionOutcome {
     Failed,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ClaimAudience {
+    Author,
+    Public,
+    Character(ObjectRef),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Definition {
+    Relationship {
+        reverse_label: Option<String>,
+        symmetric: bool,
+    },
+    Tag,
+    Role,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EvidenceStatement {
+    pub statement: String,
+    pub source: Option<String>,
+    pub audience: Option<ClaimAudience>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ObjectData {
     Person,
+    Definition {
+        definition: Definition,
+        description: String,
+    },
     /// A directed, addressable bond. Reverse perceptions are independent records.
     Relationship {
         subject: ObjectRef,
@@ -161,6 +190,7 @@ pub enum ObjectData {
         subject: ObjectRef,
         predicate: String,
         statement: String,
+        audience: ClaimAudience,
     },
 }
 
@@ -237,6 +267,7 @@ pub enum Change {
 pub enum Scope {
     Author,
     Public,
+    Character(ObjectRef),
 }
 
 #[derive(Clone, Copy, Debug)]
