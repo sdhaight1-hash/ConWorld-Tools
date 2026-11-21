@@ -6,11 +6,11 @@ use std::sync::{Mutex, MutexGuard};
 
 use atlas_store::{
     ActionOutcome, AuthorRevision, Change, ClaimAudience, Command, Definition, EventDate,
-    EventRole, ObjectData, ObjectId, ObjectRef, Record, Scope, Store, ValidInterval, VersionRef,
-    ViewContext, World, WorldDay, WorldId,
+    EventRole, ObjectData, ObjectId, ObjectRef, Record, Scope, Store, ValidInterval, Version,
+    VersionRef, ViewContext, World, WorldDay, WorldId,
     discovery::{MentionDisposition, ReviewMention, SavePersonAlias},
     query::{
-        Direction, PredicateInput, QUERY_SCHEMA_VERSION, QueryFilter, QuerySpec,
+        Direction, PredicateInput, QUERY_SCHEMA_VERSION, QueryCursor, QueryFilter, QuerySpec,
         SaveNamedLabelQuery,
     },
 };
@@ -20,6 +20,14 @@ use uuid::Uuid;
 
 pub struct AuthorWorkspace {
     store: Mutex<Store>,
+    continuation: Mutex<Option<SearchContinuation>>,
+}
+
+struct SearchContinuation {
+    token: Uuid,
+    spec: QuerySpec,
+    view: ViewContext,
+    cursor: QueryCursor,
 }
 
 #[derive(Serialize)]
@@ -160,6 +168,7 @@ pub struct SearchRow {
 pub struct SearchSummary {
     revision: i64,
     truncated: bool,
+    next_cursor: Option<String>,
     rows: Vec<SearchRow>,
 }
 
@@ -459,6 +468,7 @@ impl AuthorWorkspace {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, atlas_store::Error> {
         Ok(Self {
             store: Mutex::new(Store::open(path)?),
+            continuation: Mutex::new(None),
         })
     }
 
@@ -466,6 +476,12 @@ impl AuthorWorkspace {
         self.store
             .lock()
             .map_err(|_| "Author workspace storage lock was poisoned".into())
+    }
+
+    fn lock_continuation(&self) -> Result<MutexGuard<'_, Option<SearchContinuation>>, String> {
+        self.continuation
+            .lock()
+            .map_err(|_| "Author workspace continuation lock was poisoned".into())
     }
 
     fn worlds(&self) -> Result<Vec<WorldSummary>, String> {
@@ -793,21 +809,80 @@ impl AuthorWorkspace {
             revision: AuthorRevision(revision.unwrap_or(world.revision.0)),
             ..view(&world, day)
         };
-        let result = store
-            .execute_query(
-                &QuerySpec {
-                    schema_version: QUERY_SCHEMA_VERSION,
-                    filter,
-                    limit,
-                },
-                view,
-            )
+        let mut continuation = self.lock_continuation()?;
+        *continuation = None;
+        let spec = QuerySpec {
+            schema_version: QUERY_SCHEMA_VERSION,
+            filter,
+            limit,
+        };
+        if matches!(spec.filter, QueryFilter::RelationshipPath { .. }) {
+            let result = store
+                .execute_query(&spec, view)
+                .map_err(|error| error.to_string())?;
+            return Self::search_summary(&store, view, result.rows, result.truncated, None);
+        }
+        let page = store
+            .execute_query_page(&spec, view, None)
             .map_err(|error| error.to_string())?;
+        let next = page.next_cursor.map(|cursor| SearchContinuation {
+            token: Uuid::new_v4(),
+            spec,
+            view,
+            cursor,
+        });
+        let token = next.as_ref().map(|item| item.token.to_string());
+        let summary = Self::search_summary(&store, view, page.rows, token.is_some(), token)?;
+        *continuation = next;
+        Ok(summary)
+    }
+
+    fn next_page(
+        &self,
+        world_id: &str,
+        day: i64,
+        revision: i64,
+        token: &str,
+    ) -> Result<SearchSummary, String> {
+        let store = self.lock()?;
+        let mut continuation = self.lock_continuation()?;
+        let current = continuation
+            .as_ref()
+            .filter(|item| {
+                item.token.to_string() == token
+                    && item.view.world.0.to_string() == world_id
+                    && item.view.day.0 == day
+                    && item.view.revision.0 == revision
+            })
+            .ok_or("Search page expired; run the search again.")?;
+        let page = store
+            .execute_query_page(&current.spec, current.view, Some(&current.cursor))
+            .map_err(|error| error.to_string())?;
+        let view = current.view;
+        let next = page.next_cursor.map(|cursor| SearchContinuation {
+            token: Uuid::new_v4(),
+            spec: current.spec.clone(),
+            view,
+            cursor,
+        });
+        let token = next.as_ref().map(|item| item.token.to_string());
+        let summary = Self::search_summary(&store, view, page.rows, token.is_some(), token)?;
+        *continuation = next;
+        Ok(summary)
+    }
+
+    fn search_summary(
+        store: &Store,
+        view: ViewContext,
+        rows: Vec<Version>,
+        truncated: bool,
+        next_cursor: Option<String>,
+    ) -> Result<SearchSummary, String> {
         Ok(SearchSummary {
-            revision: result.revision.0,
-            truncated: result.truncated,
-            rows: result
-                .rows
+            revision: view.revision.0,
+            truncated,
+            next_cursor,
+            rows: rows
                 .into_iter()
                 .map(|version| {
                     let statement = match &version.record.data {
@@ -858,6 +933,7 @@ impl AuthorWorkspace {
         revision: Option<i64>,
     ) -> Result<WorkspaceSnapshot, String> {
         let store = self.lock()?;
+        *self.lock_continuation()? = None;
         let world = store
             .world(WorldId(id(world_id)?), Scope::Author)
             .map_err(|error| error.to_string())?;
@@ -1710,6 +1786,17 @@ pub fn workspace_search(
 }
 
 #[tauri::command]
+pub fn workspace_next_search_page(
+    workspace: State<'_, AuthorWorkspace>,
+    world_id: String,
+    day: i64,
+    revision: i64,
+    token: String,
+) -> Result<SearchSummary, String> {
+    workspace.next_page(&world_id, day, revision, &token)
+}
+
+#[tauri::command]
 pub fn workspace_save_person_alias(
     workspace: State<'_, AuthorWorkspace>,
     request: PersonAliasInput,
@@ -1884,7 +1971,17 @@ mod tests {
         assert_eq!(found.revision, latest.view_revision);
         assert_eq!(found.rows.len(), 1);
         assert_eq!(found.rows[0].id, focus.id.0.to_string());
+        let first = workspace.search(&world.id, 0, Some(2), "fulltext", "Inhabitant", 2)?;
+        assert_eq!(first.rows.len(), 2);
+        let token = first.next_cursor.as_deref().unwrap();
+        assert!(workspace.next_page(&world.id, 1, 2, token).is_err());
+        let second = workspace.next_page(&world.id, 0, 2, token)?;
+        assert_eq!(second.rows.len(), 2);
+        assert_ne!(second.rows[0].id, first.rows[0].id);
+        assert!(workspace.next_page(&world.id, 0, 2, token).is_err());
+        let next = second.next_cursor.as_deref().unwrap();
         let historical = workspace.snapshot(&world.id, 0, Some(1))?;
+        assert!(workspace.next_page(&world.id, 0, 2, next).is_err());
         assert!(!historical.scene_limited);
         assert_eq!(historical.people.len(), 1);
         assert!(workspace.snapshot(&world.id, 0, Some(3)).is_err());

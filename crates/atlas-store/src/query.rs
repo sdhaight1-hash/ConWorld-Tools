@@ -204,14 +204,101 @@ pub struct QueryResult {
     pub truncated: bool,
 }
 
+/// Opaque in-process continuation tied to the entire original read context,
+/// typed query and page size. The host must not accept client-authored fields.
+#[derive(Clone, Debug)]
+pub struct QueryCursor {
+    spec: QuerySpec,
+    view: ViewContext,
+    last: ObjectRef,
+    label: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct QueryPage {
+    pub rows: Vec<Version>,
+    pub revision: AuthorRevision,
+    pub next_cursor: Option<QueryCursor>,
+}
+
+fn validate_query_request(spec: &QuerySpec, view: ViewContext) -> Result<(), Error> {
+    if view.scope != Scope::Author {
+        return Err(Error::CapabilityDenied);
+    }
+    if spec.schema_version != QUERY_SCHEMA_VERSION || !(1..=500).contains(&spec.limit) {
+        return Err(Error::InvalidInput("query schema or result limit"));
+    }
+    Ok(())
+}
+
 impl Store {
     pub fn execute_query(&self, spec: &QuerySpec, view: ViewContext) -> Result<QueryResult, Error> {
-        if view.scope != crate::Scope::Author {
-            return Err(Error::CapabilityDenied);
+        validate_query_request(spec, view)?;
+        self.execute_bounded_query(spec, view)
+    }
+
+    /// Page only complete, bounded author queries. Reevaluate the immutable
+    /// recorded view on each call; do not cache raw rows or trust offsets.
+    /// The current planner still materializes at most 10,000 candidate rows,
+    /// so this is stable result pagination, not unbounded SQL streaming.
+    pub fn execute_query_page(
+        &self,
+        spec: &QuerySpec,
+        view: ViewContext,
+        after: Option<&QueryCursor>,
+    ) -> Result<QueryPage, Error> {
+        validate_query_request(spec, view)?;
+        if matches!(spec.filter, QueryFilter::RelationshipPath { .. }) {
+            return Err(Error::InvalidInput("pagination of bounded traversal"));
         }
-        if spec.schema_version != QUERY_SCHEMA_VERSION || !(1..=500).contains(&spec.limit) {
-            return Err(Error::InvalidInput("query schema or result limit"));
+        if let Some(cursor) = after
+            && (cursor.view != view || cursor.spec != *spec)
+        {
+            return Err(Error::InvalidInput("query cursor context"));
         }
+        const PAGE_CANDIDATE_BUDGET: usize = 10_000;
+        let result = self.execute_bounded_query(
+            &QuerySpec {
+                limit: PAGE_CANDIDATE_BUDGET,
+                ..spec.clone()
+            },
+            view,
+        )?;
+        if result.truncated {
+            return Err(Error::QueryBudgetExceeded);
+        }
+        let mut rows = result.rows;
+        if let Some(cursor) = after {
+            let position = rows
+                .iter()
+                .position(|row| row.object == cursor.last && row.record.label == cursor.label)
+                .ok_or(Error::InvalidInput("query cursor boundary"))?;
+            rows.drain(..=position);
+        }
+        let has_more = rows.len() > spec.limit;
+        rows.truncate(spec.limit);
+        let next_cursor = if has_more {
+            rows.last().map(|last| QueryCursor {
+                spec: spec.clone(),
+                view,
+                last: last.object,
+                label: last.record.label.clone(),
+            })
+        } else {
+            None
+        };
+        Ok(QueryPage {
+            rows,
+            revision: result.revision,
+            next_cursor,
+        })
+    }
+
+    fn execute_bounded_query(
+        &self,
+        spec: &QuerySpec,
+        view: ViewContext,
+    ) -> Result<QueryResult, Error> {
         self.validate_query_view(view)?;
         if matches!(
             &spec.filter,
