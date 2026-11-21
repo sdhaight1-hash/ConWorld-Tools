@@ -150,6 +150,7 @@ export async function showAuthorWorkspace(
   const nextSearchPage = document.querySelector<HTMLButtonElement>("#author-next-search-page")!;
   const cancelSearch = document.querySelector<HTMLButtonElement>("#author-cancel-query")!;
   const discoverButton = document.querySelector<HTMLButtonElement>("#author-discover-mentions")!;
+  const cancelDiscovery = document.querySelector<HTMLButtonElement>("#author-cancel-discovery")!;
   const discoveryStatus = document.querySelector<HTMLElement>("#author-discovery-status")!;
   const discoveryResults = document.querySelector<HTMLUListElement>("#author-discovery-results")!;
   const queryStatus = document.querySelector<HTMLElement>("#author-query-status")!;
@@ -196,6 +197,8 @@ export async function showAuthorWorkspace(
   let pageCursor: string | undefined;
   let pageNumber = 1;
   let discoverySequence = 0;
+  let activeDiscovery: string | undefined;
+  let discoveryFocus: Option | undefined;
   let saving = false;
   let selectedEvent: Event | undefined;
   let people: Option[] = [];
@@ -224,7 +227,7 @@ export async function showAuthorWorkspace(
     const blocked = !snapshot || revisionInput.value.trim() !== "" || saving;
     const limited = Boolean(snapshot?.scene_limited);
     editorForms.hidden = limited;
-    discoveryPanel.hidden = limited;
+    discoveryPanel.hidden = !snapshot;
     pathForm.hidden = limited && !focusedPerson;
     participantEventsForm.hidden = limited && !focusedPerson;
     focusHint.hidden = !limited;
@@ -253,7 +256,9 @@ export async function showAuthorWorkspace(
     worldForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = saving;
     queryForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = !snapshot || saving;
     compositeForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = !snapshot || saving;
-    discoverButton.disabled = !snapshot || limited || saving;
+    discoverButton.disabled = !snapshot || saving;
+    cancelDiscovery.hidden = !activeDiscovery;
+    cancelDiscovery.disabled = !activeDiscovery;
     saveQueryForm.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled = blocked;
     saveComposite.disabled = blocked;
     runSavedQuery.disabled = !snapshot || !savedSelect.value || saving;
@@ -502,6 +507,8 @@ export async function showAuthorWorkspace(
     pageNumber = 1;
     nextSearchPage.hidden = true;
     ++discoverySequence;
+    cancelActiveDiscovery();
+    discoveryFocus = undefined;
     discoveryResults.replaceChildren();
     discoveryStatus.textContent = "Choose Find possible mentions to scan this historical view.";
     queryResults.replaceChildren();
@@ -695,6 +702,17 @@ export async function showAuthorWorkspace(
           references.setAttribute("aria-label", "Find references to " + row.label + " " + row.id);
           references.addEventListener("click", () => runSearch("backlinks", row.id));
           item.append(references);
+          if (row.kind === "claim") {
+            const mentions = document.createElement("button");
+            mentions.type = "button";
+            mentions.textContent = "Find mentions in this claim";
+            mentions.setAttribute("aria-label", "Find mentions in " + row.label + " " + row.id);
+            mentions.addEventListener("click", () => {
+              if (sequence !== querySequence || !snapshot || saving) return;
+              runDiscovery({ id: row.id, label: row.label });
+            });
+            item.append(mentions);
+          }
           if (row.kind === "claim" && row.statement !== undefined && row.statement !== null) {
             const statement = document.createElement("blockquote");
             statement.textContent = row.statement;
@@ -726,7 +744,8 @@ export async function showAuthorWorkspace(
   }
 
   function reviewCandidate(candidate: MentionDiscovery["rows"][number], decision: "approved" | "dismissed") {
-    if (!snapshot || snapshot.scene_limited || saving || selectedRevision() !== null) return;
+    if (!snapshot || saving || selectedRevision() !== null) return;
+    const focus = discoveryFocus;
     const request = {
       world_id: snapshot.world.id,
       day: snapshot.day,
@@ -747,7 +766,7 @@ export async function showAuthorWorkspace(
         await invoke<number>("workspace_review_mention", { request });
         saving = false;
         await refresh();
-        discoverButton.click();
+        runDiscovery(focus);
       } catch (error) {
         discoveryStatus.textContent = "Unable to review mention: " + String(error);
       } finally {
@@ -757,18 +776,44 @@ export async function showAuthorWorkspace(
     })();
   }
 
-  discoverButton.addEventListener("click", () => {
-    if (!snapshot || snapshot.scene_limited || saving) return;
+  function cancelActiveDiscovery() {
+    const requestId = activeDiscovery;
+    activeDiscovery = undefined;
+    cancelDiscovery.hidden = true;
+    cancelDiscovery.disabled = true;
+    if (requestId) void invoke("workspace_cancel_query", { requestId }).catch(() => {});
+  }
+
+  cancelDiscovery.addEventListener("click", () => {
+    ++discoverySequence;
+    cancelActiveDiscovery();
+    discoveryResults.replaceChildren();
+    discoveryStatus.textContent = "Mention scan cancellation requested.";
+  });
+
+  discoverButton.addEventListener("click", () => runDiscovery());
+
+  function runDiscovery(focus?: Option) {
+    if (!snapshot || saving) return;
     const worldId = snapshot.world.id;
     const day = snapshot.day;
     const revision = snapshot.view_revision;
     const sequence = ++discoverySequence;
+    cancelActiveDiscovery();
+    const requestId = crypto.randomUUID();
+    activeDiscovery = requestId;
+    discoveryFocus = focus;
+    cancelDiscovery.hidden = false;
+    cancelDiscovery.disabled = false;
     discoveryResults.replaceChildren();
-    discoveryStatus.textContent = "Checking source statements for possible names…";
+    discoveryStatus.textContent = focus
+      ? "Checking only claim: " + focus.label + "…"
+      : "Checking source statements for possible names…";
     void (async () => {
       try {
         const result = await invoke<MentionDiscovery>("workspace_discover_mentions", {
-          worldId, day, revision, limit: 100,
+          worldId, day, revision, limit: 100, requestId,
+          ...(focus ? { sourceId: focus.id } : {}),
         });
         if (sequence !== discoverySequence || !snapshot) return;
         if (result.revision !== snapshot.view_revision) throw new Error("Discovery response belongs to a different author revision. Refresh the view.");
@@ -816,14 +861,21 @@ export async function showAuthorWorkspace(
           discoveryResults.append(item);
         }
         discoveryStatus.textContent = result.rows.length + " possible name candidate(s) at author revision " +
-          result.revision + (result.truncated ? " · more candidates exist; results are limited." : "");
+          result.revision + (focus ? " · claim: " + focus.label : "") +
+          (result.truncated ? " · more candidates exist; results are limited." : "");
       } catch (error) {
         if (sequence === discoverySequence) {
           discoveryStatus.textContent = "Discovery failed: " + String(error);
         }
+      } finally {
+        if (sequence === discoverySequence) {
+          activeDiscovery = undefined;
+          cancelDiscovery.hidden = true;
+          cancelDiscovery.disabled = true;
+        }
       }
     })();
-  });
+  }
 
   cancelSearch.addEventListener("click", () => {
     if (!activeQuery) return;

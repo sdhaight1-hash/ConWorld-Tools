@@ -567,7 +567,7 @@ test("native mention discovery lists distinct collision identities and never acc
   await expect(results.nth(1)).toContainText("person-b");
   await results.nth(1).getByRole("button", { name: "Inspect candidate person" }).click();
   const calls = await page.evaluate(() => (window as unknown as { __discoveryCalls: unknown[] }).__discoveryCalls);
-  expect(calls).toEqual([{ worldId: "world", day: 0, revision: 2, limit: 100 }]);
+  expect(calls).toMatchObject([{ worldId: "world", day: 0, revision: 2, limit: 100 }]);
   const revision = page.locator("#author-revision");
   await revision.fill("1");
   await revision.blur();
@@ -1070,7 +1070,7 @@ test("oversized worlds preserve pinned indexed search while disabling incomplete
   await expect(page.locator("#author-status")).toContainText("Search-only mode");
   await expect(page.locator("#workspace")).toBeHidden();
   await expect(page.locator(".editor-forms")).toBeHidden();
-  await expect(page.locator("#author-mention-discovery")).toBeHidden();
+  await expect(page.locator("#author-mention-discovery")).toBeVisible();
   const form = page.locator("#author-query-form");
   await form.getByLabel("Find name").fill("Obsidian");
   await form.getByLabel("Match names").selectOption("fulltext");
@@ -1331,4 +1331,80 @@ test("saved parameters use typed bindings and server-side saved identity", async
   await page.locator("#author-revision").blur();
   await expect(page.locator("#author-saved-parameters")).toBeHidden();
   await expect(saved.getByRole("button", { name: "Run saved search" })).toBeDisabled();
+});
+
+test("oversized world discovers one exact claim and cancels stale discovery", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "archive", name: "Large archive", revision: 7 };
+    const calls: Record<string, unknown>[] = [];
+    const cancellations: string[] = [];
+    const pending = new Map<string, (value: unknown) => void>();
+    Object.assign(window, {
+      isTauri: true,
+      __focusDiscoveryCalls: calls,
+      __focusDiscoveryCancellations: cancellations,
+      __resolveDiscovery: (request: string) => pending.get(request)?.({
+        revision: 7, truncated: false, rows: [{
+          source_id: "claim", source_branch: "main", source_state_revision: 5,
+          source_revision: 5, source_label: "Diary entry", statement: "Eleanor Vale arrived.",
+          target_id: "person", target_label: "Eleanor Vale", matched_label: "Eleanor Vale",
+          start_byte: 0, end_byte: 12, collisions: 2, disposition: null,
+        }],
+      }),
+      __TAURI_INTERNALS__: {
+        invoke: async (command: string, args: Record<string, unknown>) => {
+          if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+          if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+          if (command === "workspace_worlds") return [world];
+          if (command === "workspace_snapshot") return {
+            world, day: args.day, view_revision: args.revision ?? 7, scene_limited: true,
+            people: [], relationships: [], events: [], definitions: [], aliases: [],
+          };
+          if (command === "workspace_saved_queries") return [];
+          if (command === "workspace_search") return {
+            revision: args.revision, truncated: false, rows: [{ id: "claim", label: "Diary entry",
+              kind: "claim", statement: "Eleanor Vale arrived.", source_citation: "Diary 1" }],
+          };
+          if (command === "workspace_discover_mentions") {
+            calls.push(args);
+            return new Promise((resolve) => pending.set(String(args.requestId), resolve));
+          }
+          if (command === "workspace_cancel_query") {
+            cancellations.push(String(args.requestId));
+            return null;
+          }
+          throw new Error("Unexpected native command: " + command);
+        },
+      },
+    });
+  });
+  await page.goto("/");
+  await expect(page.locator("#author-status")).toContainText("Search-only mode");
+  const search = page.locator("#author-query-form");
+  await search.getByLabel("Find name").fill("Eleanor");
+  await search.getByLabel("Match names").selectOption("claimtext");
+  await search.getByRole("button", { name: "Search history" }).click();
+  const focus = page.getByRole("button", { name: "Find mentions in Diary entry claim" });
+  const cancel = page.getByRole("button", { name: "Cancel mention scan" });
+  const calls = () => page.evaluate(() => (window as unknown as { __focusDiscoveryCalls: Record<string, unknown>[] }).__focusDiscoveryCalls);
+  const cancellations = () => page.evaluate(() => (window as unknown as { __focusDiscoveryCancellations: string[] }).__focusDiscoveryCancellations);
+  const resolve = (request: string) => page.evaluate((request) =>
+    (window as unknown as { __resolveDiscovery: (request: string) => void }).__resolveDiscovery(request), request);
+  await focus.click();
+  await expect.poll(calls).toHaveLength(1);
+  const first = String((await calls())[0].requestId);
+  expect((await calls())[0]).toMatchObject({ worldId: "archive", day: 0, revision: 7, sourceId: "claim", limit: 100 });
+  await cancel.click();
+  await expect.poll(cancellations).toContain(first);
+  await resolve(first);
+  await expect(page.locator("#author-discovery-results li")).toHaveCount(0);
+  await focus.click();
+  await expect.poll(calls).toHaveLength(2);
+  const second = String((await calls())[1].requestId);
+  await resolve(second);
+  await expect(page.locator("#author-discovery-results")).toContainText("2 possible identity/identities");
+  await expect(page.locator("#author-discovery-status")).toContainText("claim: Diary entry");
+  await page.getByRole("button", { name: "Refresh historical view" }).click();
+  await expect(page.locator("#author-discovery-results li")).toHaveCount(0);
+  await expect(cancel).toBeHidden();
 });

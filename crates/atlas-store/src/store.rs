@@ -8,8 +8,8 @@ use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, 
 use uuid::Uuid;
 
 use crate::discovery::{
-    MentionCandidate, MentionDisposition, PersonAlias, ReviewMention, SavePersonAlias,
-    matching_spans,
+    MentionCandidate, MentionDisposition, MentionRefresh, PersonAlias, ReviewMention,
+    SavePersonAlias, matching_spans,
 };
 use crate::query::{
     PredicateInput, QUERY_SCHEMA_VERSION, QueryControl, QueryFilter, QuerySpec,
@@ -18,7 +18,7 @@ use crate::query::{
 use crate::*;
 
 pub(crate) const APPLICATION_ID: i64 = 0x4357_4c44; // CWLD
-pub(crate) const SCHEMA_VERSION: i64 = 19;
+pub(crate) const SCHEMA_VERSION: i64 = 20;
 
 // Candidate queries bind world (?1), focus/phrase (?2), author revision (?3),
 // limit (?4) and branch (?5). Follow only immutable inherited revisions.
@@ -159,6 +159,9 @@ impl Store {
         }
         if version < 19 {
             tx.execute_batch(include_str!("../migrations/0019.sql"))?;
+        }
+        if version < 20 {
+            tx.execute_batch(include_str!("../migrations/0020.sql"))?;
         }
         if version < SCHEMA_VERSION {
             verify_foreign_keys(&tx)?;
@@ -1335,6 +1338,143 @@ impl Store {
     /// Phase Two authoring projection: bounded object snapshots, using one
     /// revision/branch/day and one SQLite read transaction. Phase Three will
     /// replace the scan with the indexed query engine.
+    /// Typed historical candidates for discovery only. The fixed kind and
+    /// lineage ceiling exclude unrelated records before the candidate budget.
+    pub(crate) fn discovery_versions_at(
+        &self,
+        view: ViewContext,
+        kind: &str,
+    ) -> Result<Vec<Version>, Error> {
+        require_author(view.scope)?;
+        if !matches!(kind, "person" | "claim") {
+            return Err(Error::InvalidInput("discovery record kind"));
+        }
+        self.validate_query_view(view)?;
+        let tx = self.conn.unchecked_transaction()?;
+        const BUDGET: i64 = 10_000;
+        let sql = format!(
+            "{QUERY_LINEAGE}SELECT DISTINCT v.object_id
+            FROM object_versions v JOIN lineage l ON l.branch_id = v.branch_id
+            WHERE v.world_id = ?1 AND v.kind = ?2
+                AND v.revision <= ?3 AND v.revision <= l.max_revision
+            ORDER BY v.object_id LIMIT ?4"
+        );
+        let mut rows = Vec::new();
+        {
+            let mut statement = tx.prepare(&sql)?;
+            let ids = statement.query_map(
+                params![
+                    view.world.0.as_bytes(),
+                    kind,
+                    view.revision.0,
+                    BUDGET + 1,
+                    view.branch.0.as_bytes()
+                ],
+                |row| row.get::<_, [u8; 16]>(0),
+            )?;
+            for (index, id) in ids.enumerate() {
+                self.check_query_control()?;
+                if index == BUDGET as usize {
+                    return Err(Error::QueryBudgetExceeded);
+                }
+                let object = ObjectRef {
+                    world: view.world,
+                    id: ObjectId(Uuid::from_bytes(id?)),
+                };
+                if let Some(version) =
+                    resolve_object(&tx, object, view.branch, view.revision, view.day)?
+                {
+                    rows.push(version);
+                }
+            }
+        }
+        tx.commit()?;
+        Ok(rows)
+    }
+
+    /// Conservative dependency invalidation; only same-day main-line forward
+    /// revision changes can reuse per-source previews. No cached rows are read.
+    pub fn mention_refresh_plan(
+        &self,
+        before: ViewContext,
+        after: ViewContext,
+    ) -> Result<MentionRefresh, Error> {
+        require_author(before.scope)?;
+        require_author(after.scope)?;
+        self.validate_query_view(before)?;
+        self.validate_query_view(after)?;
+        if before == after {
+            return Ok(MentionRefresh::Sources(Vec::new()));
+        }
+        if before.world != after.world
+            || before.branch != after.branch
+            || before.day != after.day
+            || before.revision > after.revision
+        {
+            return Ok(MentionRefresh::Full);
+        }
+        let tx = self.conn.unchecked_transaction()?;
+        let world = load_world(&tx, after.world)?;
+        if after.branch != world.main {
+            return Ok(MentionRefresh::Full);
+        }
+        let names_changed: bool = tx.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM invalidations i JOIN objects o
+                    ON o.world_id = i.world_id AND o.id = i.object_id
+                WHERE i.world_id = ?1 AND i.revision > ?2 AND i.revision <= ?3
+                    AND o.kind = 'person'
+                UNION ALL
+                SELECT 1 FROM person_alias_versions
+                WHERE world_id = ?1 AND revision > ?2 AND revision <= ?3
+            )",
+            params![
+                after.world.0.as_bytes(),
+                before.revision.0,
+                after.revision.0
+            ],
+            |row| row.get(0),
+        )?;
+        if names_changed {
+            return Ok(MentionRefresh::Full);
+        }
+        const BUDGET: usize = 2_000;
+        let ids = {
+            let mut statement = tx.prepare(
+                "SELECT i.object_id FROM invalidations i JOIN objects o
+                    ON o.world_id = i.world_id AND o.id = i.object_id
+                 WHERE i.world_id = ?1 AND i.revision > ?2 AND i.revision <= ?3
+                    AND o.kind = 'claim'
+                 UNION
+                 SELECT source_id FROM mention_reviews
+                 WHERE world_id = ?1 AND revision > ?2 AND revision <= ?3
+                 ORDER BY 1 LIMIT 2001",
+            )?;
+            statement
+                .query_map(
+                    params![
+                        after.world.0.as_bytes(),
+                        before.revision.0,
+                        after.revision.0
+                    ],
+                    |row| row.get::<_, [u8; 16]>(0),
+                )?
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        tx.commit()?;
+        if ids.len() > BUDGET {
+            return Ok(MentionRefresh::Full);
+        }
+        Ok(MentionRefresh::Sources(
+            ids.into_iter()
+                .map(|id| ObjectRef {
+                    world: after.world,
+                    id: ObjectId(Uuid::from_bytes(id)),
+                })
+                .collect(),
+        ))
+    }
+
     pub fn objects_at(&self, view: ViewContext, limit: usize) -> Result<Vec<Version>, Error> {
         require_author(view.scope)?;
         if !(1..=2_000).contains(&limit) {

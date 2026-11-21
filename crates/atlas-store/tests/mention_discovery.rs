@@ -276,3 +276,165 @@ fn discovery_honors_world_boundaries_and_returns_original_claim_versions() -> Re
     );
     Ok(())
 }
+
+#[test]
+fn focused_discovery_and_source_delta_ignore_unrelated_records() -> Result<(), Error> {
+    use atlas_store::discovery::{MentionRefresh, SavePersonAlias};
+    use atlas_store::query::QueryControl;
+    use std::time::Duration;
+
+    let mut store = Store::open(":memory:")?;
+    let world = store.create_world("Large archive", Scope::Author)?;
+    let person = ObjectRef::new(world.id);
+    let other = ObjectRef::new(world.id);
+    let event = ObjectRef::new(world.id);
+    let citation = ObjectRef::new(world.id);
+    let claim = ObjectRef::new(world.id);
+    let unrelated = ObjectRef::new(world.id);
+    let mut changes = vec![
+        Change::Create(person, record("Eleanor Vale", ObjectData::Person)),
+        Change::Create(other, record("Eleanor Vale", ObjectData::Person)),
+        Change::Create(
+            event,
+            record(
+                "Meeting",
+                ObjectData::HistoricalEvent {
+                    occurrence: EventDate::Exact(WorldDay(0)),
+                },
+            ),
+        ),
+        Change::Create(
+            citation,
+            record(
+                "Diary",
+                ObjectData::Source {
+                    citation: "Diary 1".into(),
+                },
+            ),
+        ),
+    ];
+    for number in 0..2_100 {
+        changes.push(Change::Create(
+            ObjectRef::new(world.id),
+            record(
+                &format!("Unrelated archive {number}"),
+                ObjectData::Source {
+                    citation: format!("Folio {number}"),
+                },
+            ),
+        ));
+    }
+    let initial = store.apply(&command(&world, world.revision, changes))?;
+    let claim_record = |label: &str, statement: &str| Record {
+        source: Some(citation),
+        ..record(
+            label,
+            ObjectData::Claim {
+                subject: event,
+                predicate: "reported".into(),
+                statement: statement.into(),
+                audience: ClaimAudience::Author,
+            },
+        )
+    };
+    let written = store.apply(&command(
+        &world,
+        initial,
+        vec![
+            Change::Create(claim, claim_record("Focused", "Eleanor Vale arrived.")),
+            Change::Create(
+                unrelated,
+                claim_record("Unrelated", "Eleanor Vale departed."),
+            ),
+        ],
+    ))?;
+    let before = view(&world, written, 0);
+    assert!(matches!(
+        store.objects_at(before, 2_000),
+        Err(Error::QueryBudgetExceeded)
+    ));
+    let focused = store.discover_mentions_for_source(before, claim, 100)?;
+    assert_eq!(focused.rows.len(), 2);
+    assert!(
+        focused
+            .rows
+            .iter()
+            .all(|row| row.source.object == claim && row.collisions == 2)
+    );
+    assert_eq!(store.discover_mentions(before, 100)?.rows.len(), 4);
+    let corrected = store.apply(&command(
+        &world,
+        written,
+        vec![Change::Correct(
+            claim,
+            claim_record("Focused", "No names remain."),
+        )],
+    ))?;
+    let after = view(&world, corrected, 0);
+    assert_eq!(
+        store.mention_refresh_plan(before, after)?,
+        MentionRefresh::Sources(vec![claim])
+    );
+    assert!(
+        store
+            .discover_mentions_for_source(after, claim, 100)?
+            .rows
+            .is_empty()
+    );
+    assert_eq!(
+        store.discover_mentions_for_source(before, claim, 100)?.rows,
+        focused.rows
+    );
+    let alias = store.save_person_alias(SavePersonAlias {
+        world: world.id,
+        person,
+        day: WorldDay(0),
+        expected: corrected,
+        alias_id: None,
+        label: "Archivist",
+        starts_at: None,
+        ends_before: None,
+        active: true,
+        command_id: Uuid::new_v4(),
+        scope: Scope::Author,
+    })?;
+    let renamed = view(&world, alias.recorded_at, 0);
+    assert_eq!(
+        store.mention_refresh_plan(after, renamed)?,
+        MentionRefresh::Full
+    );
+    assert_eq!(
+        store.mention_refresh_plan(renamed, view(&world, alias.recorded_at, 1))?,
+        MentionRefresh::Full
+    );
+    assert_eq!(
+        store.mention_refresh_plan(renamed, renamed)?,
+        MentionRefresh::Sources(vec![])
+    );
+    let control = QueryControl::new(Duration::ZERO)?;
+    assert!(matches!(
+        store.discover_mentions_controlled(renamed, Some(claim), 100, &control),
+        Err(Error::QueryDeadlineExceeded)
+    ));
+    assert!(matches!(
+        store.discover_mentions_for_source(renamed, person, 100),
+        Err(Error::WrongKind)
+    ));
+    assert!(matches!(
+        store.discover_mentions_for_source(
+            ViewContext {
+                scope: Scope::Public,
+                ..renamed
+            },
+            claim,
+            100
+        ),
+        Err(Error::CapabilityDenied)
+    ));
+    store.rebuild_search_index(Scope::Author)?;
+    assert_eq!(
+        store.discover_mentions_for_source(before, claim, 100)?.rows,
+        focused.rows
+    );
+    Ok(())
+}
