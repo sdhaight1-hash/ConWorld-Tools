@@ -769,10 +769,12 @@ impl AuthorWorkspace {
             ..view(&world, day)
         };
         let source = source_id
-            .map(|raw| id(raw).map(|id| ObjectRef {
-                world: world.id,
-                id: ObjectId(id),
-            }))
+            .map(|raw| {
+                id(raw).map(|id| ObjectRef {
+                    world: world.id,
+                    id: ObjectId(id),
+                })
+            })
             .transpose()?;
         let discovery = store
             .discover_mentions_controlled(context, source, limit, control)
@@ -2010,9 +2012,20 @@ pub async fn workspace_discover_mentions(
     source_id: Option<String>,
     request_id: Option<String>,
 ) -> Result<MentionDiscoverySummary, String> {
-    run_query_job(app, request_id.unwrap_or_else(|| Uuid::new_v4().to_string()), move |workspace, control| {
-        workspace.discover_mentions(&world_id, day, revision, limit, source_id.as_deref(), control)
-    })
+    run_query_job(
+        app,
+        request_id.unwrap_or_else(|| Uuid::new_v4().to_string()),
+        move |workspace, control| {
+            workspace.discover_mentions(
+                &world_id,
+                day,
+                revision,
+                limit,
+                source_id.as_deref(),
+                control,
+            )
+        },
+    )
     .await
 }
 
