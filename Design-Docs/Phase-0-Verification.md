@@ -63,6 +63,18 @@ npm --prefix apps/desktop run build
 
 Open **Renderer benchmark** in the native shell. The deterministic fixture has 2,000 nodes and 3,910 edges. Pan with the scrollable diagram, adjust zoom, and select a node in the diagram or inspector. When the adapter and bundle load, wgpu submits the node and edge geometry and Canvas2D draws the labels. **Simulate device loss** destroys the active WebGPU device. **Retry WebGPU** rebuilds the renderer with the same selection, zoom and scroll state. The optional Playwright path for a compatible Chromium software implementation runs with `ATLAS_SOFTWARE_WEBGPU=1 npm test` in `apps/desktop`.
 
+## Native renderer acceptance
+
+Build the renderer bundle and embedded app as above, then run the strict check from the repository root on a GPU-capable Windows host.
+
+```powershell
+./apps/desktop/scripts/windows-platform-smoke.ps1 -Binary ./target/debug/atlas-desktop.exe -RendererBenchmark -RequireGpu
+```
+
+The script records the Windows video controllers and driver versions, then launches the native WebView2 benchmark. The structured `ATLAS_PLATFORM_SMOKE` report includes the WebView version, the probed adapter vendor, architecture and [fallback status](https://developer.mozilla.org/en-US/docs/Web/API/GPUAdapterInfo/isFallbackAdapter), fixture counts, selected-node pixel checks, forced loss, fallback and recovery. The test exercises selection, 125% zoom and scrolling. It records 24 animation-frame intervals while redrawing the benchmark at that zoom. These are end-to-end frame intervals for this workload and build.
+
+Strict mode requires a reported non-fallback adapter, successful selected-node GPU readback before and after recovery, verified Canvas2D fallback after loss, an unchanged view, and 24 positive timing samples. Keep the report and a screenshot or recording from the target when recording the result. The hosted Windows CI uses `-RendererBenchmark` without the strict flag so a confirmed unavailable adapter can pass the fallback coverage. On Linux use `--renderer-smoke` or `--renderer-smoke --require-gpu` directly with the native executable.
+
 ## Observations
 
 | Check | Observed result |
@@ -76,5 +88,7 @@ Open **Renderer benchmark** in the native shell. The deterministic fixture has 2
 | Hosted Windows fallback | WebView2 157.0.4341.46 ran the embedded app, verified the scene and selected-node pixels, and reported `adapter_unavailable`. [Windows CI evidence](https://github.com/sdhaight1-hash/ConWorld-Tools/actions/runs/44832568493/job/136620893121). |
 | 2,000-node workload | Three fallback browser tests passed, including selection of the final benchmark node. The [embedded Linux capture](../Development-Screenshots/2026-11-20_23-13-39Z_phase-00_renderer_benchmark-canvas-fallback_01.png) records the full benchmark viewport with WebGPU unavailable. |
 | Accelerated benchmark | The WASM renderer built and passed Clippy for `wasm32-unknown-unknown`. Both local Chromium builds exposed a software adapter and lost the device before stable presentation. A separate minimal WebGPU clear also lost its device in this environment. Hardware rendering, successful recovery and timing measurements are unverified. |
+
+A repeat Linux WebKitGTK 2.54.0 run verified 2,000 nodes, 3,910 edges, Canvas2D pixels and preserved selection, zoom and scroll. Strict mode exited with failure as expected when the WebGPU API was unavailable. The Chromium software-adapter test again lost its accelerated canvas before stable presentation.
 
 The Phase Zero exit still requires exercising the wgpu/WASM graph on GPU-capable Windows WebView2, or establishing a target platform limitation and verifying the fallback there. The branch/time, world identity, transaction and publishing choices are documented contracts for later runtime tests.
