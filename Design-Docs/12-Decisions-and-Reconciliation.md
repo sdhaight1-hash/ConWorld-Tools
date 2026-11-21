@@ -55,7 +55,7 @@ The older files are historical design inputs, **not alternate live specification
 14. **Uncertain date versus exact surrogate:** store uncertainty and 3-valued query result; never invent a day from year-only input.
 15. **Large one-shot program versus vertical proofs:** coherent architecture now, small tested milestones in issues.
 
-The [Phase Zero architecture baseline](ADRs/phase-0-architecture-baseline.md) records the implemented shell and initial decisions for ADR-001, ADR-002, ADR-005, ADR-006, ADR-007 and ADR-011. The [verification log](Phase-0-Verification.md) records platform evidence and open gates.
+The [Phase Zero architecture baseline](ADRs/phase-0-architecture-baseline.md) records the implemented shell and initial decisions for ADR-001, ADR-002, ADR-005, ADR-006, ADR-007 and ADR-011. The [verification log](Phase-0-Verification.md) records platform evidence and open gates. The [Phase One persistence ADR](ADRs/phase-1-persistence-slice.md) records the initial storage and historical-state behavior.
 
 ## Open decisions requiring specific ADRs
 

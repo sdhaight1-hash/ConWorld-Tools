@@ -4,7 +4,7 @@
 
 ## Mission
 
-Implement the ConWorld Tools / Living History Atlas architecture in this repository, following [Design-Docs/README](README.md) and the numbered GitHub **Roadmap Phase N** issues. See the [Phase Zero verification log](Phase-0-Verification.md) and current tests for implementation and runtime evidence.
+Implement the ConWorld Tools / Living History Atlas architecture in this repository, following [Design-Docs/README](README.md) and the numbered GitHub **Roadmap Phase N** issues. See the [Phase Zero verification log](Phase-0-Verification.md), the [Phase One foundation](Phase-Foundation.md), and current tests for implementation evidence.
 
 ## Mandatory preflight
 

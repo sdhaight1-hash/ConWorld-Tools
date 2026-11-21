@@ -4,6 +4,8 @@
 
 The roadmap is **dependency ordered**, not an invitation to build all systems in parallel. Every phase first settles its architecture, then implements a tested narrow vertical slice. Preserve the full future model without implementing speculative flexibility.
 
+See the [implementation foundation](Phase-Foundation.md) for current evidence and shared contracts across all phases.
+
 ## Active roadmap issues
 
 - [Roadmap Phase 0 — Architecture Baseline & Platform Feasibility](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/1)

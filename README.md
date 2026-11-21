@@ -39,7 +39,7 @@ That same history can be explored through a graph, searched by date or affiliati
 
 The selected architectural direction is **Rust** for the authoritative domain, data, history, and query systems; **HTML/CSS/TypeScript** within **Tauri 2** for the desktop interface; **wgpu** for accelerated graph/map/timeline visualization where supported; and **SQLite** for local, versioned world storage. The GPU/webview integration must be validated, with an accessible non-GPU fallback. External AI and NPC-simulation integration is optional rather than required to use the application.
 
-This is a **design-first project**, not a claim that these capabilities are already implemented. Work is organized into dependency-ordered roadmap phases, with acceptance tests and observable results required before a feature is marked complete. The detailed source of truth is [the design documentation index](Design-Docs/README.md); see also the [product charter](Design-Docs/00-Product-Charter.md), [system architecture](Design-Docs/02-System-Architecture.md), [three-layer entry design](Design-Docs/06-Three-Layer-Entries-and-Canvas.md), and [delivery roadmap](Design-Docs/10-Delivery-Roadmap.md).
+The workspace includes the Phase Zero desktop shell and the Phase One Rust/SQLite persistence library. See the [repository audit and implementation foundation](Design-Docs/Phase-Foundation.md) for the roadmap dependencies, current behavior, and verification commands. The [design documentation index](Design-Docs/README.md) remains the source for the full application design.
 
 ### Phase Zero desktop shell
 
