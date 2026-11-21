@@ -20,6 +20,18 @@ use crate::*;
 pub(crate) const APPLICATION_ID: i64 = 0x4357_4c44; // CWLD
 pub(crate) const SCHEMA_VERSION: i64 = 18;
 
+// Candidate queries bind world (?1), focus/phrase (?2), author revision (?3),
+// limit (?4) and branch (?5). Follow only immutable inherited revisions.
+// This is a conservative candidate set; resolve_object remains authoritative
+// for selected fictional day, branch overrides and latest corrected state.
+const QUERY_LINEAGE: &str = "WITH RECURSIVE lineage(branch_id, max_revision) AS (
+    VALUES (?5, ?3)
+    UNION ALL
+    SELECT f.parent_id, f.inherited_revision
+    FROM branch_forks f JOIN lineage l ON f.branch_id = l.branch_id
+    WHERE f.world_id = ?1 AND f.created_revision <= l.max_revision
+) ";
+
 pub struct Store {
     conn: Connection,
     query_control: RefCell<Option<QueryControl>>,
@@ -453,20 +465,29 @@ impl Store {
         let candidates = {
             let sql = if by_participant {
                 "SELECT DISTINCT involvement_id FROM event_involvement_versions
-                 WHERE world_id = ?1 AND participant_id = ?2
-                 ORDER BY involvement_id LIMIT ?3"
+                 WHERE world_id = ?1 AND participant_id = ?2 AND revision <= ?3
+                   AND EXISTS (SELECT 1 FROM lineage l
+                       WHERE l.branch_id = event_involvement_versions.branch_id
+                       AND event_involvement_versions.revision <= l.max_revision)
+                 ORDER BY involvement_id LIMIT ?4"
             } else {
                 "SELECT DISTINCT involvement_id FROM event_involvement_versions
-                 WHERE world_id = ?1 AND event_id = ?2
-                 ORDER BY involvement_id LIMIT ?3"
+                 WHERE world_id = ?1 AND event_id = ?2 AND revision <= ?3
+                   AND EXISTS (SELECT 1 FROM lineage l
+                       WHERE l.branch_id = event_involvement_versions.branch_id
+                       AND event_involvement_versions.revision <= l.max_revision)
+                 ORDER BY involvement_id LIMIT ?4"
             };
-            let mut statement = tx.prepare(sql)?;
+            let sql = format!("{QUERY_LINEAGE}{sql}");
+            let mut statement = tx.prepare(&sql)?;
             statement
                 .query_map(
                     params![
                         view.world.0.as_bytes(),
                         focus.id.0.as_bytes(),
-                        RAW_BUDGET + 1
+                        view.revision.0,
+                        RAW_BUDGET + 1,
+                        view.branch.0.as_bytes()
                     ],
                     |row| row.get::<_, [u8; 16]>(0),
                 )?
@@ -585,22 +606,35 @@ impl Store {
             Direction::Outgoing => {
                 "SELECT DISTINCT relationship_id FROM relationship_versions
                  WHERE world_id = ?1 AND subject_id = ?2 AND revision <= ?3
+                   AND EXISTS (SELECT 1 FROM lineage l
+                       WHERE l.branch_id = relationship_versions.branch_id
+                       AND relationship_versions.revision <= l.max_revision)
                  ORDER BY relationship_id LIMIT ?4"
             }
             Direction::Incoming => {
                 "SELECT DISTINCT relationship_id FROM relationship_versions
                  WHERE world_id = ?1 AND target_id = ?2 AND revision <= ?3
+                   AND EXISTS (SELECT 1 FROM lineage l
+                       WHERE l.branch_id = relationship_versions.branch_id
+                       AND relationship_versions.revision <= l.max_revision)
                  ORDER BY relationship_id LIMIT ?4"
             }
             Direction::Both => {
                 "SELECT relationship_id FROM relationship_versions
                  WHERE world_id = ?1 AND subject_id = ?2 AND revision <= ?3
+                   AND EXISTS (SELECT 1 FROM lineage l
+                       WHERE l.branch_id = relationship_versions.branch_id
+                       AND relationship_versions.revision <= l.max_revision)
                  UNION
                  SELECT relationship_id FROM relationship_versions
                  WHERE world_id = ?1 AND target_id = ?2 AND revision <= ?3
+                   AND EXISTS (SELECT 1 FROM lineage l
+                       WHERE l.branch_id = relationship_versions.branch_id
+                       AND relationship_versions.revision <= l.max_revision)
                  ORDER BY relationship_id LIMIT ?4"
             }
         };
+        let sql = format!("{QUERY_LINEAGE}{sql}");
         let mut remaining = 10_000_usize;
         let mut visited = HashSet::from([*start]);
         let mut queue = VecDeque::from([(*start, 0_u8)]);
@@ -612,14 +646,15 @@ impl Store {
                 continue;
             }
             let candidates = {
-                let mut statement = tx.prepare_cached(sql)?;
+                let mut statement = tx.prepare_cached(&sql)?;
                 statement
                     .query_map(
                         params![
                             view.world.0.as_bytes(),
                             node.id.0.as_bytes(),
                             view.revision.0,
-                            (remaining + 1) as i64
+                            (remaining + 1) as i64,
+                            view.branch.0.as_bytes()
                         ],
                         |row| row.get::<_, [u8; 16]>(0),
                     )?
@@ -724,45 +759,76 @@ impl Store {
         }
         const CANDIDATE_BUDGET: usize = 10_000;
         let candidates = {
-            let mut statement = tx.prepare(
-                "SELECT object_id FROM object_versions
+            let sql = "SELECT object_id FROM object_versions
                  WHERE world_id = ?1 AND source_id = ?2 AND revision <= ?3
+                   AND EXISTS (SELECT 1 FROM lineage l
+                       WHERE l.branch_id = object_versions.branch_id
+                       AND object_versions.revision <= l.max_revision)
                  UNION
                  SELECT relationship_id FROM relationship_versions
                  WHERE world_id = ?1 AND subject_id = ?2 AND revision <= ?3
+                   AND EXISTS (SELECT 1 FROM lineage l
+                       WHERE l.branch_id = relationship_versions.branch_id
+                       AND relationship_versions.revision <= l.max_revision)
                  UNION
                  SELECT relationship_id FROM relationship_versions
                  WHERE world_id = ?1 AND target_id = ?2 AND revision <= ?3
+                   AND EXISTS (SELECT 1 FROM lineage l
+                       WHERE l.branch_id = relationship_versions.branch_id
+                       AND relationship_versions.revision <= l.max_revision)
                  UNION
                  SELECT involvement_id FROM event_involvement_versions
                  WHERE world_id = ?1 AND event_id = ?2 AND revision <= ?3
+                   AND EXISTS (SELECT 1 FROM lineage l
+                       WHERE l.branch_id = event_involvement_versions.branch_id
+                       AND event_involvement_versions.revision <= l.max_revision)
                  UNION
                  SELECT involvement_id FROM event_involvement_versions
                  WHERE world_id = ?1 AND participant_id = ?2 AND revision <= ?3
+                   AND EXISTS (SELECT 1 FROM lineage l
+                       WHERE l.branch_id = event_involvement_versions.branch_id
+                       AND event_involvement_versions.revision <= l.max_revision)
                  UNION
                  SELECT involvement_id FROM event_involvement_versions
                  WHERE world_id = ?1 AND role_definition_id = ?2 AND revision <= ?3
+                   AND EXISTS (SELECT 1 FROM lineage l
+                       WHERE l.branch_id = event_involvement_versions.branch_id
+                       AND event_involvement_versions.revision <= l.max_revision)
                  UNION
                  SELECT action_id FROM actor_action_versions
                  WHERE world_id = ?1 AND event_id = ?2 AND revision <= ?3
+                   AND EXISTS (SELECT 1 FROM lineage l
+                       WHERE l.branch_id = actor_action_versions.branch_id
+                       AND actor_action_versions.revision <= l.max_revision)
                  UNION
                  SELECT action_id FROM actor_action_versions
                  WHERE world_id = ?1 AND actor_id = ?2 AND revision <= ?3
+                   AND EXISTS (SELECT 1 FROM lineage l
+                       WHERE l.branch_id = actor_action_versions.branch_id
+                       AND actor_action_versions.revision <= l.max_revision)
                  UNION
                  SELECT action_id FROM actor_action_versions
                  WHERE world_id = ?1 AND target_id = ?2 AND revision <= ?3
+                   AND EXISTS (SELECT 1 FROM lineage l
+                       WHERE l.branch_id = actor_action_versions.branch_id
+                       AND actor_action_versions.revision <= l.max_revision)
                  UNION
                  SELECT claim_id FROM claim_versions
                  WHERE world_id = ?1 AND subject_id = ?2 AND revision <= ?3
-                 ORDER BY 1 LIMIT ?4",
-            )?;
+                   AND EXISTS (SELECT 1 FROM lineage l
+                       WHERE l.branch_id = claim_versions.branch_id
+                       AND claim_versions.revision <= l.max_revision)
+                 ORDER BY 1 LIMIT ?4";
+            let sql = format!("{QUERY_LINEAGE}{sql}");
+            let mut statement = tx.prepare(&sql)?;
             statement
                 .query_map(
                     params![
                         view.world.0.as_bytes(),
                         target.id.0.as_bytes(),
                         view.revision.0,
-                        (CANDIDATE_BUDGET + 1) as i64
+                        (CANDIDATE_BUDGET + 1) as i64,
+                        view.branch.0.as_bytes()
                     ],
                     |row| row.get::<_, [u8; 16]>(0),
                 )?
@@ -857,23 +923,34 @@ impl Store {
                  FROM claim_search_fts
                  JOIN claim_search_documents d ON d.doc_id = claim_search_fts.rowid
                  WHERE d.world_id = ?1 AND claim_search_fts MATCH ?2
+                   AND d.revision <= ?3 AND EXISTS (
+                       SELECT 1 FROM lineage l WHERE l.branch_id = d.branch_id
+                       AND d.revision <= l.max_revision
+                   )
                  ORDER BY d.claim_id, d.branch_id, d.state_revision, d.revision
-                 LIMIT ?3"
+                 LIMIT ?4"
             } else {
                 "SELECT d.object_id, d.branch_id, d.state_revision, d.revision
                  FROM object_search_fts
                  JOIN object_search_documents d ON d.doc_id = object_search_fts.rowid
                  WHERE d.world_id = ?1 AND object_search_fts MATCH ?2
+                   AND d.revision <= ?3 AND EXISTS (
+                       SELECT 1 FROM lineage l WHERE l.branch_id = d.branch_id
+                       AND d.revision <= l.max_revision
+                   )
                  ORDER BY d.object_id, d.branch_id, d.state_revision, d.revision
-                 LIMIT ?3"
+                 LIMIT ?4"
             };
-            let mut statement = tx.prepare(sql)?;
+            let sql = format!("{QUERY_LINEAGE}{sql}");
+            let mut statement = tx.prepare(&sql)?;
             statement
                 .query_map(
                     params![
                         view.world.0.as_bytes(),
                         match_expression,
-                        CANDIDATE_BUDGET + 1
+                        view.revision.0,
+                        CANDIDATE_BUDGET + 1,
+                        view.branch.0.as_bytes()
                     ],
                     |row| {
                         Ok((
