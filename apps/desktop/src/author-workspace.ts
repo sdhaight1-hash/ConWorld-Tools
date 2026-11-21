@@ -1021,8 +1021,10 @@ export async function showAuthorWorkspace(
         active: field<HTMLInputElement>(aliasForm, "active").checked,
       },
     });
+    const personId = value(aliasForm, "person_id");
+    aliasForm.reset();
+    field<HTMLSelectElement>(aliasForm, "person_id").value = personId;
     field<HTMLSelectElement>(aliasForm, "alias_id").value = "";
-    field<HTMLInputElement>(aliasForm, "label").value = "";
   });
   bind(relationshipForm, async (context) => {
     await invoke("workspace_create_relationship", { request: {
