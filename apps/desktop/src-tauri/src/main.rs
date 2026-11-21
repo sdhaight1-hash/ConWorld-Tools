@@ -223,6 +223,8 @@ fn main() {
             workspace::workspace_preview_author_layout,
             workspace::workspace_save_layout,
             workspace::workspace_public_entry,
+            workspace::workspace_author_entry_backlinks,
+            workspace::workspace_public_entry_backlinks,
             workspace::workspace_search_public_entry,
             workspace::workspace_search_public_pages,
             workspace::workspace_create_person,

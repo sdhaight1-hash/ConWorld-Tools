@@ -1627,3 +1627,96 @@ test("character canvas pins a private saved query and previews typed overrides",
   await expect(inspector.getByText("Public biography", { exact: true })).toBeVisible();
   await expect(inspector.getByRole("table", { name: "Private query table" })).toHaveCount(0);
 });
+
+test("authored links save stable targets and reader navigation reauthorizes each page", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "archive", name: "River Archive", revision: 4 };
+    const people = [{ id: "alice", label: "Alice" }, { id: "beatrice", label: "Beatrice" }];
+    const calls: { command: string; payload: unknown }[] = [];
+    let saved: unknown = null;
+    let released = true;
+    Object.assign(window, {
+      isTauri: true, __linkCalls: calls, __withdrawTarget: () => { released = false; },
+      __TAURI_INTERNALS__: {
+        invoke: async (command: string, payload: { day?: number; entryId?: string; document?: unknown; published?: boolean }) => {
+          if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+          if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+          if (command === "workspace_worlds") return [world];
+          if (command === "workspace_snapshot") return {
+            world, day: payload.day ?? 0, view_revision: world.revision, people,
+            relationships: [], events: [], definitions: [],
+          };
+          if (command === "workspace_saved_queries") return [];
+          if (command === "workspace_entry_layout") return saved;
+          if (command === "workspace_save_layout") {
+            calls.push({ command, payload });
+            saved = [payload.document, payload.published];
+            world.revision++;
+            return null;
+          }
+          if (command === "workspace_public_entry") {
+            calls.push({ command, payload });
+            if (payload.entryId === "beatrice") return released ? { content: { Text: "Beatrice publication" } } : null;
+            return { content: { Stack: [
+              { content: { Text: "Alice publication" } },
+              ...(released ? [{ content: { ObjectLink: { target: { world: "archive", id: "beatrice" }, label: "Read Beatrice" } } }] : []),
+            ] } };
+          }
+          if (command === "workspace_public_entry_backlinks" || command === "workspace_author_entry_backlinks") {
+            calls.push({ command, payload });
+            return { matches: [{ source: { world: "archive", id: "alice" }, element: "link", label: "Read Beatrice" }], truncated: false };
+          }
+          throw new Error("Unexpected mock command: " + command);
+        },
+      },
+    });
+  });
+  await page.goto("/");
+  const graph = page.getByRole("region", { name: "Saved world graph" });
+  const inspector = graph.getByRole("complementary", { name: "Node inspector" });
+  await graph.locator("#nodes button[data-node=alice]").click();
+  await inspector.getByRole("button", { name: "Open character page" }).click();
+  await inspector.getByRole("textbox", { name: "Page text", exact: true }).fill("Alice publication");
+  await inspector.getByRole("button", { name: "Add entry link" }).click();
+  await inspector.getByLabel("Link target identity").fill("beatrice");
+  await inspector.getByLabel("Link caption").fill("Read Beatrice");
+  await inspector.getByLabel("Link audience").selectOption("Public");
+  await inspector.getByLabel("Publish page text").check();
+  await inspector.getByRole("button", { name: "Save page" }).click();
+  await inspector.getByRole("button", { name: "Open character page" }).click();
+  await expect(inspector.getByLabel("Link target identity")).toHaveValue("beatrice");
+  await inspector.getByRole("button", { name: "Find authored backlinks" }).click();
+  await expect(inspector.getByText("1 authored references.", { exact: true })).toBeVisible();
+  await inspector.getByRole("button", { name: "View current public page" }).click();
+  await inspector.getByRole("button", { name: "Read Beatrice", exact: true }).click();
+  await expect(inspector.getByText("Beatrice publication", { exact: true })).toBeVisible();
+  await inspector.getByRole("button", { name: "Find published backlinks" }).click();
+  await expect(inspector.getByRole("button", { name: "Referenced by: Read Beatrice" })).toBeVisible();
+  if (process.env.ATLAS_CAPTURE_PHASE3 === "1") {
+    const timestamp = new Date().toISOString().slice(0, 19).replace("T", "_").replaceAll(":", "-") + "Z";
+    await inspector.screenshot({
+      path: "../../Development-Screenshots/" + timestamp + "_phase-04_links_mock-native-reader-backlinks_01.png",
+      animations: "disabled",
+    });
+  }
+  await inspector.getByRole("button", { name: "Back to previous page" }).click();
+  await expect(inspector.getByText("Alice publication", { exact: true })).toBeVisible();
+  await page.evaluate(() => (window as unknown as { __withdrawTarget: () => void }).__withdrawTarget());
+  await inspector.getByRole("button", { name: "Read Beatrice", exact: true }).click();
+  await expect(inspector.getByText("Unpublished at this date.", { exact: true })).toBeVisible();
+  const calls = await page.evaluate(() => (window as unknown as {
+    __linkCalls: { command: string; payload: unknown }[];
+  }).__linkCalls);
+  const save = calls.find(call => call.command === "workspace_save_layout")!.payload as {
+    document: { root: { content: { Stack: unknown[] } } };
+  };
+  expect(save.document.root.content.Stack[2]).toMatchObject({
+    audience: "Public", content: { ObjectLink: { target: { world: "archive", id: "beatrice" }, label: "Read Beatrice" } },
+  });
+  expect(calls.filter(call => call.command === "workspace_public_entry").map(call => call.payload)).toEqual([
+    { worldId: "archive", day: 0, entryId: "alice" },
+    { worldId: "archive", day: 0, entryId: "beatrice" },
+    { worldId: "archive", day: 0, entryId: "alice" },
+    { worldId: "archive", day: 0, entryId: "beatrice" },
+  ]);
+});

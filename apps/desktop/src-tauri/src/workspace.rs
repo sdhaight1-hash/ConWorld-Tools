@@ -2283,6 +2283,63 @@ pub fn workspace_public_entry(
 }
 
 #[tauri::command]
+pub async fn workspace_author_entry_backlinks(
+    app: AppHandle,
+    request_id: String,
+    world_id: String,
+    entry_id: String,
+    day: i64,
+    revision: i64,
+) -> Result<atlas_store::layout::EntryBacklinks, String> {
+    run_query_job(app, request_id, move |workspace, control| {
+        let store = workspace.lock()?;
+        let world = store
+            .world(WorldId(id(&world_id)?), Scope::Author)
+            .map_err(|e| e.to_string())?;
+        store
+            .entry_backlinks(
+                ViewContext {
+                    revision: AuthorRevision(revision),
+                    ..view(&world, day)
+                },
+                reference(world.id, &entry_id)?,
+                50,
+                control,
+            )
+            .map_err(|e| e.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn workspace_public_entry_backlinks(
+    app: AppHandle,
+    request_id: String,
+    world_id: String,
+    entry_id: String,
+    day: i64,
+) -> Result<atlas_store::layout::EntryBacklinks, String> {
+    run_query_job(app, request_id, move |workspace, control| {
+        let store = workspace.lock()?;
+        let world = store
+            .world(WorldId(id(&world_id)?), Scope::Author)
+            .map_err(|e| e.to_string())?;
+        store
+            .entry_backlinks(
+                ViewContext {
+                    scope: Scope::Public,
+                    ..view(&world, day)
+                },
+                reference(world.id, &entry_id)?,
+                50,
+                control,
+            )
+            .map_err(|e| e.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
 pub fn workspace_search_public_entry(
     workspace: State<'_, AuthorWorkspace>,
     world_id: String,

@@ -27,6 +27,8 @@ fn main() {
             "workspace_preview_author_layout",
             "workspace_save_layout",
             "workspace_public_entry",
+            "workspace_author_entry_backlinks",
+            "workspace_public_entry_backlinks",
             "workspace_search_public_entry",
             "workspace_search_public_pages",
             "workspace_create_person",

@@ -115,3 +115,11 @@ jobs:
           path: Development-Screenshots/*_phase-04_canvas_mock-native-saved-binding_01.png
           if-no-files-found: error
           retention-days: 30
+      - name: Upload Phase 4 reader backlinks browser capture
+        if: runner.os == 'Linux' && success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: phase-04-browser-reader-links
+          path: Development-Screenshots/*_phase-04_links_mock-native-reader-backlinks_01.png
+          if-no-files-found: error
+          retention-days: 30

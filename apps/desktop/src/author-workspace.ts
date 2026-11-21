@@ -1,5 +1,6 @@
 import { openFamilyHistory } from "./family-history";
 import { openEntryEditor } from "./entry-editor";
+import { publicReader, type Backlinks } from "./public-reader";
 import { invoke } from "@tauri-apps/api/core";
 import type { Scene } from "./main";
 
@@ -456,7 +457,12 @@ export async function showAuthorWorkspace(
       button("Open character page", () => {
         panel.replaceChildren();
         void openEntryEditor(panel, current.world.id, id, current.day, current.view_revision,
-          !revisionInput.value.trim(), async () => { await refresh(); selectNode(id); });
+          !revisionInput.value.trim(), async () => { await refresh(); selectNode(id); }, people,
+          target => {
+            panel.replaceChildren();
+            void openEntryEditor(panel, current.world.id, target, current.day, current.view_revision,
+              !revisionInput.value.trim(), async () => { await refresh(); selectNode(target); }, people);
+          });
       });
     }
     if (event) {
@@ -552,7 +558,6 @@ export async function showAuthorWorkspace(
     publicCancel.hidden = false;
     publicStatus.textContent = "Searching current published pages…";
     type Hit = { entry: { world: string; id: string }; element: string; text: string };
-    type PublicDisplay = { content: { Text?: string; Stack?: PublicDisplay[] } };
     try {
       const found = await invoke<{ matches: Hit[]; truncated: boolean }>(
         "workspace_search_public_pages", { worldId, day, text, requestId });
@@ -566,33 +571,11 @@ export async function showAuthorWorkspace(
         const open = document.createElement("button");
         open.type = "button";
         open.textContent = "Read published page";
-        open.addEventListener("click", async () => {
+        open.addEventListener("click", () => {
           const preview = ++publicPreviewSequence;
-          publicPreview.textContent = "Loading current publication…";
-          try {
-            const page = await invoke<PublicDisplay | null>("workspace_public_entry",
-              { worldId, day, entryId: hit.entry.id });
-            if (sequence !== publicSequence || preview !== publicPreviewSequence) return;
-            publicPreview.replaceChildren();
-            if (!page) {
-              clearPublicSearch();
-              publicStatus.textContent = "Publication changed. Search again.";
-              return;
-            }
-            function render(node: PublicDisplay) {
-              if (node.content.Text !== undefined) {
-                const p = document.createElement("p");
-                p.textContent = node.content.Text;
-                publicPreview.append(p);
-              }
-              node.content.Stack?.forEach(render);
-            }
-            render(page);
-          } catch (error) {
-            if (sequence === publicSequence && preview === publicPreviewSequence) {
-              publicPreview.textContent = String(error);
-            }
-          }
+          void publicReader(publicPreview, worldId, day,
+            () => sequence === publicSequence && preview === publicPreviewSequence,
+            () => { clearPublicSearch(); publicStatus.textContent = "Publication changed. Search again."; }).open(hit.entry.id);
         });
         item.append(passage, open);
         publicResults.append(item);
@@ -810,7 +793,12 @@ export async function showAuthorWorkspace(
               if (!current || sequence !== querySequence) return;
               pageButton.disabled = true;
               void openEntryEditor(item, current.world.id, row.id, current.day, current.view_revision,
-                !revisionInput.value.trim(), refresh);
+                !revisionInput.value.trim(), refresh, current.people, target => {
+                  if (sequence !== querySequence) return;
+                  item.replaceChildren();
+                  void openEntryEditor(item, current.world.id, target, current.day, current.view_revision,
+                    !revisionInput.value.trim(), refresh, current.people);
+                });
             });
             item.append(pageButton);
             item.append(focus);
@@ -822,6 +810,47 @@ export async function showAuthorWorkspace(
           references.setAttribute("aria-label", "Find references to " + row.label + " " + row.id);
           references.addEventListener("click", () => runSearch("backlinks", row.id));
           item.append(references);
+          const authored = document.createElement("button");
+          authored.type = "button";
+          authored.textContent = "Find authored page links";
+          authored.addEventListener("click", async () => {
+            const current = snapshot;
+            if (!current || sequence !== querySequence) return;
+            authored.disabled = true;
+            try {
+              const found = await invoke<Backlinks>("workspace_author_entry_backlinks", {
+                worldId: current.world.id, entryId: row.id, day: current.day,
+                revision: current.view_revision, requestId: crypto.randomUUID(),
+              });
+              if (sequence !== querySequence || !item.isConnected) return;
+              const list = document.createElement("ul");
+              for (const match of found.matches) {
+                const li = document.createElement("li");
+                const open = document.createElement("button");
+                open.type = "button";
+                open.textContent = match.label + " · " + match.source.id;
+                open.addEventListener("click", () => {
+                  if (sequence !== querySequence) return;
+                  item.replaceChildren();
+                  void openEntryEditor(item, current.world.id, match.source.id, current.day,
+                    current.view_revision, !revisionInput.value.trim(), refresh, current.people);
+                });
+                li.append(open);
+                list.append(li);
+              }
+              const status = document.createElement("p");
+              status.textContent = found.truncated ? "First 50 authored references." : found.matches.length + " authored references.";
+              item.append(status, list);
+            } catch (error) {
+              if (sequence === querySequence && item.isConnected) {
+                authored.disabled = false;
+                const status = document.createElement("p");
+                status.textContent = String(error);
+                item.append(status);
+              }
+            }
+          });
+          item.append(authored);
           if (row.kind === "claim") {
             const mentions = document.createElement("button");
             mentions.type = "button";
