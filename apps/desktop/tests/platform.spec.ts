@@ -1589,7 +1589,7 @@ test("character canvas pins a private saved query and previews typed overrides",
   const inspector = graph.getByRole("complementary", { name: "Node inspector" });
   await graph.locator("#nodes button[data-node=alice]").click();
   await graph.getByRole("button", { name: "Open character page" }).click();
-  await inspector.getByLabel("Page text").fill("Public biography");
+  await inspector.getByRole("textbox", { name: "Page text", exact: true }).fill("Public biography");
   await inspector.getByLabel("Private saved query").selectOption("saved@3");
   await inspector.getByLabel("exact 1").fill("Beatrice");
   await inspector.getByRole("button", { name: "Preview author layout" }).click();
