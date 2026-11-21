@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 type Block = { id: string; audience: string; content: { Text?: string; Stack?: Block[] } };
 type Document = { schema_version: number; entry: { world: string; id: string }; root: Block };
 type Display = { content: { Text?: string; Stack?: Display[] } };
+type EntrySearch = { matches: [string, string][]; truncated: boolean };
 
 export async function openEntryEditor(panel: HTMLElement, worldId: string, entryId: string,
   day: number, revision: number, editable: boolean, afterSave: () => Promise<void>) {
@@ -13,7 +14,11 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
     <label>Author notes <textarea name="notes"></textarea></label>
     <label><input type="checkbox" name="published"> Publish page text</label>
     <button>Save page</button></fieldset></form>
-    <button type="button">View current public page</button><div aria-live="polite"></div>`;
+    <button type="button">View current public page</button>
+    <form class="editor-form" data-public-search>
+      <label>Find in public page <input name="text" required maxlength="256"></label>
+      <button>Find</button>
+    </form><div aria-live="polite"></div>`;
   const form = host.querySelector("form")!;
   const fields = host.querySelector("fieldset")!;
   const body = form.elements.namedItem("body") as HTMLTextAreaElement;
@@ -21,9 +26,39 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
   const published = form.elements.namedItem("published") as HTMLInputElement;
   const result = host.querySelector("div")!;
   const args = { worldId, entryId, day };
+  let request = 0;
+  const find = host.querySelector<HTMLFormElement>("[data-public-search]")!;
+  find.addEventListener("input", () => { request++; result.replaceChildren(); });
+  find.addEventListener("submit", async event => {
+    event.preventDefault();
+    const text = (find.elements.namedItem("text") as HTMLInputElement).value.trim();
+    if (!text) return;
+    const current = ++request;
+    result.textContent = "Searching current public page…";
+    try {
+      const found = await invoke<EntrySearch | null>("workspace_search_public_entry", { ...args, text });
+      if (current !== request || !host.isConnected) return;
+      result.replaceChildren();
+      if (!found) { result.textContent = "Unpublished at this date."; return; }
+      const summary = document.createElement("p");
+      summary.textContent = found.truncated ? "Showing first 50 matching blocks." :
+        `${found.matches.length} matching blocks.`;
+      result.append(summary);
+      for (const [, text] of found.matches) {
+        const p = document.createElement("p");
+        p.textContent = text;
+        result.append(p);
+      }
+    } catch (error) {
+      if (current === request && host.isConnected) result.textContent = String(error);
+    }
+  });
   host.querySelector("button[type=button]")!.addEventListener("click", async () => {
+    const current = ++request;
+    result.textContent = "Loading current public page…";
     try {
       const display = await invoke<Display | null>("workspace_public_entry", args);
+      if (current !== request || !host.isConnected) return;
       result.replaceChildren();
       if (!display) result.textContent = "Unpublished at this date.";
       function render(node: Display) {
@@ -35,7 +70,9 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
         node.content.Stack?.forEach(render);
       }
       if (display) render(display);
-    } catch (error) { result.textContent = String(error); }
+    } catch (error) {
+      if (current === request && host.isConnected) result.textContent = String(error);
+    }
   });
   try {
     const saved = await invoke<[Document, boolean] | null>("workspace_entry_layout", { ...args, revision });

@@ -527,10 +527,39 @@ fn character_page_replays_author_queries_and_revokes_reader_access_after_restore
         visible[0].content,
         DisplayContent::Text("Gazette biography".into())
     );
+    let hits = store
+        .search_entry_text(public(published), entry, " GAZETTE ", 1)?
+        .unwrap();
+    assert_eq!(
+        hits.matches,
+        vec![(visible[0].id, "Gazette biography".into())]
+    );
+    assert!(!hits.truncated);
+    let hidden = store
+        .search_entry_text(public(published), entry, "Sealed testimony", 1)?
+        .unwrap();
+    assert!(hidden.matches.is_empty());
+    assert!(!hidden.truncated);
+    assert!(matches!(
+        store.search_entry_text(public(published), entry, "", 1),
+        Err(Error::InvalidInput(_))
+    ));
+    assert!(matches!(
+        store.search_entry_text(public(published), entry, "Gazette", 51),
+        Err(Error::InvalidInput(_))
+    ));
     let pinned = ViewContext {
         revision: published,
         ..author
     };
+    assert_eq!(
+        store
+            .search_entry_text(pinned, entry, "Sealed", 1)?
+            .unwrap()
+            .matches
+            .len(),
+        1
+    );
     let projected = store.display_entry(pinned, entry)?.unwrap();
     let DisplayContent::Stack(children) = projected.content else {
         panic!("expected root")
@@ -557,6 +586,15 @@ fn character_page_replays_author_queries_and_revokes_reader_access_after_restore
         Some((document, true))
     );
     assert!(restored.display_entry(public(revoked), entry)?.is_none());
+    assert!(
+        restored
+            .search_entry_text(public(revoked), entry, "Gazette", 1)?
+            .is_none()
+    );
+    assert!(matches!(
+        restored.search_entry_text(public(published), entry, "Gazette", 1),
+        Err(Error::InvalidRevision)
+    ));
     assert!(matches!(
         restored.display_entry(public(published), entry),
         Err(Error::InvalidRevision)

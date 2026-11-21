@@ -2258,6 +2258,31 @@ pub fn workspace_public_entry(
 }
 
 #[tauri::command]
+pub fn workspace_search_public_entry(
+    workspace: State<'_, AuthorWorkspace>,
+    world_id: String,
+    entry_id: String,
+    day: i64,
+    text: String,
+) -> Result<Option<atlas_store::layout::EntryTextSearch>, String> {
+    let store = workspace.lock()?;
+    let world = store
+        .world(WorldId(id(&world_id)?), Scope::Author)
+        .map_err(|e| e.to_string())?;
+    store
+        .search_entry_text(
+            ViewContext {
+                scope: Scope::Public,
+                ..view(&world, day)
+            },
+            reference(world.id, &entry_id)?,
+            &text,
+            50,
+        )
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn workspace_create_person(
     workspace: State<'_, AuthorWorkspace>,
     world_id: String,

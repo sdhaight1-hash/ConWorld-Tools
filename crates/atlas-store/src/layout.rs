@@ -54,6 +54,13 @@ pub enum DisplayContent {
     },
 }
 
+/// Matches are drawn only from the compiled, audience-authorized page.
+#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct EntryTextSearch {
+    pub matches: Vec<(ElementId, String)>,
+    pub truncated: bool,
+}
+
 impl LayoutDocument {
     pub fn validate(&self) -> Result<(), Error> {
         if self.schema_version != LAYOUT_SCHEMA_VERSION {

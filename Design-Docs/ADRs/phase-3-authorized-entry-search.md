@@ -1,0 +1,11 @@
+# Phase 3 — Authorized entry text search
+
+Status: implemented on development branch; validation pending. Tracks [Phase 3 #4](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/4) and [Phase 4 #5](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/5). Baseline `e48368f25bf75162c8647ffefac5599e71038567` (#49, stacked on #48).
+
+## Contract
+
+QRY-03, INV-15, AT-20 and AT-25 (partial). The persisted entry and its existing Rust Display projection are the sole authority. Search a single entry's compiled text blocks, not raw layout JSON, canonical labels, query-backed author rows, or FTS author documents. An unpublished or inaccessible entry returns no page, while a visible page with no matches returns an empty match list. Match ordering follows layout order. Case-insensitive literal substring matching; no ranking, regex, arbitrary SQL, graph counts, or hidden snippets. Stable element IDs identify matching blocks. Trimmed query length 1–256 bytes; 1–50 returned blocks, explicit truncation, existing layout depth/element/text bounds. No migration or cached results. Reader revision must be current, so unpublication invalidates subsequent reads, including after restore. Public IPC fixes scope at the trusted host and always resolves latest revision; the author editor exposes a reader preview with request-generation protection against stale responses. Character-specific global search and public query bindings remain unsupported. This is not a new global search index or a completed AT-25 gate.
+
+## Validation
+
+Extended existing persisted-layout integration regression: case-insensitive literal match, stable ID, author-only hidden text, input bounds, author view, restored revocation, refusal of old reader revision. Native desktop exposes search from the existing character page editor. Run `cargo fmt --all -- --check`, `cargo test -p atlas-store --test roadmap_foundations`, strict workspace Clippy, frontend build and native smoke. No local Rust toolchain/native host available in this session; CI and visual capture not yet verified. Do not close #4 or label a screenshot as native unless actually captured.

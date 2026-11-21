@@ -1,6 +1,6 @@
 //! Main-branch authored layouts and explicit, revocable publication.
 use super::*;
-use crate::layout::{DisplayElement, LayoutDocument};
+use crate::layout::{DisplayContent, DisplayElement, EntryTextSearch, LayoutDocument};
 
 impl Store {
     pub fn save_entry_layout(
@@ -76,6 +76,44 @@ impl Store {
             return Ok(None);
         };
         document.compile(self, view)
+    }
+
+    /// Find literal, case-insensitive text within a single authorized entry.
+    /// Never search stored layout JSON or the author full-text index.
+    pub fn search_entry_text(
+        &self,
+        view: ViewContext,
+        entry: ObjectRef,
+        text: &str,
+        limit: usize,
+    ) -> Result<Option<EntryTextSearch>, Error> {
+        let text = text.trim();
+        if text.is_empty() || text.len() > 256 || !(1..=50).contains(&limit) {
+            return Err(Error::InvalidInput("entry search text or limit"));
+        }
+        let needle = text.to_lowercase();
+        let Some(page) = self.display_entry(view, entry)? else {
+            return Ok(None);
+        };
+        let mut result = EntryTextSearch {
+            matches: Vec::new(),
+            truncated: false,
+        };
+        let mut pending = vec![page];
+        while let Some(element) = pending.pop() {
+            match element.content {
+                DisplayContent::Stack(children) => pending.extend(children.into_iter().rev()),
+                DisplayContent::Text(text) if text.to_lowercase().contains(&needle) => {
+                    if result.matches.len() == limit {
+                        result.truncated = true;
+                        break;
+                    }
+                    result.matches.push((element.id, text));
+                }
+                _ => {}
+            }
+        }
+        Ok(Some(result))
     }
 
     fn read_layout(

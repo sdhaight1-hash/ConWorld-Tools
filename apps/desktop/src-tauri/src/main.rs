@@ -222,6 +222,7 @@ fn main() {
             workspace::workspace_entry_layout,
             workspace::workspace_save_layout,
             workspace::workspace_public_entry,
+            workspace::workspace_search_public_entry,
             workspace::workspace_create_person,
             workspace::workspace_create_relationship,
             workspace::workspace_record_relationship_state,
