@@ -3,7 +3,10 @@ use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use crate::graph::walk;
-use crate::{AuthorRevision, Error, EventRole, ObjectData, ObjectRef, Scope, Store, Version, ViewContext, WorldId};
+use crate::{
+    AuthorRevision, Error, EventRole, ObjectData, ObjectRef, Scope, Store, Version, ViewContext,
+    WorldId,
+};
 
 pub const QUERY_SCHEMA_VERSION: u16 = 1;
 
