@@ -60,6 +60,40 @@ impl Store {
         Ok(AuthorRevision(revision))
     }
 
+    /// Compile an unsaved author draft without modifying publication or canonical state.
+    pub fn preview_author_layout(
+        &self,
+        view: ViewContext,
+        document: &LayoutDocument,
+        control: &QueryControl,
+    ) -> Result<Option<DisplayElement>, Error> {
+        require_author(view.scope)?;
+        if document.entry.world != view.world {
+            return Err(Error::WrongWorld);
+        }
+        document.validate()?;
+        let text =
+            serde_json::to_string(document).map_err(|_| Error::InvalidInput("layout encoding"))?;
+        if text.len() > 1_048_576 {
+            return Err(Error::QueryBudgetExceeded);
+        }
+        self.with_query_control(control, |store| {
+            {
+                let tx = store.conn.unchecked_transaction()?;
+                let world = load_world(&tx, view.world)?;
+                if world.main != view.branch {
+                    return Err(Error::CapabilityDenied);
+                }
+                if view.revision.0 < 0 || view.revision > world.revision {
+                    return Err(Error::InvalidRevision);
+                }
+                resolve_object(&tx, document.entry, view.branch, view.revision, view.day)?
+                    .ok_or(Error::NotFound)?;
+            }
+            document.compile(store, view)
+        })
+    }
+
     /// Editable definitions are author-only. Older author revisions remain reproducible.
     pub fn entry_layout(
         &self,

@@ -1540,3 +1540,90 @@ test("world public search opens only the current reader projection", async ({ pa
   await expect(search.getByText("0 matching public blocks.")).toBeVisible();
   await expect(search.getByText("Released context")).toHaveCount(0);
 });
+
+test("character canvas pins a private saved query and previews typed overrides", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "archive", name: "River Archive", revision: 4 };
+    const people = [{ id: "alice", label: "Alice" }];
+    const requests: { command: string; payload: unknown }[] = [];
+    let savedLayout: unknown = null;
+    Object.assign(window, {
+      isTauri: true,
+      __canvasBindingRequests: requests,
+      __TAURI_INTERNALS__: {
+        invoke: async (command: string, payload: { day?: number; revision?: number; document?: unknown; published?: boolean }) => {
+          if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+          if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+          if (command === "workspace_worlds") return [world];
+          if (command === "workspace_snapshot") return {
+            world, day: payload.day ?? 0, view_revision: world.revision, people,
+            relationships: [], events: [], definitions: [],
+          };
+          if (command === "workspace_saved_queries") return [{
+            id: "saved", name: "Find a person", mode: "exact", term: "Alice", limit: 10,
+            recorded_at: 3, parameters: [{ name: "exact_1", default: { type: "text", value: "Alice" } }],
+          }];
+          if (command === "workspace_entry_layout") return savedLayout;
+          if (command === "workspace_preview_author_layout") {
+            requests.push({ command, payload });
+            return { content: { Stack: [
+              { content: { Text: "Public biography" } },
+              { content: { QueryRows: { records: [[{ world: "archive", id: "beatrice" }, "Beatrice"]], truncated: false } } },
+            ] } };
+          }
+          if (command === "workspace_save_layout") {
+            requests.push({ command, payload });
+            savedLayout = [payload.document, payload.published];
+            world.revision++;
+            return null;
+          }
+          if (command === "workspace_public_entry") return { content: { Text: "Public biography" } };
+          if (command === "workspace_cancel_query") return null;
+          throw new Error("Unexpected mock command: " + command);
+        },
+      },
+    });
+  });
+  await page.goto("/");
+  const graph = page.getByRole("region", { name: "Saved world graph" });
+  const inspector = graph.getByRole("complementary", { name: "Node inspector" });
+  await graph.locator("#nodes button[data-node=alice]").click();
+  await graph.getByRole("button", { name: "Open character page" }).click();
+  await inspector.getByLabel("Page text").fill("Public biography");
+  await inspector.getByLabel("Private saved query").selectOption("saved@3");
+  await inspector.getByLabel("exact 1").fill("Beatrice");
+  await inspector.getByRole("button", { name: "Preview author layout" }).click();
+  await expect(inspector.getByRole("table", { name: "Private query table" })).toContainText("Beatrice");
+  if (process.env.ATLAS_CAPTURE_PHASE3 === "1") {
+    const timestamp = new Date().toISOString().slice(0, 19).replace("T", "_").replaceAll(":", "-") + "Z";
+    await inspector.screenshot({
+      path: "../../Development-Screenshots/" + timestamp + "_phase-04_canvas_mock-native-saved-binding_01.png",
+      animations: "disabled",
+    });
+  }
+  await inspector.getByLabel("Publish page text").check();
+  await inspector.getByRole("button", { name: "Save page" }).click();
+  await graph.getByRole("button", { name: "Open character page" }).click();
+  await expect(inspector.getByLabel("Private saved query")).toHaveValue("saved@3");
+  await expect(inspector.getByLabel("exact 1")).toHaveValue("Beatrice");
+  const requests = await page.evaluate(() => (window as unknown as {
+    __canvasBindingRequests: { command: string; payload: unknown }[];
+  }).__canvasBindingRequests);
+  const previews = requests.filter(request => request.command === "workspace_preview_author_layout");
+  const saves = requests.filter(request => request.command === "workspace_save_layout");
+  expect(previews).toHaveLength(1);
+  expect(saves).toHaveLength(1);
+  const preview = previews[0].payload as { revision: number; document: { root: { content: { Stack: unknown[] } } } };
+  const save = saves[0].payload as { expectedRevision: number; published: boolean; document: typeof preview.document };
+  expect(preview.revision).toBe(4);
+  expect(save.expectedRevision).toBe(4);
+  expect(save.published).toBe(true);
+  expect(save.document.root.content.Stack[2]).toEqual(preview.document.root.content.Stack[2]);
+  expect(save.document.root.content.Stack[2]).toMatchObject({
+    audience: "Author", content: { SavedQuery: { world: "archive", query_id: "saved",
+      definition_revision: 3, bindings: [{ name: "exact_1", value: { type: "text", value: "Beatrice" } }] } },
+  });
+  await inspector.getByRole("button", { name: "View current public page" }).click();
+  await expect(inspector.getByText("Public biography", { exact: true })).toBeVisible();
+  await expect(inspector.getByRole("table", { name: "Private query table" })).toHaveCount(0);
+});

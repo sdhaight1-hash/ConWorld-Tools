@@ -33,10 +33,10 @@ type Predicate = { op: "contains" | "exact" | "exact_alias" | "full_text" | "cla
   { op: "has_source"; source_id: string } |
   { op: "and" | "or"; filters: Predicate[] } |
   { op: "not"; filter: Predicate };
-type ParameterValue = { type: "text" | "object_kind"; value: string } |
+export type ParameterValue = { type: "text" | "object_kind"; value: string } |
   { type: "source"; world_id: string; source_id: string };
 type QueryParameter = { name: string; default: ParameterValue };
-type SavedQuery = { id: string; name: string; mode: "contains" | "exact" | "alias" | "fulltext" | "claimtext" | "composite";
+export type SavedQuery = { id: string; name: string; mode: "contains" | "exact" | "alias" | "fulltext" | "claimtext" | "composite";
   term: string; predicate?: Predicate | null; limit: number; recorded_at: number; parameters?: QueryParameter[] };
 type MentionDiscovery = { revision: number; truncated: boolean; rows: {
   source_id: string; source_branch: string; source_state_revision: number; source_revision: number;

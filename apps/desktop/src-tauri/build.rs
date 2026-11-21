@@ -24,6 +24,7 @@ fn main() {
             "workspace_record_parentage",
             "workspace_withdraw_parentage",
             "workspace_entry_layout",
+            "workspace_preview_author_layout",
             "workspace_save_layout",
             "workspace_public_entry",
             "workspace_search_public_entry",

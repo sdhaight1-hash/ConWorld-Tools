@@ -220,6 +220,7 @@ fn main() {
             workspace::workspace_record_parentage,
             workspace::workspace_withdraw_parentage,
             workspace::workspace_entry_layout,
+            workspace::workspace_preview_author_layout,
             workspace::workspace_save_layout,
             workspace::workspace_public_entry,
             workspace::workspace_search_public_entry,

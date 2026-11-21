@@ -1145,6 +1145,23 @@ fn saved_canvas_binding_pins_definition_and_replays_live_author_history() -> Res
             ]),
         ),
     };
+    let control = atlas_store::query::QueryControl::new(std::time::Duration::from_secs(5))?;
+    assert_eq!(
+        store.preview_author_layout(author, &doc, &control)?,
+        doc.compile(&store, author)?
+    );
+    assert!(store.entry_layout(author, entry)?.is_none());
+    assert!(matches!(
+        store.preview_author_layout(
+            ViewContext {
+                scope: Scope::Public,
+                ..author
+            },
+            &doc,
+            &control
+        ),
+        Err(Error::CapabilityDenied)
+    ));
     let direct = store.execute_query(&binding.resolve(&store, author)?, author)?;
     assert_eq!(direct.rows.len(), 1);
     assert_eq!(direct.rows[0].object, id(&world, 2));

@@ -2219,6 +2219,31 @@ pub fn workspace_entry_layout(
 }
 
 #[tauri::command]
+pub async fn workspace_preview_author_layout(
+    app: AppHandle,
+    request_id: String,
+    world_id: String,
+    day: i64,
+    revision: i64,
+    document: atlas_store::layout::LayoutDocument,
+) -> Result<Option<atlas_store::layout::DisplayElement>, String> {
+    run_query_job(app, request_id, move |workspace, control| {
+        let store = workspace.lock()?;
+        let world = store
+            .world(WorldId(id(&world_id)?), Scope::Author)
+            .map_err(|e| e.to_string())?;
+        let context = ViewContext {
+            revision: AuthorRevision(revision),
+            ..view(&world, day)
+        };
+        store
+            .preview_author_layout(context, &document, control)
+            .map_err(|e| e.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
 pub fn workspace_save_layout(
     workspace: State<'_, AuthorWorkspace>,
     world_id: String,

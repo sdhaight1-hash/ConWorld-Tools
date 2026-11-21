@@ -28,6 +28,7 @@
     "allow-workspace-record-parentage",
     "allow-workspace-withdraw-parentage",
     "allow-workspace-entry-layout",
+    "allow-workspace-preview-author-layout",
     "allow-workspace-save-layout",
     "allow-workspace-public-entry",
     "allow-workspace-search-public-entry",
