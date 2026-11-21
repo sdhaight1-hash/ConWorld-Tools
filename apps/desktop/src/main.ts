@@ -37,7 +37,7 @@ async function start() {
     link.href = location.pathname;
   }
   const graph = showScene(benchmark ? makeBenchmark() : response.scene, benchmark);
-  const historyVerified = await showHistory();
+  const historyVerified = await showHistory(response.smoke);
   const webgpu = await probeWebGpu();
   if (graph) renderer.textContent = `Canvas2D · ${webGpuLabels[webgpu]}`;
   if (benchmark && graph && webgpu === "available") void graph.tryGpu();
@@ -56,7 +56,7 @@ async function start() {
   }
 }
 
-async function showHistory(): Promise<boolean> {
+async function showHistory(smoke: boolean): Promise<boolean> {
   if (!isTauri()) return false;
   const section = document.querySelector<HTMLElement>("#history")!;
   const select = document.querySelector<HTMLSelectElement>("#history-year")!;
@@ -90,7 +90,7 @@ async function showHistory(): Promise<boolean> {
   const original = await refresh();
   if (!original) return false;
   // The platform smoke also verifies the event-attributed history path.
-  if (!new URLSearchParams(location.search).has("benchmark")) {
+  if (smoke) {
     select.value = "3652";
     const changed = await refresh();
     if (!changed || !cause.textContent?.includes("Northbridge folio 14")) return false;
