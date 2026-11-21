@@ -3,13 +3,13 @@
 //! Proposals have no write authority: text similarity is not a relationship,
 //! membership, parentage, or proven historical fact.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use uuid::Uuid;
 
 use crate::{
     AuthorRevision, Error, ObjectData, ObjectRef, Scope, Store, VersionRef, ViewContext, WorldDay,
-    WorldId,
+    WorldId, query::QueryControl,
 };
 
 /// Explicitly authored historical name metadata for a stable person identity,
@@ -92,14 +92,55 @@ pub struct MentionDiscovery {
     pub truncated: bool,
 }
 
+/// Which existing source previews must be discarded between exact views.
+/// A full refresh is necessary when the name dictionary or context changes.
+/// A source-only refresh replaces ALL candidates for each returned ID,
+/// including an empty result when a claim is no longer visible.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MentionRefresh {
+    Full,
+    Sources(Vec<ObjectRef>),
+}
+
 impl Store {
-    /// Examine a single authorized world/branch/day/recorded-revision snapshot.
-    /// This is a candidate preview, not automatic link or relationship creation.
-    /// The existing snapshot and comparison budgets are deliberate; larger
-    /// universes need the indexed mention pipeline planned in Phase 3.
+    /// Examine only relevant historical person and claim records.
     pub fn discover_mentions(
         &self,
         view: ViewContext,
+        limit: usize,
+    ) -> Result<MentionDiscovery, Error> {
+        self.discover_mentions_inner(view, None, limit)
+    }
+
+    /// Incremental preview of one claim; never reads unrelated claim statements.
+    pub fn discover_mentions_for_source(
+        &self,
+        view: ViewContext,
+        source: ObjectRef,
+        limit: usize,
+    ) -> Result<MentionDiscovery, Error> {
+        self.discover_mentions_inner(view, Some(source), limit)
+    }
+
+    pub fn discover_mentions_controlled(
+        &self,
+        view: ViewContext,
+        source: Option<ObjectRef>,
+        limit: usize,
+        control: &QueryControl,
+    ) -> Result<MentionDiscovery, Error> {
+        if view.scope != Scope::Author {
+            return Err(Error::CapabilityDenied);
+        }
+        self.with_query_control(control, |store| {
+            store.discover_mentions_inner(view, source, limit)
+        })
+    }
+
+    fn discover_mentions_inner(
+        &self,
+        view: ViewContext,
+        source: Option<ObjectRef>,
         limit: usize,
     ) -> Result<MentionDiscovery, Error> {
         if view.scope != Scope::Author {
@@ -108,29 +149,36 @@ impl Store {
         if !(1..=100).contains(&limit) {
             return Err(Error::InvalidInput("discovery result limit"));
         }
-        let versions = self.objects_at(view, 2_000)?;
-        let people: Vec<_> = versions
-            .iter()
-            .filter(|item| matches!(item.record.data, ObjectData::Person))
-            .collect();
-        let claims: Vec<_> = versions
-            .iter()
-            .filter_map(|item| match &item.record.data {
-                ObjectData::Claim { statement, .. } => Some((item, statement)),
-                _ => None,
-            })
-            .collect();
+        self.validate_query_view(view)?;
+        let claims = if let Some(source) = source {
+            let version = self.get_object(source, view)?;
+            if version.as_ref().is_some_and(|item| !matches!(item.record.data, ObjectData::Claim { .. })) {
+                return Err(Error::WrongKind);
+            }
+            version.into_iter().collect()
+        } else {
+            self.discovery_versions_at(view, "claim")?
+        };
+        if claims.is_empty() {
+            return Ok(MentionDiscovery {
+                revision: view.revision,
+                rows: Vec::new(),
+                truncated: false,
+            });
+        }
+        let people = self.discovery_versions_at(view, "person")?;
+        let person_by_id: HashMap<_, _> = people.iter().map(|person| (person.object, person)).collect();
 
         // The current alias registry is main-branch author metadata, and
         // explicitly returns no values on an alternate historical branch.
         let aliases = self.person_aliases(view)?;
         let mut names = Vec::new();
         for person in &people {
-            names.push((*person, person.record.label.as_str()));
+            names.push((person, person.record.label.as_str()));
         }
         for alias in &aliases {
             if alias.matches_day(view.day)
-                && let Some(person) = people.iter().find(|person| person.object == alias.person)
+                && let Some(person) = person_by_id.get(&alias.person)
             {
                 names.push((*person, alias.label.as_str()));
             }
@@ -140,12 +188,17 @@ impl Store {
         const MAX_CANDIDATES: usize = 2_000;
         let mut comparisons = 0_usize;
         let mut rows = Vec::new();
-        for (claim, statement) in claims {
+        for claim in claims {
+            self.check_query_control()?;
+            let ObjectData::Claim { statement, .. } = &claim.record.data else {
+                return Err(Error::WrongKind);
+            };
             if statement.len() > 10_000 {
                 return Err(Error::QueryBudgetExceeded);
             }
             let mut seen = HashSet::new();
             for (person, matching_label) in &names {
+                self.check_query_control()?;
                 comparisons += 1;
                 if comparisons > MAX_COMPARISONS {
                     return Err(Error::QueryBudgetExceeded);
@@ -202,6 +255,7 @@ impl Store {
         let truncated = rows.len() > limit;
         rows.truncate(limit);
         for candidate in &mut rows {
+            self.check_query_control()?;
             candidate.disposition = self.mention_disposition_at(view, candidate)?;
         }
         Ok(MentionDiscovery {
