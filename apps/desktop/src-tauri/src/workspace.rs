@@ -6,8 +6,8 @@ use std::sync::{Mutex, MutexGuard};
 
 use atlas_store::{
     ActionOutcome, AuthorRevision, Change, ClaimAudience, Command, Definition, EventDate,
-    EventRole, ObjectData, ObjectId, ObjectRef, Record, Scope, Store, ValidInterval, Version, VersionRef,
-    ViewContext, World, WorldDay, WorldId,
+    EventRole, ObjectData, ObjectId, ObjectRef, Record, Scope, Store, ValidInterval, Version,
+    VersionRef, ViewContext, World, WorldDay, WorldId,
     discovery::{MentionDisposition, ReviewMention, SavePersonAlias},
     query::{
         Direction, PredicateInput, QUERY_SCHEMA_VERSION, QueryCursor, QueryFilter, QuerySpec,
