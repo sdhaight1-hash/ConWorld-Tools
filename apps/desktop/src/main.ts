@@ -170,6 +170,11 @@ async function showAuthorWorkspace() {
         if (select instanceof HTMLSelectElement) options(select, personOptions);
       }
     }
+    const subjectSelection = relationshipForm.elements.namedItem("subject") as HTMLSelectElement;
+    const targetSelection = relationshipForm.elements.namedItem("target") as HTMLSelectElement;
+    if (personOptions.length > 1 && subjectSelection.value === targetSelection.value) {
+      targetSelection.value = personOptions.find((item) => item.id !== subjectSelection.value)!.id;
+    }
     options(eventForm.elements.namedItem("relationship") as HTMLSelectElement,
       snapshot.relationships.map((bond) => ({
         id: bond.id,
@@ -226,7 +231,11 @@ async function showAuthorWorkspace() {
         } catch (error) {
           status.textContent = "Unable to save: " + String(error);
         } finally {
-          button.disabled = false;
+          button.disabled = form === relationshipForm
+            ? (relationshipForm.elements.namedItem("subject") as HTMLSelectElement).options.length < 2
+            : form === eventForm
+              ? (eventForm.elements.namedItem("relationship") as HTMLSelectElement).options.length === 0
+              : false;
         }
       })();
     });
