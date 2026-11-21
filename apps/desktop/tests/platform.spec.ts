@@ -402,3 +402,41 @@ test("native path explorer uses typed direction, hop and visit budgets at the se
     { world_id: "world", day: 10, revision: null, max_depth: 2, max_visited: 2 },
   ]);
 });
+
+
+test("historical full-text option invokes indexed label search without client-side FTS syntax", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "world", name: "Index world", revision: 1 };
+    const calls: unknown[] = [];
+    Object.assign(window, {
+      isTauri: true,
+      __fulltextCalls: calls,
+      __TAURI_INTERNALS__: {
+        invoke: async (command: string, args: Record<string, unknown>) => {
+          if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+          if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+          if (command === "workspace_worlds") return [world];
+          if (command === "workspace_snapshot") return {
+            world, day: args.day, view_revision: args.revision ?? 1,
+            people: [{ id: "alice", label: "Alice Vale" }], relationships: [], events: [], definitions: [],
+          };
+          if (command === "workspace_search") {
+            calls.push(args);
+            return { revision: args.revision ?? 1, truncated: false,
+              rows: [{ id: "alice", label: "Alice Vale", kind: "person" }] };
+          }
+          throw new Error("Unexpected mock command: " + command);
+        },
+      },
+    });
+  });
+  await page.goto("/");
+  const form = page.locator("#author-query-form");
+  await form.getByLabel("Find name").fill("Alice Vale");
+  await form.getByLabel("Match names").selectOption("fulltext");
+  await form.getByRole("button", { name: "Search history" }).click();
+  await expect(page.locator("#author-query-results").getByRole("button", { name: /^Alice Vale ·/ })).toBeVisible();
+  const calls = await page.evaluate(() => (window as unknown as { __fulltextCalls: unknown[] }).__fulltextCalls);
+  expect(calls).toMatchObject([{ worldId: "world", day: 0, revision: null,
+    mode: "fulltext", term: "Alice Vale", limit: 100 }]);
+});

@@ -365,7 +365,7 @@ pub enum Error {
     #[error("invalid input for {0}")]
     InvalidInput(&'static str),
     #[error(
-        "the author history view exceeds the temporary Phase Two listing budget; narrow the view or use the indexed Phase Three query service"
+        "query exceeds the bounded candidate or result budget; narrow the query or use a more specific filter"
     )]
     QueryBudgetExceeded,
     #[error("backup path is not valid UTF-8: {0:?}")]

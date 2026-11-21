@@ -365,6 +365,7 @@ impl AuthorWorkspace {
         let filter = match mode {
             "contains" => QueryFilter::LabelContains(term.into()),
             "exact" => QueryFilter::ExactLabel(term.into()),
+            "fulltext" => QueryFilter::FullTextPhrase(term.into()),
             "backlinks" => QueryFilter::Backlinks(ObjectRef {
                 world: WorldId(id(world_id)?),
                 id: ObjectId(id(term.trim())?),
