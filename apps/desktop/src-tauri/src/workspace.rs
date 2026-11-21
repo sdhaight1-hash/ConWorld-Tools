@@ -670,10 +670,8 @@ impl AuthorWorkspace {
             };
             let query_id = id(&request.query_id)?;
             let saved = store
-                .saved_label_queries(world.id, context.revision, Scope::Author)
+                .saved_label_query(world.id, context.revision, Scope::Author, query_id)
                 .map_err(|error| error.to_string())?
-                .into_iter()
-                .find(|query| query.id == query_id)
                 .ok_or("Saved query does not exist at this revision.")?;
             saved
                 .bind(context, &request.bindings)

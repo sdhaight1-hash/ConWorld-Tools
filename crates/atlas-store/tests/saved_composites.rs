@@ -471,8 +471,8 @@ fn saved_parameter_defaults_overrides_and_history_survive_reopen() -> Result<(),
     drop(store);
     let reopened = Store::open(&path)?;
     let old = reopened
-        .saved_label_queries(world.id, saved.recorded_at, Scope::Author)?
-        .remove(0);
+        .saved_label_query(world.id, saved.recorded_at, Scope::Author, saved.id)?
+        .unwrap();
     assert_eq!(old.parameters, saved.parameters);
     assert_eq!(
         reopened
@@ -486,5 +486,66 @@ fn saved_parameter_defaults_overrides_and_history_survive_reopen() -> Result<(),
         .remove(0);
     assert!(current.parameters.is_empty());
     reopened.verify_foreign_keys(Scope::Author)?;
+    Ok(())
+}
+
+#[test]
+fn schema_eighteen_upgrade_keeps_literal_definitions_and_scopes_sources() -> Result<(), Error> {
+    let dir = tempdir()?;
+    let path = dir.path().join("schema-18.sqlite");
+    let mut store = Store::open(&path)?;
+    let world = store.create_world("Old archive", Scope::Author)?;
+    let other = store.create_world("Other archive", Scope::Author)?;
+    let source = ObjectRef::new(world.id);
+    let original = spec(QueryFilter::HasSource(source));
+    let legacy = save(
+        &mut store,
+        &world,
+        world.revision,
+        None,
+        "Literal source",
+        &original,
+    )?;
+    drop(store);
+    let conn = rusqlite::Connection::open(&path)?;
+    conn.execute_batch("DROP TABLE saved_query_parameters; PRAGMA user_version = 18;")?;
+    drop(conn);
+    let mut store = Store::open(&path)?;
+    let loaded = store
+        .saved_label_query(world.id, legacy.recorded_at, Scope::Author, legacy.id)?
+        .unwrap();
+    assert_eq!(loaded.spec, original);
+    assert!(loaded.parameters.is_empty());
+    let saved = store.save_named_parameterized_query(SaveNamedLabelQuery {
+        world_id: world.id,
+        expected: legacy.recorded_at,
+        query_id: Some(legacy.id),
+        name: "Parameterized source",
+        spec: &original,
+        command_id: Uuid::new_v4(),
+        scope: Scope::Author,
+    })?;
+    let context = view(&world, saved.recorded_at);
+    let foreign = ParameterBinding {
+        name: "source_1".into(),
+        value: ParameterValue::Source {
+            world_id: other.id.0.to_string(),
+            source_id: Uuid::new_v4().to_string(),
+        },
+    };
+    assert!(matches!(saved.bind(context, &[foreign]), Err(Error::WrongWorld)));
+    let replacement = ObjectRef::new(world.id);
+    let local = ParameterBinding {
+        name: "source_1".into(),
+        value: ParameterValue::Source {
+            world_id: world.id.0.to_string(),
+            source_id: replacement.id.0.to_string(),
+        },
+    };
+    assert_eq!(
+        saved.bind(context, &[local])?.filter,
+        QueryFilter::HasSource(replacement)
+    );
+    store.verify_foreign_keys(Scope::Author)?;
     Ok(())
 }

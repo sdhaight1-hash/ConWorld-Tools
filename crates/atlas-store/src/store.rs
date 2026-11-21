@@ -1172,6 +1172,29 @@ impl Store {
         revision: AuthorRevision,
         scope: Scope,
     ) -> Result<Vec<SavedLabelQuery>, Error> {
+        self.saved_queries_at(world_id, revision, scope, None)
+    }
+
+    /// Resolve precisely one saved definition at its recorded history boundary.
+    pub fn saved_label_query(
+        &self,
+        world_id: WorldId,
+        revision: AuthorRevision,
+        scope: Scope,
+        query_id: Uuid,
+    ) -> Result<Option<SavedLabelQuery>, Error> {
+        Ok(self
+            .saved_queries_at(world_id, revision, scope, Some(query_id))?
+            .pop())
+    }
+
+    fn saved_queries_at(
+        &self,
+        world_id: WorldId,
+        revision: AuthorRevision,
+        scope: Scope,
+        query_id: Option<Uuid>,
+    ) -> Result<Vec<SavedLabelQuery>, Error> {
         require_author(scope)?;
         let tx = self.conn.unchecked_transaction()?;
         let world = load_world(&tx, world_id)?;
@@ -1185,7 +1208,8 @@ impl Store {
                  FROM saved_query_versions q
                  LEFT JOIN saved_query_parameters p ON p.world_id = q.world_id
                     AND p.query_id = q.query_id AND p.revision = q.revision
-                 WHERE q.world_id = ?1 AND q.revision = (
+                 WHERE q.world_id = ?1 AND (?3 IS NULL OR q.query_id = ?3)
+                   AND q.revision = (
                      SELECT MAX(prev.revision) FROM saved_query_versions prev
                      WHERE prev.world_id = q.world_id AND prev.query_id = q.query_id
                        AND prev.revision <= ?2
@@ -1193,7 +1217,9 @@ impl Store {
                  ORDER BY q.name, q.query_id",
             )?;
             statement
-                .query_map(params![world_id.0.as_bytes(), revision.0], |row| {
+                .query_map(
+                    params![world_id.0.as_bytes(), revision.0, query_id.as_ref().map(Uuid::as_bytes)],
+                    |row| {
                     Ok((
                         Uuid::from_bytes(row.get(0)?),
                         row.get::<_, String>(1)?,
@@ -1204,7 +1230,8 @@ impl Store {
                         row.get::<_, i64>(6)?,
                         row.get::<_, Option<String>>(7)?,
                     ))
-                })?
+                    },
+                )?
                 .collect::<Result<Vec<_>, _>>()?
         };
         let mut result = Vec::new();
