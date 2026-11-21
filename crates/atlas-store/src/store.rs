@@ -8,8 +8,8 @@ use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, 
 use uuid::Uuid;
 
 use crate::discovery::{
-    MentionCandidate, MentionDisposition, MentionRefresh, PersonAlias, ReviewMention, SavePersonAlias,
-    matching_spans,
+    MentionCandidate, MentionDisposition, MentionRefresh, PersonAlias, ReviewMention,
+    SavePersonAlias, matching_spans,
 };
 use crate::query::{
     PredicateInput, QUERY_SCHEMA_VERSION, QueryControl, QueryFilter, QuerySpec,
@@ -1352,16 +1352,24 @@ impl Store {
         self.validate_query_view(view)?;
         let tx = self.conn.unchecked_transaction()?;
         const BUDGET: i64 = 10_000;
-        let sql = format!("{QUERY_LINEAGE}SELECT DISTINCT v.object_id
+        let sql = format!(
+            "{QUERY_LINEAGE}SELECT DISTINCT v.object_id
             FROM object_versions v JOIN lineage l ON l.branch_id = v.branch_id
             WHERE v.world_id = ?1 AND v.kind = ?2
                 AND v.revision <= ?3 AND v.revision <= l.max_revision
-            ORDER BY v.object_id LIMIT ?4");
+            ORDER BY v.object_id LIMIT ?4"
+        );
         let mut rows = Vec::new();
         {
             let mut statement = tx.prepare(&sql)?;
             let ids = statement.query_map(
-                params![view.world.0.as_bytes(), kind, view.revision.0, BUDGET + 1, view.branch.0.as_bytes()],
+                params![
+                    view.world.0.as_bytes(),
+                    kind,
+                    view.revision.0,
+                    BUDGET + 1,
+                    view.branch.0.as_bytes()
+                ],
                 |row| row.get::<_, [u8; 16]>(0),
             )?;
             for (index, id) in ids.enumerate() {
@@ -1369,8 +1377,13 @@ impl Store {
                 if index == BUDGET as usize {
                     return Err(Error::QueryBudgetExceeded);
                 }
-                let object = ObjectRef { world: view.world, id: ObjectId(Uuid::from_bytes(id?)) };
-                if let Some(version) = resolve_object(&tx, object, view.branch, view.revision, view.day)? {
+                let object = ObjectRef {
+                    world: view.world,
+                    id: ObjectId(Uuid::from_bytes(id?)),
+                };
+                if let Some(version) =
+                    resolve_object(&tx, object, view.branch, view.revision, view.day)?
+                {
                     rows.push(version);
                 }
             }
@@ -1393,8 +1406,11 @@ impl Store {
         if before == after {
             return Ok(MentionRefresh::Sources(Vec::new()));
         }
-        if before.world != after.world || before.branch != after.branch
-            || before.day != after.day || before.revision > after.revision {
+        if before.world != after.world
+            || before.branch != after.branch
+            || before.day != after.day
+            || before.revision > after.revision
+        {
             return Ok(MentionRefresh::Full);
         }
         let tx = self.conn.unchecked_transaction()?;
@@ -1402,7 +1418,6 @@ impl Store {
         if after.branch != world.main {
             return Ok(MentionRefresh::Full);
         }
-        let args = params![after.world.0.as_bytes(), before.revision.0, after.revision.0];
         let names_changed: bool = tx.query_row(
             "SELECT EXISTS(
                 SELECT 1 FROM invalidations i JOIN objects o
@@ -1412,7 +1427,13 @@ impl Store {
                 UNION ALL
                 SELECT 1 FROM person_alias_versions
                 WHERE world_id = ?1 AND revision > ?2 AND revision <= ?3
-            )", args, |row| row.get(0),
+            )",
+            params![
+                after.world.0.as_bytes(),
+                before.revision.0,
+                after.revision.0
+            ],
+            |row| row.get(0),
         )?;
         if names_changed {
             return Ok(MentionRefresh::Full);
@@ -1429,19 +1450,29 @@ impl Store {
                  WHERE world_id = ?1 AND revision > ?2 AND revision <= ?3
                  ORDER BY 1 LIMIT 2001",
             )?;
-            statement.query_map(
-                params![after.world.0.as_bytes(), before.revision.0, after.revision.0],
-                |row| row.get::<_, [u8; 16]>(0),
-            )?.collect::<Result<Vec<_>, _>>()?
+            statement
+                .query_map(
+                    params![
+                        after.world.0.as_bytes(),
+                        before.revision.0,
+                        after.revision.0
+                    ],
+                    |row| row.get::<_, [u8; 16]>(0),
+                )?
+                .collect::<Result<Vec<_>, _>>()?
         };
         tx.commit()?;
         if ids.len() > BUDGET {
             return Ok(MentionRefresh::Full);
         }
-        Ok(MentionRefresh::Sources(ids.into_iter().map(|id| ObjectRef {
-            world: after.world,
-            id: ObjectId(Uuid::from_bytes(id)),
-        }).collect()))
+        Ok(MentionRefresh::Sources(
+            ids.into_iter()
+                .map(|id| ObjectRef {
+                    world: after.world,
+                    id: ObjectId(Uuid::from_bytes(id)),
+                })
+                .collect(),
+        ))
     }
 
     pub fn objects_at(&self, view: ViewContext, limit: usize) -> Result<Vec<Version>, Error> {

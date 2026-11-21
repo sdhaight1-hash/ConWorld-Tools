@@ -152,7 +152,10 @@ impl Store {
         self.validate_query_view(view)?;
         let claims = if let Some(source) = source {
             let version = self.get_object(source, view)?;
-            if version.as_ref().is_some_and(|item| !matches!(item.record.data, ObjectData::Claim { .. })) {
+            if version
+                .as_ref()
+                .is_some_and(|item| !matches!(item.record.data, ObjectData::Claim { .. }))
+            {
                 return Err(Error::WrongKind);
             }
             version.into_iter().collect()
@@ -167,7 +170,10 @@ impl Store {
             });
         }
         let people = self.discovery_versions_at(view, "person")?;
-        let person_by_id: HashMap<_, _> = people.iter().map(|person| (person.object, person)).collect();
+        let person_by_id: HashMap<_, _> = people
+            .iter()
+            .map(|person| (person.object, person))
+            .collect();
 
         // The current alias registry is main-branch author metadata, and
         // explicitly returns no values on an alternate historical branch.

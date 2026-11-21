@@ -756,8 +756,11 @@ impl AuthorWorkspace {
         day: i64,
         revision: Option<i64>,
         limit: usize,
+        source_id: Option<&str>,
+        control: &QueryControl,
     ) -> Result<MentionDiscoverySummary, String> {
         let store = self.lock()?;
+        control.check().map_err(|error| error.to_string())?;
         let world = store
             .world(WorldId(id(world_id)?), Scope::Author)
             .map_err(|error| error.to_string())?;
@@ -765,8 +768,14 @@ impl AuthorWorkspace {
             revision: AuthorRevision(revision.unwrap_or(world.revision.0)),
             ..view(&world, day)
         };
+        let source = source_id
+            .map(|raw| id(raw).map(|id| ObjectRef {
+                world: world.id,
+                id: ObjectId(id),
+            }))
+            .transpose()?;
         let discovery = store
-            .discover_mentions(context, limit)
+            .discover_mentions_controlled(context, source, limit, control)
             .map_err(|error| error.to_string())?;
         Ok(MentionDiscoverySummary {
             revision: discovery.revision.0,
@@ -1913,13 +1922,11 @@ pub fn workspace_snapshot(
     workspace.snapshot(&world_id, day, revision)
 }
 
-async fn run_query_job(
+async fn run_query_job<T: Send + 'static>(
     app: AppHandle,
     request_id: String,
-    execute: impl FnOnce(&AuthorWorkspace, &QueryControl) -> Result<SearchSummary, String>
-    + Send
-    + 'static,
-) -> Result<SearchSummary, String> {
+    execute: impl FnOnce(&AuthorWorkspace, &QueryControl) -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
     let request = id(&request_id)?;
     let control = app.state::<AuthorWorkspace>().begin_query(request)?;
     tauri::async_runtime::spawn_blocking(move || {
@@ -1994,14 +2001,19 @@ pub fn workspace_review_mention(
 }
 
 #[tauri::command]
-pub fn workspace_discover_mentions(
-    workspace: State<'_, AuthorWorkspace>,
+pub async fn workspace_discover_mentions(
+    app: AppHandle,
     world_id: String,
     day: i64,
     revision: Option<i64>,
     limit: usize,
+    source_id: Option<String>,
+    request_id: Option<String>,
 ) -> Result<MentionDiscoverySummary, String> {
-    workspace.discover_mentions(&world_id, day, revision, limit)
+    run_query_job(app, request_id.unwrap_or_else(|| Uuid::new_v4().to_string()), move |workspace, control| {
+        workspace.discover_mentions(&world_id, day, revision, limit, source_id.as_deref(), control)
+    })
+    .await
 }
 
 #[tauri::command]
