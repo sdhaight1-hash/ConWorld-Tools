@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::{self, OpenOptions};
 use std::path::Path;
 use std::time::Duration;
@@ -17,7 +17,7 @@ use crate::query::{
 use crate::*;
 
 pub(crate) const APPLICATION_ID: i64 = 0x4357_4c44; // CWLD
-pub(crate) const SCHEMA_VERSION: i64 = 15;
+pub(crate) const SCHEMA_VERSION: i64 = 16;
 
 pub struct Store {
     conn: Connection,
@@ -90,8 +90,11 @@ impl Store {
         if version < 14 {
             tx.execute_batch(include_str!("../migrations/0014.sql"))?;
         }
-        // Version 15 adds saved predicate operators, not tables. An older
-        // binary must reject the database before reading unknown AST variants.
+        // Version 15 adds saved predicate operators without DDL.
+        // Version 16 adds the reverse relationship endpoint index.
+        if version < 16 {
+            tx.execute_batch(include_str!("../migrations/0016.sql"))?;
+        }
         if version < SCHEMA_VERSION {
             verify_foreign_keys(&tx)?;
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -390,6 +393,156 @@ impl Store {
         rows.truncate(limit);
         tx.commit()?;
         Ok(crate::query::QueryResult {
+            rows,
+            revision: view.revision,
+            truncated,
+        })
+    }
+
+    /// Traverse resolved historical relationships by indexed endpoint instead
+    /// of materializing all world records. Raw candidate and visited budgets
+    /// are independent; hidden/obsolete edges never enter the walk.
+    pub(crate) fn indexed_relationship_path_at(
+        &self,
+        view: ViewContext,
+        filter: &QueryFilter,
+        limit: usize,
+    ) -> Result<crate::query::QueryResult, Error> {
+        use crate::query::{Direction, QueryResult, search_label};
+
+        require_author(view.scope)?;
+        let QueryFilter::RelationshipPath {
+            start,
+            kind,
+            direction,
+            max_depth,
+            max_visited,
+        } = filter
+        else {
+            return Err(Error::InvalidInput("relationship path"));
+        };
+        if start.world != view.world {
+            return Err(Error::WrongWorld);
+        }
+        let kind = search_label(kind)?;
+        if !(1..=16).contains(max_depth) || !(1..=2_000).contains(max_visited) {
+            return Err(Error::InvalidInput("relationship traversal budget"));
+        }
+        self.validate_query_view(view)?;
+        let tx = self.conn.unchecked_transaction()?;
+        if resolve_object(&tx, *start, view.branch, view.revision, view.day)?.is_none() {
+            return Ok(QueryResult {
+                rows: Vec::new(),
+                revision: view.revision,
+                truncated: false,
+            });
+        }
+        let sql = match direction {
+            Direction::Outgoing => {
+                "SELECT DISTINCT relationship_id FROM relationship_versions
+                 WHERE world_id = ?1 AND subject_id = ?2 AND revision <= ?3
+                 ORDER BY relationship_id LIMIT ?4"
+            }
+            Direction::Incoming => {
+                "SELECT DISTINCT relationship_id FROM relationship_versions
+                 WHERE world_id = ?1 AND target_id = ?2 AND revision <= ?3
+                 ORDER BY relationship_id LIMIT ?4"
+            }
+            Direction::Both => {
+                "SELECT relationship_id FROM relationship_versions
+                 WHERE world_id = ?1 AND subject_id = ?2 AND revision <= ?3
+                 UNION
+                 SELECT relationship_id FROM relationship_versions
+                 WHERE world_id = ?1 AND target_id = ?2 AND revision <= ?3
+                 ORDER BY relationship_id LIMIT ?4"
+            }
+        };
+        let mut remaining = 10_000_usize;
+        let mut visited = HashSet::from([*start]);
+        let mut queue = VecDeque::from([(*start, 0_u8)]);
+        let mut rows = Vec::new();
+        let mut truncated = false;
+        'walk: while let Some((node, depth)) = queue.pop_front() {
+            if depth == *max_depth {
+                continue;
+            }
+            let candidates = {
+                let mut statement = tx.prepare_cached(sql)?;
+                statement
+                    .query_map(
+                        params![
+                            view.world.0.as_bytes(),
+                            node.id.0.as_bytes(),
+                            view.revision.0,
+                            (remaining + 1) as i64
+                        ],
+                        |row| row.get::<_, [u8; 16]>(0),
+                    )?
+                    .collect::<Result<Vec<_>, _>>()?
+            };
+            if candidates.len() > remaining {
+                return Err(Error::QueryBudgetExceeded);
+            }
+            remaining -= candidates.len();
+            let mut neighbors = HashSet::new();
+            for id in candidates {
+                let object = ObjectRef {
+                    world: view.world,
+                    id: ObjectId(Uuid::from_bytes(id)),
+                };
+                let Some(edge) = resolve_object(&tx, object, view.branch, view.revision, view.day)?
+                else {
+                    continue;
+                };
+                let ObjectData::Relationship {
+                    subject,
+                    target,
+                    kind: label,
+                    ..
+                } = edge.record.data
+                else {
+                    continue;
+                };
+                if label.to_lowercase() != kind {
+                    continue;
+                }
+                if *direction != Direction::Incoming && subject == node {
+                    neighbors.insert(target);
+                }
+                if *direction != Direction::Outgoing && target == node {
+                    neighbors.insert(subject);
+                }
+            }
+            let mut neighbors: Vec<_> = neighbors.into_iter().collect();
+            neighbors.sort_unstable_by_key(|item| item.id.0);
+            for next in neighbors {
+                if visited.contains(&next) {
+                    continue;
+                }
+                let Some(version) =
+                    resolve_object(&tx, next, view.branch, view.revision, view.day)?
+                else {
+                    continue;
+                };
+                if visited.len() == *max_visited {
+                    truncated = true;
+                    break 'walk;
+                }
+                visited.insert(next);
+                rows.push(version);
+                queue.push_back((next, depth + 1));
+            }
+        }
+        rows.sort_by(|a, b| {
+            a.record
+                .label
+                .cmp(&b.record.label)
+                .then(a.object.id.0.cmp(&b.object.id.0))
+        });
+        truncated |= rows.len() > limit;
+        rows.truncate(limit);
+        tx.commit()?;
+        Ok(QueryResult {
             rows,
             revision: view.revision,
             truncated,
