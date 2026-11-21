@@ -245,7 +245,11 @@ impl Store {
             }
             QueryFilter::ParticipantEvents { participant, role } => {
                 return self.indexed_involvements_at(
-                    view, *participant, role.as_ref(), true, spec.limit,
+                    view,
+                    *participant,
+                    role.as_ref(),
+                    true,
+                    spec.limit,
                 );
             }
             _ => {}

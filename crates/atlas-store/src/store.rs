@@ -147,7 +147,6 @@ impl Store {
         Ok(())
     }
 
-
     /// Find candidate IDs via canonical typed involvement indexes, then resolve
     /// every identity through the authoritative world/branch/day/revision view.
     /// Never treat an older, future or other-branch involvement row as current.
@@ -198,7 +197,11 @@ impl Store {
             let mut statement = tx.prepare(sql)?;
             statement
                 .query_map(
-                    params![view.world.0.as_bytes(), focus.id.0.as_bytes(), RAW_BUDGET + 1],
+                    params![
+                        view.world.0.as_bytes(),
+                        focus.id.0.as_bytes(),
+                        RAW_BUDGET + 1
+                    ],
                     |row| row.get::<_, [u8; 16]>(0),
                 )?
                 .collect::<Result<Vec<_>, _>>()?
@@ -222,7 +225,8 @@ impl Store {
                 event,
                 participant,
                 role: recorded_role,
-            } = &involvement.record.data else {
+            } = &involvement.record.data
+            else {
                 continue;
             };
             if (by_participant && participant != &focus)
@@ -238,7 +242,10 @@ impl Store {
                 continue;
             };
             let expected = if by_participant {
-                matches!(&target_version.record.data, ObjectData::HistoricalEvent { .. })
+                matches!(
+                    &target_version.record.data,
+                    ObjectData::HistoricalEvent { .. }
+                )
             } else {
                 matches!(&target_version.record.data, ObjectData::Person)
             };

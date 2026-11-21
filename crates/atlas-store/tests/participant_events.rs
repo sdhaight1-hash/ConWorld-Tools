@@ -247,9 +247,9 @@ fn participant_event_search_respects_role_valid_time_and_author_corrections() ->
     Ok(())
 }
 
-
 #[test]
-fn indexed_participation_scales_beyond_snapshot_limit_and_survives_reopen_and_upgrade() -> Result<(), Error> {
+fn indexed_participation_scales_beyond_snapshot_limit_and_survives_reopen_and_upgrade()
+-> Result<(), Error> {
     let dir = tempfile::tempdir()?;
     let path = dir.path().join("events.sqlite");
     let backup = dir.path().join("events-backup.sqlite");
@@ -262,20 +262,45 @@ fn indexed_participation_scales_beyond_snapshot_limit_and_survives_reopen_and_up
         world.revision,
         vec![
             Change::Create(alice, record("Archivist", 0, ObjectData::Person)),
-            Change::Create(event, record("Guild hearing", 10, ObjectData::HistoricalEvent {
-                occurrence: EventDate::Exact(WorldDay(10)),
-            })),
+            Change::Create(
+                event,
+                record(
+                    "Guild hearing",
+                    10,
+                    ObjectData::HistoricalEvent {
+                        occurrence: EventDate::Exact(WorldDay(10)),
+                    },
+                ),
+            ),
         ],
     ))?;
     let first_role = ObjectRef::new(world.id);
     let second_role = ObjectRef::new(world.id);
     let mut changes = vec![
-        Change::Create(first_role, record("Actor involvement", 10, ObjectData::EventInvolvement {
-            event, participant: alice, role: EventRole::Actor,
-        })),
-        Change::Create(second_role, record("Witness involvement", 10, ObjectData::EventInvolvement {
-            event, participant: alice, role: EventRole::Witness,
-        })),
+        Change::Create(
+            first_role,
+            record(
+                "Actor involvement",
+                10,
+                ObjectData::EventInvolvement {
+                    event,
+                    participant: alice,
+                    role: EventRole::Actor,
+                },
+            ),
+        ),
+        Change::Create(
+            second_role,
+            record(
+                "Witness involvement",
+                10,
+                ObjectData::EventInvolvement {
+                    event,
+                    participant: alice,
+                    role: EventRole::Witness,
+                },
+            ),
+        ),
     ];
     for n in 0..2_015 {
         changes.push(Change::Create(
@@ -285,46 +310,133 @@ fn indexed_participation_scales_beyond_snapshot_limit_and_survives_reopen_and_up
     }
     let second = store.apply(&command(&world, first, changes))?;
     let at = view(&world, second, 20);
-    assert!(matches!(store.objects_at(at, 2_000), Err(Error::QueryBudgetExceeded)));
+    assert!(matches!(
+        store.objects_at(at, 2_000),
+        Err(Error::QueryBudgetExceeded)
+    ));
     let all_events = store.execute_query(&query(alice, None, 100), at)?;
-    assert_eq!(all_events.rows.len(), 1, "duplicate roles must not duplicate events");
+    assert_eq!(
+        all_events.rows.len(),
+        1,
+        "duplicate roles must not duplicate events"
+    );
     assert_eq!(all_events.rows[0].object, event);
-    assert_eq!(store.execute_query(&query(alice, Some(EventRole::Actor), 100), at)?.rows.len(), 1);
+    assert_eq!(
+        store
+            .execute_query(&query(alice, Some(EventRole::Actor), 100), at)?
+            .rows
+            .len(),
+        1
+    );
     let by_event = QuerySpec {
         schema_version: QUERY_SCHEMA_VERSION,
-        filter: QueryFilter::EventRole { event, role: EventRole::Witness },
+        filter: QueryFilter::EventRole {
+            event,
+            role: EventRole::Witness,
+        },
         limit: 100,
     };
-    assert_eq!(store.execute_query(&by_event, at)?.rows[0].object, second_role);
-    assert!(store.execute_query(&query(alice, None, 100), view(&world, first, 20))?.rows.is_empty());
-    assert!(store.execute_query(&query(alice, None, 100), view(&world, second, 9))?.rows.is_empty());
+    assert_eq!(
+        store.execute_query(&by_event, at)?.rows[0].object,
+        second_role
+    );
+    assert!(
+        store
+            .execute_query(&query(alice, None, 100), view(&world, first, 20))?
+            .rows
+            .is_empty()
+    );
+    assert!(
+        store
+            .execute_query(&query(alice, None, 100), view(&world, second, 9))?
+            .rows
+            .is_empty()
+    );
     let fork = store.fork(&ForkCommand {
-        world: world.id, parent: world.main, day: WorldDay(10), expected: second,
-        id: Uuid::new_v4(), author: "Role query fixture".into(),
-        rationale: "Isolate role history".into(), scope: Scope::Author,
+        world: world.id,
+        parent: world.main,
+        day: WorldDay(10),
+        expected: second,
+        id: Uuid::new_v4(),
+        author: "Role query fixture".into(),
+        rationale: "Isolate role history".into(),
+        scope: Scope::Author,
     })?;
     let third = store.apply(&command(
         &world,
         fork.created_revision,
-        vec![Change::Correct(first_role, record(
-            "Corrected actor involvement", 10,
-            ObjectData::EventInvolvement { event, participant: alice, role: EventRole::Witness },
-        ))],
+        vec![Change::Correct(
+            first_role,
+            record(
+                "Corrected actor involvement",
+                10,
+                ObjectData::EventInvolvement {
+                    event,
+                    participant: alice,
+                    role: EventRole::Witness,
+                },
+            ),
+        )],
     ))?;
-    assert!(store.execute_query(&query(alice, Some(EventRole::Actor), 100),
-        view(&world, third, 20))?.rows.is_empty());
-    assert_eq!(store.execute_query(&by_event, view(&world, third, 20))?.rows.len(), 2);
-    assert_eq!(store.execute_query(&query(alice, Some(EventRole::Actor), 100),
-        ViewContext { branch: fork.id, ..view(&world, third, 20) })?.rows.len(), 1);
-    assert_eq!(store.execute_query(&query(alice, Some(EventRole::Actor), 100),
-        view(&world, second, 20))?.rows.len(), 1);
-    assert!(matches!(store.execute_query(&query(alice, None, 100),
-        ViewContext { scope: Scope::Public, ..view(&world, third, 20) }),
-        Err(Error::CapabilityDenied)));
+    assert!(
+        store
+            .execute_query(
+                &query(alice, Some(EventRole::Actor), 100),
+                view(&world, third, 20)
+            )?
+            .rows
+            .is_empty()
+    );
+    assert_eq!(
+        store
+            .execute_query(&by_event, view(&world, third, 20))?
+            .rows
+            .len(),
+        2
+    );
+    assert_eq!(
+        store
+            .execute_query(
+                &query(alice, Some(EventRole::Actor), 100),
+                ViewContext {
+                    branch: fork.id,
+                    ..view(&world, third, 20)
+                }
+            )?
+            .rows
+            .len(),
+        1
+    );
+    assert_eq!(
+        store
+            .execute_query(
+                &query(alice, Some(EventRole::Actor), 100),
+                view(&world, second, 20)
+            )?
+            .rows
+            .len(),
+        1
+    );
+    assert!(matches!(
+        store.execute_query(
+            &query(alice, None, 100),
+            ViewContext {
+                scope: Scope::Public,
+                ..view(&world, third, 20)
+            }
+        ),
+        Err(Error::CapabilityDenied)
+    ));
     store.backup_to(&backup, Scope::Author)?;
     drop(store);
     let reopened = Store::open(&backup)?;
-    assert_eq!(reopened.execute_query(&by_event, view(&world, third, 20))?.rows.len(), 2);
+    assert_eq!(
+        reopened
+            .execute_query(&by_event, view(&world, third, 20))?
+            .rows
+            .len(),
+        2
+    );
     reopened.verify_foreign_keys(Scope::Author)?;
     drop(reopened);
 
@@ -336,8 +448,13 @@ fn indexed_participation_scales_beyond_snapshot_limit_and_survives_reopen_and_up
     )?;
     drop(conn);
     let upgraded = Store::open(&path)?;
-    assert_eq!(upgraded.execute_query(&query(alice, None, 100),
-        view(&world, third, 20))?.rows.len(), 1);
+    assert_eq!(
+        upgraded
+            .execute_query(&query(alice, None, 100), view(&world, third, 20))?
+            .rows
+            .len(),
+        1
+    );
     upgraded.verify_foreign_keys(Scope::Author)?;
     Ok(())
 }
