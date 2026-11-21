@@ -654,7 +654,9 @@ impl AuthorWorkspace {
                         _ => None,
                     };
                     let source_citation = if statement.is_some() {
-                        version.record.source
+                        version
+                            .record
+                            .source
                             .map(|source| store.get_object(source, view))
                             .transpose()
                             .map_err(|error| error.to_string())?

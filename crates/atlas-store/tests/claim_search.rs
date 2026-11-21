@@ -63,7 +63,10 @@ fn query(text: &str) -> QuerySpec {
     }
 }
 
-fn seed(store: &mut Store, world: &World) -> Result<(ObjectRef, ObjectRef, ObjectRef, AuthorRevision), Error> {
+fn seed(
+    store: &mut Store,
+    world: &World,
+) -> Result<(ObjectRef, ObjectRef, ObjectRef, AuthorRevision), Error> {
     let event = ObjectRef::new(world.id);
     let source = ObjectRef::new(world.id);
     let account = ObjectRef::new(world.id);
@@ -71,18 +74,37 @@ fn seed(store: &mut Store, world: &World) -> Result<(ObjectRef, ObjectRef, Objec
         world,
         world.revision,
         vec![
-            Change::Create(event, record("Hearing", ObjectData::HistoricalEvent {
-                occurrence: EventDate::Exact(WorldDay(10)),
-            }, None, Some(10))),
-            Change::Create(source, record("Court journal", ObjectData::Source {
-                citation: "Archive folio 24".into(),
-            }, None, None)),
+            Change::Create(
+                event,
+                record(
+                    "Hearing",
+                    ObjectData::HistoricalEvent {
+                        occurrence: EventDate::Exact(WorldDay(10)),
+                    },
+                    None,
+                    Some(10),
+                ),
+            ),
+            Change::Create(
+                source,
+                record(
+                    "Court journal",
+                    ObjectData::Source {
+                        citation: "Archive folio 24".into(),
+                    },
+                    None,
+                    None,
+                ),
+            ),
         ],
     ))?;
     let second = store.apply(&command(
         world,
         first,
-        vec![Change::Create(account, claim(event, source, "The hidden obsidian ledger was stolen."))],
+        vec![Change::Create(
+            account,
+            claim(event, source, "The hidden obsidian ledger was stolen."),
+        )],
     ))?;
     Ok((event, source, account, second))
 }
@@ -95,29 +117,63 @@ fn indexed_claims_respect_world_branch_day_and_recorded_revision() -> Result<(),
     let (event, source, account, first) = seed(&mut store, &world)?;
     let (_other_event, _other_source, foreign, other_revision) = seed(&mut store, &other)?;
     assert_eq!(
-        store.execute_query(&query("obsidian ledger"), context(&world, first, 10))?.rows[0].object,
+        store
+            .execute_query(&query("obsidian ledger"), context(&world, first, 10))?
+            .rows[0]
+            .object,
         account
     );
     assert_eq!(
-        store.execute_query(&query("obsidian"), context(&other, other_revision, 10))?.rows[0].object,
+        store
+            .execute_query(&query("obsidian"), context(&other, other_revision, 10))?
+            .rows[0]
+            .object,
         foreign
     );
-    assert!(store.execute_query(&query("obsidian"), context(&world, first, 9))?.rows.is_empty());
-    assert!(store.execute_query(&query("obsidian"), context(&world, AuthorRevision(1), 10))?.rows.is_empty());
-    assert!(store.execute_query(&query("Archive folio"), context(&world, first, 10))?.rows.is_empty(),
-        "the content index must search statements, not citations or labels");
-    assert!(store.execute_query(&query("obsidian OR ledger"), context(&world, first, 10))?.rows.is_empty(),
-        "FTS operators must not be interpreted as queries");
-    assert!(store.execute_query(&query("hidden \" OR obsidian"), context(&world, first, 10))?.rows.is_empty());
+    assert!(
+        store
+            .execute_query(&query("obsidian"), context(&world, first, 9))?
+            .rows
+            .is_empty()
+    );
+    assert!(
+        store
+            .execute_query(&query("obsidian"), context(&world, AuthorRevision(1), 10))?
+            .rows
+            .is_empty()
+    );
+    assert!(
+        store
+            .execute_query(&query("Archive folio"), context(&world, first, 10))?
+            .rows
+            .is_empty(),
+        "the content index must search statements, not citations or labels"
+    );
+    assert!(
+        store
+            .execute_query(&query("obsidian OR ledger"), context(&world, first, 10))?
+            .rows
+            .is_empty(),
+        "FTS operators must not be interpreted as queries"
+    );
+    assert!(
+        store
+            .execute_query(&query("hidden \" OR obsidian"), context(&world, first, 10))?
+            .rows
+            .is_empty()
+    );
     assert!(matches!(
         store.execute_query(&query("  "), context(&world, first, 10)),
         Err(Error::InvalidInput(_))
     ));
     assert!(matches!(
-        store.execute_query(&query("obsidian"), ViewContext {
-            scope: Scope::Public,
-            ..context(&world, first, 10)
-        }),
+        store.execute_query(
+            &query("obsidian"),
+            ViewContext {
+                scope: Scope::Public,
+                ..context(&world, first, 10)
+            }
+        ),
         Err(Error::CapabilityDenied)
     ));
     let fork = store.fork(&ForkCommand {
@@ -133,19 +189,41 @@ fn indexed_claims_respect_world_branch_day_and_recorded_revision() -> Result<(),
     let corrected = store.apply(&command(
         &world,
         fork.created_revision,
-        vec![Change::Correct(account, claim(event, source, "The crimson ledger was recovered."))],
+        vec![Change::Correct(
+            account,
+            claim(event, source, "The crimson ledger was recovered."),
+        )],
     ))?;
-    assert!(store.execute_query(&query("obsidian"), context(&world, corrected, 10))?.rows.is_empty());
-    assert_eq!(store.execute_query(&query("crimson ledger"), context(&world, corrected, 10))?.rows[0].object, account);
+    assert!(
+        store
+            .execute_query(&query("obsidian"), context(&world, corrected, 10))?
+            .rows
+            .is_empty()
+    );
+    assert_eq!(
+        store
+            .execute_query(&query("crimson ledger"), context(&world, corrected, 10))?
+            .rows[0]
+            .object,
+        account
+    );
     let historical = store.execute_query(&query("obsidian"), context(&world, first, 10))?;
     assert_eq!(historical.rows[0].object, account);
     let fork_context = ViewContext {
         branch: fork.id,
         ..context(&world, corrected, 10)
     };
-    assert_eq!(store.execute_query(&query("obsidian"), fork_context)?.rows[0].object, account,
-        "the fork must retain the source version it inherited");
-    assert!(store.execute_query(&query("crimson"), fork_context)?.rows.is_empty());
+    assert_eq!(
+        store.execute_query(&query("obsidian"), fork_context)?.rows[0].object,
+        account,
+        "the fork must retain the source version it inherited"
+    );
+    assert!(
+        store
+            .execute_query(&query("crimson"), fork_context)?
+            .rows
+            .is_empty()
+    );
     Ok(())
 }
 
@@ -169,13 +247,31 @@ fn claim_fts_rebuild_backup_migration_and_saved_replay() -> Result<(), Error> {
     let current = saved.recorded_at;
     let definitions = store.saved_label_queries(world.id, current, Scope::Author)?;
     assert_eq!(definitions[0].spec, query("obsidian ledger"));
-    assert_eq!(store.execute_query(&definitions[0].spec, context(&world, current, 10))?.rows[0].object, account);
+    assert_eq!(
+        store
+            .execute_query(&definitions[0].spec, context(&world, current, 10))?
+            .rows[0]
+            .object,
+        account
+    );
     store.rebuild_search_index(Scope::Author)?;
-    assert_eq!(store.execute_query(&query("obsidian"), context(&world, current, 10))?.rows[0].object, account);
+    assert_eq!(
+        store
+            .execute_query(&query("obsidian"), context(&world, current, 10))?
+            .rows[0]
+            .object,
+        account
+    );
     store.backup_to(&backup, Scope::Author)?;
     drop(store);
     let reopened = Store::open(&backup)?;
-    assert_eq!(reopened.execute_query(&query("obsidian"), context(&world, current, 10))?.rows[0].object, account);
+    assert_eq!(
+        reopened
+            .execute_query(&query("obsidian"), context(&world, current, 10))?
+            .rows[0]
+            .object,
+        account
+    );
     reopened.verify_foreign_keys(Scope::Author)?;
     drop(reopened);
 
@@ -203,7 +299,13 @@ fn claim_fts_rebuild_backup_migration_and_saved_replay() -> Result<(), Error> {
     )?;
     drop(conn);
     let upgraded = Store::open(&path)?;
-    assert_eq!(upgraded.execute_query(&query("obsidian"), context(&world, current, 10))?.rows[0].object, account);
+    assert_eq!(
+        upgraded
+            .execute_query(&query("obsidian"), context(&world, current, 10))?
+            .rows[0]
+            .object,
+        account
+    );
     upgraded.verify_foreign_keys(Scope::Author)?;
     Ok(())
 }
@@ -217,16 +319,25 @@ fn claim_fts_finds_narrow_content_in_worlds_beyond_snapshot_scan_limit() -> Resu
     for number in 0..2_010 {
         changes.push(Change::Create(
             ObjectRef::new(world.id),
-            record(&format!("Observer {number}"), ObjectData::Person, None, None),
+            record(
+                &format!("Observer {number}"),
+                ObjectData::Person,
+                None,
+                None,
+            ),
         ));
     }
     let later = store.apply(&command(&world, revision, changes))?;
-    assert!(matches!(store.objects_at(context(&world, later, 10), 2_000),
-        Err(Error::QueryBudgetExceeded)));
+    assert!(matches!(
+        store.objects_at(context(&world, later, 10), 2_000),
+        Err(Error::QueryBudgetExceeded)
+    ));
     let search = store.execute_query(&query("obsidian"), context(&world, later, 10))?;
     assert_eq!(search.rows.len(), 1);
     assert_eq!(search.rows[0].object, account);
     assert_eq!(search.rows[0].record.source, Some(source));
-    assert!(matches!(search.rows[0].record.data, ObjectData::Claim { subject, .. } if subject == event));
+    assert!(
+        matches!(search.rows[0].record.data, ObjectData::Claim { subject, .. } if subject == event)
+    );
     Ok(())
 }
