@@ -38,7 +38,12 @@ fn record(label: &str, data: ObjectData) -> Record {
     }
 }
 
-fn references(store: &Store, world: &World, rev: AuthorRevision, target: ObjectRef) -> Result<Vec<ObjectRef>, Error> {
+fn references(
+    store: &Store,
+    world: &World,
+    rev: AuthorRevision,
+    target: ObjectRef,
+) -> Result<Vec<ObjectRef>, Error> {
     let result = store.execute_query(
         &QuerySpec {
             schema_version: QUERY_SCHEMA_VERSION,
@@ -62,30 +67,65 @@ fn reviewed_link_is_versioned_author_provenance_not_a_relationship() -> Result<(
     let event = ObjectRef::new(world.id);
     let source = ObjectRef::new(world.id);
     let claim = ObjectRef::new(world.id);
-    let first = store.apply(&command(&world, world.revision, vec![
-        Change::Create(one, record("Eleanor Vale", ObjectData::Person)),
-        Change::Create(duplicate, record("Eleanor Vale", ObjectData::Person)),
-        Change::Create(event, record("Council", ObjectData::HistoricalEvent {
-            occurrence: EventDate::Exact(WorldDay(10)),
-        })),
-        Change::Create(source, record("Diary", ObjectData::Source { citation: "Folio 12".into() })),
-    ]))?;
-    let second = store.apply(&command(&world, first, vec![Change::Create(
-        claim,
-        Record {
-            source: Some(source),
-            ..record("Witness statement", ObjectData::Claim {
-                subject: event,
-                predicate: "observed".into(),
-                statement: "Eleanor Vale spoke to the Guild.".into(),
-                audience: ClaimAudience::Author,
-            })
-        }
-    )]))?;
+    let first = store.apply(&command(
+        &world,
+        world.revision,
+        vec![
+            Change::Create(one, record("Eleanor Vale", ObjectData::Person)),
+            Change::Create(duplicate, record("Eleanor Vale", ObjectData::Person)),
+            Change::Create(
+                event,
+                record(
+                    "Council",
+                    ObjectData::HistoricalEvent {
+                        occurrence: EventDate::Exact(WorldDay(10)),
+                    },
+                ),
+            ),
+            Change::Create(
+                source,
+                record(
+                    "Diary",
+                    ObjectData::Source {
+                        citation: "Folio 12".into(),
+                    },
+                ),
+            ),
+        ],
+    ))?;
+    let second = store.apply(&command(
+        &world,
+        first,
+        vec![Change::Create(
+            claim,
+            Record {
+                source: Some(source),
+                ..record(
+                    "Witness statement",
+                    ObjectData::Claim {
+                        subject: event,
+                        predicate: "observed".into(),
+                        statement: "Eleanor Vale spoke to the Guild.".into(),
+                        audience: ClaimAudience::Author,
+                    },
+                )
+            },
+        )],
+    ))?;
     let candidates = store.discover_mentions(view(&world, second), 100)?;
     assert_eq!(candidates.rows.len(), 2);
-    assert!(candidates.rows.iter().all(|row| row.collisions == 2 && row.disposition.is_none()));
-    let candidate = candidates.rows.iter().find(|row| row.target == one).unwrap().clone();
+    assert!(
+        candidates
+            .rows
+            .iter()
+            .all(|row| row.collisions == 2 && row.disposition.is_none())
+    );
+    let candidate = candidates
+        .rows
+        .iter()
+        .find(|row| row.target == one)
+        .unwrap()
+        .clone();
     let review = |expected, decision| ReviewMention {
         view: view(&world, expected),
         expected,
@@ -99,43 +139,92 @@ fn reviewed_link_is_versioned_author_provenance_not_a_relationship() -> Result<(
     let approved = store.review_mention(review(second, MentionDisposition::Approved))?;
     assert_eq!(approved, AuthorRevision(3));
     let current = store.discover_mentions(view(&world, approved), 100)?;
-    assert_eq!(current.rows.iter().find(|row| row.target == one).unwrap().disposition,
-        Some(MentionDisposition::Approved));
-    assert_eq!(current.rows.iter().find(|row| row.target == duplicate).unwrap().disposition, None);
+    assert_eq!(
+        current
+            .rows
+            .iter()
+            .find(|row| row.target == one)
+            .unwrap()
+            .disposition,
+        Some(MentionDisposition::Approved)
+    );
+    assert_eq!(
+        current
+            .rows
+            .iter()
+            .find(|row| row.target == duplicate)
+            .unwrap()
+            .disposition,
+        None
+    );
     assert!(references(&store, &world, second, one)?.is_empty());
     assert_eq!(references(&store, &world, approved, one)?, vec![claim]);
     assert!(references(&store, &world, approved, duplicate)?.is_empty());
     assert!(matches!(
-        store.review_mention(ReviewMention { expected: approved, ..review(approved, MentionDisposition::Approved) }),
+        store.review_mention(ReviewMention {
+            expected: approved,
+            ..review(approved, MentionDisposition::Approved)
+        }),
         Ok(AuthorRevision(4))
     ));
     let latest = AuthorRevision(4);
     let rejected = store.review_mention(review(latest, MentionDisposition::Dismissed))?;
     assert!(references(&store, &world, rejected, one)?.is_empty());
     assert_eq!(references(&store, &world, approved, one)?, vec![claim]);
-    assert_eq!(store.discover_mentions(view(&world, rejected), 100)?.rows.iter()
-        .find(|row| row.target == one).unwrap().disposition, Some(MentionDisposition::Dismissed));
+    assert_eq!(
+        store
+            .discover_mentions(view(&world, rejected), 100)?
+            .rows
+            .iter()
+            .find(|row| row.target == one)
+            .unwrap()
+            .disposition,
+        Some(MentionDisposition::Dismissed)
+    );
 
     let reapproved = store.review_mention(review(rejected, MentionDisposition::Approved))?;
-    let renamed = store.apply(&command(&world, reapproved, vec![
-        Change::Correct(one, record("Eleanor Thorne", ObjectData::Person)),
-    ]))?;
-    assert_eq!(references(&store, &world, renamed, one)?, vec![claim],
-        "explicit stable-ID link survives a person rename");
-    let corrected = store.apply(&command(&world, renamed, vec![
-        Change::Correct(claim, Record {
-            source: Some(source),
-            ..record("Witness statement", ObjectData::Claim {
-                subject: event,
-                predicate: "observed".into(),
-                statement: "Nobody recognizable spoke to the Guild.".into(),
-                audience: ClaimAudience::Author,
-            })
-        }),
-    ]))?;
-    assert!(references(&store, &world, corrected, one)?.is_empty(),
-        "old source-version approval must not follow a corrected statement");
-    assert!(store.discover_mentions(view(&world, corrected), 100)?.rows.is_empty());
+    let renamed = store.apply(&command(
+        &world,
+        reapproved,
+        vec![Change::Correct(
+            one,
+            record("Eleanor Thorne", ObjectData::Person),
+        )],
+    ))?;
+    assert_eq!(
+        references(&store, &world, renamed, one)?,
+        vec![claim],
+        "explicit stable-ID link survives a person rename"
+    );
+    let corrected = store.apply(&command(
+        &world,
+        renamed,
+        vec![Change::Correct(
+            claim,
+            Record {
+                source: Some(source),
+                ..record(
+                    "Witness statement",
+                    ObjectData::Claim {
+                        subject: event,
+                        predicate: "observed".into(),
+                        statement: "Nobody recognizable spoke to the Guild.".into(),
+                        audience: ClaimAudience::Author,
+                    },
+                )
+            },
+        )],
+    ))?;
+    assert!(
+        references(&store, &world, corrected, one)?.is_empty(),
+        "old source-version approval must not follow a corrected statement"
+    );
+    assert!(
+        store
+            .discover_mentions(view(&world, corrected), 100)?
+            .rows
+            .is_empty()
+    );
     store.backup_to(&backup, Scope::Author)?;
     drop(store);
     let reopened = Store::open(&backup)?;
@@ -156,23 +245,54 @@ fn invalid_reviews_and_old_schema_upgrade_are_safe() -> Result<(), Error> {
     let event = ObjectRef::new(world.id);
     let source = ObjectRef::new(world.id);
     let claim = ObjectRef::new(world.id);
-    let first = store.apply(&command(&world, world.revision, vec![
-        Change::Create(one, record("Morgan", ObjectData::Person)),
-        Change::Create(event, record("Council", ObjectData::HistoricalEvent {
-            occurrence: EventDate::Exact(WorldDay(10)),
-        })),
-        Change::Create(source, record("Diary", ObjectData::Source { citation: "Folio".into() })),
-    ]))?;
-    let second = store.apply(&command(&world, first, vec![Change::Create(claim, Record {
-        source: Some(source),
-        ..record("Witness", ObjectData::Claim {
-            subject: event,
-            predicate: "observed".into(),
-            statement: "Morgan was seen.".into(),
-            audience: ClaimAudience::Author,
-        })
-    })]))?;
-    let candidate = store.discover_mentions(view(&world, second), 100)?.rows.remove(0);
+    let first = store.apply(&command(
+        &world,
+        world.revision,
+        vec![
+            Change::Create(one, record("Morgan", ObjectData::Person)),
+            Change::Create(
+                event,
+                record(
+                    "Council",
+                    ObjectData::HistoricalEvent {
+                        occurrence: EventDate::Exact(WorldDay(10)),
+                    },
+                ),
+            ),
+            Change::Create(
+                source,
+                record(
+                    "Diary",
+                    ObjectData::Source {
+                        citation: "Folio".into(),
+                    },
+                ),
+            ),
+        ],
+    ))?;
+    let second = store.apply(&command(
+        &world,
+        first,
+        vec![Change::Create(
+            claim,
+            Record {
+                source: Some(source),
+                ..record(
+                    "Witness",
+                    ObjectData::Claim {
+                        subject: event,
+                        predicate: "observed".into(),
+                        statement: "Morgan was seen.".into(),
+                        audience: ClaimAudience::Author,
+                    },
+                )
+            },
+        )],
+    ))?;
+    let candidate = store
+        .discover_mentions(view(&world, second), 100)?
+        .rows
+        .remove(0);
     let valid = ReviewMention {
         view: view(&world, second),
         expected: second,
@@ -184,7 +304,10 @@ fn invalid_reviews_and_old_schema_upgrade_are_safe() -> Result<(), Error> {
         command_id: Uuid::new_v4(),
     };
     assert!(matches!(
-        store.review_mention(ReviewMention { start_byte: 1, ..valid }),
+        store.review_mention(ReviewMention {
+            start_byte: 1,
+            ..valid
+        }),
         Err(Error::InvalidInput(_))
     ));
     assert!(matches!(
@@ -196,7 +319,10 @@ fn invalid_reviews_and_old_schema_upgrade_are_safe() -> Result<(), Error> {
     ));
     assert!(matches!(
         store.review_mention(ReviewMention {
-            view: ViewContext { scope: Scope::Public, ..valid.view },
+            view: ViewContext {
+                scope: Scope::Public,
+                ..valid.view
+            },
             ..valid
         }),
         Err(Error::CapabilityDenied)

@@ -762,7 +762,6 @@ impl Store {
         Ok(AuthorRevision(revision))
     }
 
-
     /// Author-only explicit decision about a candidate's precise source version
     /// and character boundaries. Re-resolve both ends *inside* the write transaction
     /// before appending an author audit revision.
@@ -786,7 +785,11 @@ impl Store {
             return Err(Error::InvalidRevision);
         }
         let source = resolve_object(
-            &tx, review.source.object, view.branch, view.revision, view.day,
+            &tx,
+            review.source.object,
+            view.branch,
+            view.revision,
+            view.day,
         )?
         .ok_or(Error::NotFound)?;
         if source.reference() != review.source {
@@ -806,10 +809,16 @@ impl Store {
         if !matching_spans(statement, &target.record.label)
             .contains(&(review.start_byte, review.end_byte))
         {
-            return Err(Error::InvalidInput("mention does not match selected person"));
+            return Err(Error::InvalidInput(
+                "mention does not match selected person",
+            ));
         }
         let revision = append_revision(
-            &tx, &world, world.main, review.expected, review.command_id,
+            &tx,
+            &world,
+            world.main,
+            review.expected,
+            review.command_id,
             ("Local author", "Review historical mention candidate"),
         )?;
         tx.execute(
@@ -845,26 +854,29 @@ impl Store {
         candidate: &MentionCandidate,
     ) -> Result<Option<MentionDisposition>, Error> {
         require_author(view.scope)?;
-        let decision: Option<String> = self.conn.query_row(
-            "SELECT decision FROM mention_reviews
+        let decision: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT decision FROM mention_reviews
              WHERE world_id = ?1 AND source_id = ?2 AND source_branch_id = ?3
                AND source_state_revision = ?4 AND source_revision = ?5
                AND target_id = ?6 AND start_byte = ?7 AND end_byte = ?8
                AND revision <= ?9
              ORDER BY revision DESC LIMIT 1",
-            params![
-                view.world.0.as_bytes(),
-                candidate.source.object.id.0.as_bytes(),
-                candidate.source.branch.0.as_bytes(),
-                candidate.source.state_revision.0,
-                candidate.source.recorded_at.0,
-                candidate.target.id.0.as_bytes(),
-                candidate.start_byte as i64,
-                candidate.end_byte as i64,
-                view.revision.0,
-            ],
-            |row| row.get(0),
-        ).optional()?;
+                params![
+                    view.world.0.as_bytes(),
+                    candidate.source.object.id.0.as_bytes(),
+                    candidate.source.branch.0.as_bytes(),
+                    candidate.source.state_revision.0,
+                    candidate.source.recorded_at.0,
+                    candidate.target.id.0.as_bytes(),
+                    candidate.start_byte as i64,
+                    candidate.end_byte as i64,
+                    view.revision.0,
+                ],
+                |row| row.get(0),
+            )
+            .optional()?;
         Ok(match decision.as_deref() {
             Some("approved") => Some(MentionDisposition::Approved),
             Some("dismissed") => Some(MentionDisposition::Dismissed),
@@ -899,19 +911,27 @@ impl Store {
                           source_revision, start_byte, end_byte, revision DESC
                  LIMIT ?4",
             )?;
-            statement.query_map(
-                params![view.world.0.as_bytes(), target.id.0.as_bytes(),
-                        view.revision.0, REVIEW_BUDGET + 1],
-                |row| Ok((
-                    row.get::<_, [u8; 16]>(0)?,
-                    row.get::<_, [u8; 16]>(1)?,
-                    row.get::<_, i64>(2)?,
-                    row.get::<_, i64>(3)?,
-                    row.get::<_, i64>(4)?,
-                    row.get::<_, i64>(5)?,
-                    row.get::<_, String>(6)?,
-                )),
-            )?.collect::<Result<Vec<_>, _>>()?
+            statement
+                .query_map(
+                    params![
+                        view.world.0.as_bytes(),
+                        target.id.0.as_bytes(),
+                        view.revision.0,
+                        REVIEW_BUDGET + 1
+                    ],
+                    |row| {
+                        Ok((
+                            row.get::<_, [u8; 16]>(0)?,
+                            row.get::<_, [u8; 16]>(1)?,
+                            row.get::<_, i64>(2)?,
+                            row.get::<_, i64>(3)?,
+                            row.get::<_, i64>(4)?,
+                            row.get::<_, i64>(5)?,
+                            row.get::<_, String>(6)?,
+                        ))
+                    },
+                )?
+                .collect::<Result<Vec<_>, _>>()?
         };
         if reviews.len() > REVIEW_BUDGET as usize {
             return Err(Error::QueryBudgetExceeded);
@@ -919,7 +939,14 @@ impl Store {
         let mut seen = HashSet::new();
         let mut linked = HashSet::new();
         for (source_id, branch_id, state_revision, recorded_at, start, end, decision) in reviews {
-            if !seen.insert((source_id, branch_id, state_revision, recorded_at, start, end)) {
+            if !seen.insert((
+                source_id,
+                branch_id,
+                state_revision,
+                recorded_at,
+                start,
+                end,
+            )) {
                 continue;
             }
             if decision != "approved" {
@@ -929,7 +956,8 @@ impl Store {
                 world: view.world,
                 id: ObjectId(Uuid::from_bytes(source_id)),
             };
-            if let Some(version) = resolve_object(&tx, source, view.branch, view.revision, view.day)?
+            if let Some(version) =
+                resolve_object(&tx, source, view.branch, view.revision, view.day)?
                 && version.source_branch.0.as_bytes() == &branch_id
                 && version.state_revision.0 == state_revision
                 && version.recorded_at.0 == recorded_at
