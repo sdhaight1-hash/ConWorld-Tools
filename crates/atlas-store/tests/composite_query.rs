@@ -1,6 +1,6 @@
 //! Phase 3 bounded, typed predicates over an authorized historical snapshot.
 use atlas_store::{
-    query::{ObjectKindFilter, QueryFilter, QuerySpec, QUERY_SCHEMA_VERSION},
+    query::{ObjectKindFilter, QUERY_SCHEMA_VERSION, QueryFilter, QuerySpec},
     *,
 };
 use uuid::Uuid;
@@ -63,20 +63,43 @@ fn compound_predicates_obey_kind_source_boolean_and_historical_scope() -> Result
         world.revision,
         vec![
             Change::Create(alice, record("Alice", None, ObjectData::Person, None)),
-            Change::Create(source, record("Journal volume 4", None, ObjectData::Source {
-                citation: "J-4".into(),
-            }, None)),
-            Change::Create(event, record("Trial", Some(10), ObjectData::HistoricalEvent {
-                occurrence: EventDate::Exact(WorldDay(10)),
-            }, None)),
+            Change::Create(
+                source,
+                record(
+                    "Journal volume 4",
+                    None,
+                    ObjectData::Source {
+                        citation: "J-4".into(),
+                    },
+                    None,
+                ),
+            ),
+            Change::Create(
+                event,
+                record(
+                    "Trial",
+                    Some(10),
+                    ObjectData::HistoricalEvent {
+                        occurrence: EventDate::Exact(WorldDay(10)),
+                    },
+                    None,
+                ),
+            ),
         ],
     ))?;
-    let claim = |label: &str, source| record(label, Some(10), ObjectData::Claim {
-        subject: event,
-        predicate: "testified".into(),
-        statement: "Alice was seen near the library".into(),
-        audience: ClaimAudience::Author,
-    }, source);
+    let claim = |label: &str, source| {
+        record(
+            label,
+            Some(10),
+            ObjectData::Claim {
+                subject: event,
+                predicate: "testified".into(),
+                statement: "Alice was seen near the library".into(),
+                audience: ClaimAudience::Author,
+            },
+            source,
+        )
+    };
     let second = store.apply(&command(
         &world,
         first,
@@ -91,7 +114,9 @@ fn compound_predicates_obey_kind_source_boolean_and_historical_scope() -> Result
     ]);
     let filter = QueryFilter::And(vec![
         QueryFilter::Or(vec![names, QueryFilter::Kind(ObjectKindFilter::Claim)]),
-        QueryFilter::Not(Box::new(QueryFilter::ExactLabel("Independent testimony".into()))),
+        QueryFilter::Not(Box::new(QueryFilter::ExactLabel(
+            "Independent testimony".into(),
+        ))),
     ]);
     let full = store.execute_query(&query(filter, 100), view(&world, second, 10))?;
     let returned: Vec<_> = full.rows.iter().map(|row| row.object).collect();
@@ -104,12 +129,29 @@ fn compound_predicates_obey_kind_source_boolean_and_historical_scope() -> Result
         QueryFilter::LabelContains("testimony".into()),
     ]);
     assert_eq!(
-        store.execute_query(&query(sourced.clone(), 100), view(&world, second, 10))?.rows.len(),
+        store
+            .execute_query(&query(sourced.clone(), 100), view(&world, second, 10))?
+            .rows
+            .len(),
         2
     );
-    assert!(store.execute_query(&query(sourced.clone(), 1), view(&world, second, 10))?.truncated);
-    assert!(store.execute_query(&query(sourced.clone(), 100), view(&world, first, 10))?.rows.is_empty());
-    assert!(store.execute_query(&query(sourced.clone(), 100), view(&world, second, 9))?.rows.is_empty());
+    assert!(
+        store
+            .execute_query(&query(sourced.clone(), 1), view(&world, second, 10))?
+            .truncated
+    );
+    assert!(
+        store
+            .execute_query(&query(sourced.clone(), 100), view(&world, first, 10))?
+            .rows
+            .is_empty()
+    );
+    assert!(
+        store
+            .execute_query(&query(sourced.clone(), 100), view(&world, second, 9))?
+            .rows
+            .is_empty()
+    );
 
     let fork = store.fork(&ForkCommand {
         world: world.id,
@@ -124,29 +166,69 @@ fn compound_predicates_obey_kind_source_boolean_and_historical_scope() -> Result
     let corrected = store.apply(&command(
         &world,
         fork.created_revision,
-        vec![Change::Correct(diary, claim("Revised account", Some(source)))],
+        vec![Change::Correct(
+            diary,
+            claim("Revised account", Some(source)),
+        )],
     ))?;
-    let diary_name = query(QueryFilter::And(vec![
-        QueryFilter::Kind(ObjectKindFilter::Claim),
-        QueryFilter::LabelContains("Diary".into()),
-    ]), 100);
-    assert!(store.execute_query(&diary_name, view(&world, corrected, 10))?.rows.is_empty());
-    assert_eq!(store.execute_query(&diary_name, view(&world, second, 10))?.rows[0].object, diary);
-    assert_eq!(store.execute_query(&diary_name, ViewContext {
-        branch: fork.id,
-        ..view(&world, corrected, 10)
-    })?.rows[0].object, diary);
-    assert!(matches!(store.execute_query(&query(sourced, 100), ViewContext {
-        scope: Scope::Public,
-        ..view(&world, corrected, 10)
-    }), Err(Error::CapabilityDenied)));
-    assert!(store.execute_query(&query(QueryFilter::Kind(ObjectKindFilter::Person), 100),
-        view(&other, other.revision, 10))?.rows.is_empty());
+    let diary_name = query(
+        QueryFilter::And(vec![
+            QueryFilter::Kind(ObjectKindFilter::Claim),
+            QueryFilter::LabelContains("Diary".into()),
+        ]),
+        100,
+    );
+    assert!(
+        store
+            .execute_query(&diary_name, view(&world, corrected, 10))?
+            .rows
+            .is_empty()
+    );
+    assert_eq!(
+        store
+            .execute_query(&diary_name, view(&world, second, 10))?
+            .rows[0]
+            .object,
+        diary
+    );
+    assert_eq!(
+        store
+            .execute_query(
+                &diary_name,
+                ViewContext {
+                    branch: fork.id,
+                    ..view(&world, corrected, 10)
+                }
+            )?
+            .rows[0]
+            .object,
+        diary
+    );
+    assert!(matches!(
+        store.execute_query(
+            &query(sourced, 100),
+            ViewContext {
+                scope: Scope::Public,
+                ..view(&world, corrected, 10)
+            }
+        ),
+        Err(Error::CapabilityDenied)
+    ));
+    assert!(
+        store
+            .execute_query(
+                &query(QueryFilter::Kind(ObjectKindFilter::Person), 100),
+                view(&other, other.revision, 10)
+            )?
+            .rows
+            .is_empty()
+    );
     Ok(())
 }
 
 #[test]
-fn compound_validation_is_upfront_bounded_and_not_bypassable_by_boolean_short_circuit() -> Result<(), Error> {
+fn compound_validation_is_upfront_bounded_and_not_bypassable_by_boolean_short_circuit()
+-> Result<(), Error> {
     let mut store = Store::open(":memory:")?;
     let world = store.create_world("One", Scope::Author)?;
     let other = store.create_world("Two", Scope::Author)?;
@@ -156,10 +238,14 @@ fn compound_validation_is_upfront_bounded_and_not_bypassable_by_boolean_short_ci
         QueryFilter::And(Vec::new()),
         QueryFilter::Or(vec![QueryFilter::Kind(ObjectKindFilter::Person)]),
         QueryFilter::Not(Box::new(QueryFilter::FullTextPhrase("Alice".into()))),
-        QueryFilter::Or(vec![QueryFilter::Kind(ObjectKindFilter::Person),
-            QueryFilter::Backlinks(foreign)]),
-        QueryFilter::And(vec![QueryFilter::Kind(ObjectKindFilter::Claim),
-            QueryFilter::HasSource(foreign)]),
+        QueryFilter::Or(vec![
+            QueryFilter::Kind(ObjectKindFilter::Person),
+            QueryFilter::Backlinks(foreign),
+        ]),
+        QueryFilter::And(vec![
+            QueryFilter::Kind(ObjectKindFilter::Claim),
+            QueryFilter::HasSource(foreign),
+        ]),
         QueryFilter::LabelContains(" ".into()),
     ];
     for filter in invalids {
@@ -169,15 +255,35 @@ fn compound_validation_is_upfront_bounded_and_not_bypassable_by_boolean_short_ci
     for _ in 0..6 {
         deep = QueryFilter::Not(Box::new(deep));
     }
-    assert!(matches!(store.execute_query(&query(deep, 100), current),
-        Err(Error::QueryBudgetExceeded)));
-    let wide = QueryFilter::And((0..33).map(|_| QueryFilter::Kind(ObjectKindFilter::Person)).collect());
-    assert!(matches!(store.execute_query(&query(wide, 100), current),
-        Err(Error::QueryBudgetExceeded)));
-    assert!(matches!(store.execute_query(&query(QueryFilter::HasSource(foreign), 100), current),
-        Err(Error::WrongWorld)));
+    assert!(matches!(
+        store.execute_query(&query(deep, 100), current),
+        Err(Error::QueryBudgetExceeded)
+    ));
+    let wide = QueryFilter::And(
+        (0..33)
+            .map(|_| QueryFilter::Kind(ObjectKindFilter::Person))
+            .collect(),
+    );
+    assert!(matches!(
+        store.execute_query(&query(wide, 100), current),
+        Err(Error::QueryBudgetExceeded)
+    ));
+    assert!(matches!(
+        store.execute_query(&query(QueryFilter::HasSource(foreign), 100), current),
+        Err(Error::WrongWorld)
+    ));
     // Invalid branch is refused even if no currently visible objects match.
-    let unknown = ViewContext { branch: BranchId(Uuid::new_v4()), ..current };
-    assert!(store.execute_query(&query(QueryFilter::Kind(ObjectKindFilter::Person), 100), unknown).is_err());
+    let unknown = ViewContext {
+        branch: BranchId(Uuid::new_v4()),
+        ..current
+    };
+    assert!(
+        store
+            .execute_query(
+                &query(QueryFilter::Kind(ObjectKindFilter::Person), 100),
+                unknown
+            )
+            .is_err()
+    );
     Ok(())
 }

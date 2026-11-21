@@ -63,7 +63,12 @@ enum PredicateInput {
 }
 
 impl PredicateInput {
-    fn into_filter(self, world: WorldId, depth: usize, nodes: &mut usize) -> Result<QueryFilter, String> {
+    fn into_filter(
+        self,
+        world: WorldId,
+        depth: usize,
+        nodes: &mut usize,
+    ) -> Result<QueryFilter, String> {
         *nodes += 1;
         if depth > 4 || *nodes > 32 {
             return Err("Composite query exceeds the predicate budget".into());
@@ -89,15 +94,21 @@ impl PredicateInput {
             Self::And { filters } | Self::Or { filters } if !(2..=8).contains(&filters.len()) => {
                 return Err("AND/OR needs 2 to 8 children".into());
             }
-            Self::And { filters } => QueryFilter::And(filters.into_iter()
-                .map(|item| item.into_filter(world, depth + 1, nodes))
-                .collect::<Result<Vec<_>, _>>()?),
-            Self::Or { filters } => QueryFilter::Or(filters.into_iter()
-                .map(|item| item.into_filter(world, depth + 1, nodes))
-                .collect::<Result<Vec<_>, _>>()?),
-            Self::Not { filter } => QueryFilter::Not(Box::new(
-                filter.into_filter(world, depth + 1, nodes)?,
-            )),
+            Self::And { filters } => QueryFilter::And(
+                filters
+                    .into_iter()
+                    .map(|item| item.into_filter(world, depth + 1, nodes))
+                    .collect::<Result<Vec<_>, _>>()?,
+            ),
+            Self::Or { filters } => QueryFilter::Or(
+                filters
+                    .into_iter()
+                    .map(|item| item.into_filter(world, depth + 1, nodes))
+                    .collect::<Result<Vec<_>, _>>()?,
+            ),
+            Self::Not { filter } => {
+                QueryFilter::Not(Box::new(filter.into_filter(world, depth + 1, nodes)?))
+            }
         })
     }
 }
@@ -724,9 +735,10 @@ impl AuthorWorkspace {
 
     fn composite_query(&self, request: CompositeQueryInput) -> Result<SearchSummary, String> {
         let mut nodes = 0;
-        let predicate = request.predicate.into_filter(
-            WorldId(id(&request.world_id)?), 0, &mut nodes,
-        )?;
+        let predicate =
+            request
+                .predicate
+                .into_filter(WorldId(id(&request.world_id)?), 0, &mut nodes)?;
         self.execute_filter(
             &request.world_id,
             request.day,

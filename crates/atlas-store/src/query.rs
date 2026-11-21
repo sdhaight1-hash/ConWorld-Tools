@@ -341,22 +341,46 @@ fn predicate_matches(
     visible: &HashSet<ObjectRef>,
 ) -> bool {
     match filter {
-        QueryFilter::LabelContains(text) => version.record.label.to_lowercase().contains(&text.trim().to_lowercase()),
-        QueryFilter::ExactLabel(text) => version.record.label.to_lowercase() == text.trim().to_lowercase(),
+        QueryFilter::LabelContains(text) => version
+            .record
+            .label
+            .to_lowercase()
+            .contains(&text.trim().to_lowercase()),
+        QueryFilter::ExactLabel(text) => {
+            version.record.label.to_lowercase() == text.trim().to_lowercase()
+        }
         QueryFilter::Kind(kind) => matches!(
             (&version.record.data, kind),
             (ObjectData::Person, ObjectKindFilter::Person)
                 | (ObjectData::Definition { .. }, ObjectKindFilter::Definition)
-                | (ObjectData::Relationship { .. }, ObjectKindFilter::Relationship)
-                | (ObjectData::EventInvolvement { .. }, ObjectKindFilter::EventInvolvement)
-                | (ObjectData::ActorAction { .. }, ObjectKindFilter::ActorAction)
-                | (ObjectData::HistoricalEvent { .. }, ObjectKindFilter::HistoricalEvent)
+                | (
+                    ObjectData::Relationship { .. },
+                    ObjectKindFilter::Relationship
+                )
+                | (
+                    ObjectData::EventInvolvement { .. },
+                    ObjectKindFilter::EventInvolvement
+                )
+                | (
+                    ObjectData::ActorAction { .. },
+                    ObjectKindFilter::ActorAction
+                )
+                | (
+                    ObjectData::HistoricalEvent { .. },
+                    ObjectKindFilter::HistoricalEvent
+                )
                 | (ObjectData::Source { .. }, ObjectKindFilter::Source)
                 | (ObjectData::Claim { .. }, ObjectKindFilter::Claim)
         ),
-        QueryFilter::HasSource(source) => visible.contains(source) && version.record.source == Some(*source),
-        QueryFilter::And(children) => children.iter().all(|child| predicate_matches(child, version, visible)),
-        QueryFilter::Or(children) => children.iter().any(|child| predicate_matches(child, version, visible)),
+        QueryFilter::HasSource(source) => {
+            visible.contains(source) && version.record.source == Some(*source)
+        }
+        QueryFilter::And(children) => children
+            .iter()
+            .all(|child| predicate_matches(child, version, visible)),
+        QueryFilter::Or(children) => children
+            .iter()
+            .any(|child| predicate_matches(child, version, visible)),
         QueryFilter::Not(inner) => !predicate_matches(inner, version, visible),
         _ => unreachable!("the predicate validator rejects unsupported leaf filters"),
     }
