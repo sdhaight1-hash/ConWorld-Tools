@@ -4255,7 +4255,18 @@ fn site_area_preserves_unknown_zero_units_corrections_and_archive() -> Result<()
         reopened.site_area(later, place)?,
         store.site_area(later, place)?
     );
-    for (reference, context) in [(predecessor, prior), (reference, layout_view)] {
+    let correction_view = ViewContext {
+        day: prior.day,
+        ..layout_view
+    };
+    assert_eq!(
+        reopened
+            .resolve_semantic_fact(reference, correction_view)?
+            .unwrap()
+            .corrects,
+        Some(first)
+    );
+    for (reference, context) in [(predecessor, prior), (reference, correction_view)] {
         assert_eq!(
             reopened.resolve_semantic_fact(reference, context)?,
             store.resolve_semantic_fact(reference, context)?
