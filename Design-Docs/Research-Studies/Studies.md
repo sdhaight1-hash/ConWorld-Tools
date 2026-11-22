@@ -1,6 +1,6 @@
 # Research Studies
 
-This directory holds **research studies produced after a focused investigation** for ConWorld Tools. Research studies inform architectural decisions, the original roadmap, and potentially new-feature proposals. It is **not** a directory for speculative research requests or issue placeholders.
+This directory holds **research studies produced after a focused investigation** for ConWorld Tools. Research studies inform architectural decisions, the original roadmap, and potentially architectural-evolution or new-feature proposals. It is **not** a directory for speculative research requests or issue placeholders.
 
 **Governing instructions:** [Root README — AI Systems Instruction (Lola) and ticket-creation policy](../../README.md) · [Design documentation index](../README.md) · [Architecture decisions and reconciliation](../12-Decisions-and-Reconciliation.md).
 
@@ -9,7 +9,7 @@ This directory holds **research studies produced after a focused investigation**
 - **Proposal:** Create a GitHub issue titled `Research: Focused Research Topic` following the [root README research-ticket rules](../../README.md#5-research-tickets--proposals-for-studies-not-completed-studies). The issue MUST specify a focused question, why it matters, the decision it would enable, hypotheses, boundaries, proposed methods, affected design/phase links, and **real preliminary citations with clickable source URLs**. These are starting references, **not findings**.
 - **Investigation:** Conduct the actual literature/code/repository review, testing, benchmarks, or comparative research. Record what was examined, the methodology, dates, observed evidence, conflicting results, and limitations. Do not invent paper findings or claim to have run experiments that were not performed.
 - **Study artifact:** Write the resulting cited Markdown study in this directory. Use a descriptive filename such as `large-graph-rendering-comparison.md`. Mark drafts as **Draft**, and distinguish them from **Reviewed** studies.
-- **Review and close:** Cross-link the study to its originating Research issue and the issue back to the study. Evaluate its recommendations; update a relevant ADR, existing Roadmap Phase, or separately approved `New Feature:` proposal as warranted. Close the Research issue only after its research and review acceptance gates are satisfied.
+- **Review and close:** Cross-link the study to its originating Research issue and the issue back to the study. Evaluate its recommendations; update a relevant ADR, existing Roadmap Phase, or a separately reviewed `Architectural Evolution:` or `New Feature:` proposal as warranted. Close the Research issue only after its research and review acceptance gates are satisfied.
 
 An AI operating as **Lola** MUST follow the root README's think-first, simplicity-first, surgical-change, and testable-goals instructions. A proposed study does not authorize implementing its recommendations or changing accepted design contracts.
 
@@ -25,7 +25,7 @@ Each completed study SHOULD contain all relevant sections below, with **unknown,
 6. **Comparison and trade-offs** — feasibility, accuracy, performance, maintenance, complexity, platform compatibility, failure modes, and security as applicable.
 7. **Limitations and counter-evidence** — gaps, uncertainty, negative findings, version drift, and what was not tested.
 8. **Recommendation and decision implications** — preferred path, rationale, rejected alternatives, confidence, and what must still be decided.
-9. **Impact map** — affected requirements, ADRs, Roadmap Phase issues, test cases, APIs, schemas, and any justified `New Feature:` proposal.
+9. **Impact map** — affected requirements, ADRs, Roadmap Phase issues, test cases, APIs, schemas, and any justified `Architectural Evolution:` or `New Feature:` proposal.
 10. **References** — stable clickable primary/authoritative sources, citations near substantive claims, dates where available, URL/DOI/repository commit, and retrieval date for mutable sources.
 
 ### Citation practice
@@ -57,3 +57,4 @@ Subsequent explicit owner approval: [#70](https://github.com/sdhaight1-hash/ConW
 
 - [Universal worldbuilding ontology, entity classification and domain coverage](universal-worldbuilding-ontology.md) — **In Review**, [#71](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/71). Formal ontology and five principal game/TTRPG case studies, two supplemental studies, candidate classification and integration matrix, synthetic competency and dense classification comparison. Existing core first; constrained semantic profiles are a possible separate proposal, pending owner review. No production implementation.
   - [Deeper product-value review](universal-worldbuilding-ontology.md#11-deeper-evaluation-marginal-value-to-the-actual-product): compares completed original scope, curated and author-defined profiles; 12-task value matrix, historical and sci-fi scenarios, independent semantic validation fixture and proposed scope/stop criteria. In Review, no new feature accepted.
+  - Governance update: [Architectural Evolution ticket category](../Architectural-Evolutions/Evolutions.md) explicitly accepted by the owner; #71's shared ontology recommendations are candidates for a separate proposed evolution, with any genuinely new product capability still separately classified. Research remains In Review, not approval of a specific change.

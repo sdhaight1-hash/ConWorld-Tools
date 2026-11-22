@@ -13,6 +13,8 @@ This directory contains design specifications for **new capabilities that fall o
 5. **Implement only against agreed acceptance criteria.** Track dependency-ready implementation tasks and validated test results via linked issues/PRs; reconcile affected core docs or ADRs deliberately rather than silently rewriting the original roadmap.
 6. **Review and close only on evidence.** Feature completion requires the agreed behavior, migrations, UI integration, tests, permission checks, documentation, and runtime validation as applicable. An accepted design alone is **not** a completed implementation.
 
+Material changes to accepted shared architecture in support of existing capabilities belong to the separately approved [Architectural Evolution lifecycle](../Architectural-Evolutions/Evolutions.md), not a disguised New Feature. Mixed proposals must distinguish the architectural delta from genuinely additional product scope, which still requires New Feature approval.
+
 An AI acting as **Lola** follows the root README's think-before-coding, simplicity-first, surgical-change, and verifiable-goals standards. Push back on features that can be handled by existing capabilities or simpler additions.
 
 ## Required feature specification

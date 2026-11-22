@@ -95,7 +95,7 @@ Use the UTC-based naming pattern `YYYY-MM-DD_HH-mm-ssZ_phase-NN_area_short-descr
 
 ---
 
-This repository uses GitHub Issues to manage **roadmap phases, proposed research, and genuinely new features**. The rules below are instructions for human contributors and **AI architects/coding agents**. They apply whenever an AI considers creating, revising, or closing an issue.
+This repository uses GitHub Issues to manage **roadmap phases, proposed research, genuinely new features, and architectural evolutions**. The rules below are instructions for human contributors and **AI architects/coding agents**. They apply whenever an AI considers creating, revising, or closing an issue.
 
 ## AI Systems Instruction — Lola
 
@@ -115,13 +115,13 @@ An AI **MUST**:
 
 1. Read this README, the [design documentation index](Design-Docs/README.md), [accepted decisions](Design-Docs/12-Decisions-and-Reconciliation.md), [requirements and invariants](Design-Docs/01-Requirements-and-Invariants.md), [delivery roadmap](Design-Docs/10-Delivery-Roadmap.md), and the relevant specialist specifications.
 2. Inspect the **actual current** repository tree, the existing [GitHub issues](https://github.com/sdhaight1-hash/ConWorld-Tools/issues) (open **and** closed), and relevant pull requests and studies. Do not assume prior conversations or earlier repository names reflect current state.
-3. Check the two existing documentation areas: [Features](Design-Docs/Features/) for post-roadmap feature designs and [Research-Studies](Design-Docs/Research-Studies/) for completed research studies.
+3. Check [Features](Design-Docs/Features/), [Research-Studies](Design-Docs/Research-Studies/), and [Architectural-Evolutions](Design-Docs/Architectural-Evolutions/Evolutions.md) for accepted features, research evidence and architectural change plans.
 4. Search for duplicate or overlapping work by *concept and aliases*, not only by exact issue title. Prefer updating/linking an existing issue over duplicating it.
-5. Classify the proposed work as **exactly one** of the three issue types defined below. If the work is already covered by a Roadmap Phase, put it under that phase rather than calling it a new feature.
+5. Classify the proposed work as **exactly one** of the four governing issue types below. Ordinary work already covered by an accepted phase/feature/evolution belongs to that owner, with linked implementation tasks as necessary. A material change to an accepted architecture or shared contract requires a separately reviewed Architectural Evolution; do not rebrand ordinary implementation, repairs, or new product scope as an evolution.
 6. Check scope, prerequisites, known decisions, existing evidence, and conflicts. Link authoritative documentation using current `ConWorld-Tools` paths.
 7. Write a concrete, useful issue **before** creating it: scope, deliverable, dependencies, verification and links. Do not create empty placeholders or pretend a proposal represents finished work.
 
-**Do not create a GitHub issue solely because an AI has an interesting idea.** Explain how it serves the product, what decision/work it unlocks, and how completion can be verified. An AI may propose research or a feature, but proposing must not be mistaken for automatic authorization to alter accepted architecture or expand implementation scope.
+**Do not create a GitHub issue solely because an AI has an interesting idea.** Explain how it serves the product, what decision/work it unlocks, and how completion can be verified. An AI may propose research, a feature, or an architectural evolution, but proposing must not be mistaken for automatic authorization to alter accepted architecture or expand implementation scope.
 
 ### 2. Allowed ticket types and exact title conventions
 
@@ -130,6 +130,7 @@ An AI **MUST**:
 | **Roadmap Phase** | `Roadmap Phase N — Descriptive Title` | A phase of the established, dependency-ordered implementation plan. **N** is the roadmap phase number, not the GitHub issue number. |
 | **Research** | `Research: Focused Research Topic` | **Propose** a focused investigation required to answer an unresolved technical, design, UX, scientific, or product question. The expected future output is a cited **research study**. |
 | **New Feature** | `New Feature: Descriptive Feature Name` | Propose work genuinely **outside** the original roadmap and its existing feature requirements. Do not disguise normal roadmap implementation, bug fixes, or architectural tasks as new features. |
+| **Architectural Evolution** | `Architectural Evolution: Descriptive Architecture Change` | Propose a material, research/evidence-driven refinement or restructuring of accepted architectural foundations, shared semantic models, or cross-system contracts in support of existing and approved product capabilities. Not routine implementation/refactoring or disguised new product scope. |
 
 Keep the prefix, colon, and `Roadmap Phase N` numbering consistent. Give every issue a specific, searchable title. Never renumber or duplicate existing roadmap phases without an explicitly approved roadmap change. Labels and milestones are optional metadata; do **not** assume labels or milestones exist, and never rely on them instead of the exact title prefix.
 
@@ -188,7 +189,7 @@ Research may be proposed by the project owner or by a designing AI when it encou
 6. **Preliminary citations, links and references:** real, verifiable starting references, cited in the body (e.g. `[R1]`) and collected in a **References** section. Give author/organization, title, publication or update date *when known*, URL/DOI or repository path, and what each reference supports. Link internal design specifications and related issues as well. These are **starting sources**, not completed findings.
 7. **Research deliverable:** a future Markdown **research study** in [`/Design-Docs/Research-Studies/`](Design-Docs/Research-Studies/), with suggested descriptive filename, methods, dated sources, results, limitations, alternatives, recommendation and impact on the architecture.
 8. **Completion criteria:** the actual study exists and is linked; claims are cited; conflicting evidence and limitations documented; recommendations map to affected decisions/roadmap issues.
-9. **Follow-up decision:** describe how results will be reviewed and incorporated into ADRs, existing phase tasks, or a separately approved New Feature proposal.
+9. **Follow-up decision:** describe how results will be reviewed and incorporated into ADRs, existing phase tasks, or a separately reviewed Architectural Evolution or New Feature proposal.
 
 **Citation rule:** every Research issue MUST include real clickable source links **and** explicit citations/reference entries in its proposal. Verify a small number of genuinely relevant sources **before** opening the issue, without pretending to have performed the full study. If trustworthy starting references cannot yet be verified, do not invent them; gather verifiable sources first or flag the draft for review instead of publishing an unsupported research ticket. Public papers, authoritative specifications, original project repositories, and measured primary evidence are preferable to unverified summaries.
 
@@ -213,16 +214,40 @@ This type is for a capability not already specified by the [product charter](Des
 - **Design deliverable:** upon acceptance, write or update a feature-specific specification under [`/Design-Docs/Features/`](Design-Docs/Features/) and cross-link it from the issue.
 - **Approval/status:** state **Proposed / Under Review / Accepted / Deferred / Rejected**, with an actual recorded decision; do not assume acceptance from issue creation.
 
-**Scope rule:** do not rewrite the original roadmap just to accommodate an idea. First compare it against existing requirements and issues. If it is covered, link or update the existing phase. If evidence is insufficient, open a `Research:` proposal instead. If genuinely new, use `New Feature:` and seek explicit scope approval before implementation or changing accepted requirements.
+**Scope rule:** do not rewrite the original roadmap just to accommodate an idea. First compare it against existing requirements and issues. If it is covered without material architecture changes, link or update its existing owner. If evidence is insufficient, open a `Research:` proposal. If it materially changes shared architectural contracts for approved capabilities, use `Architectural Evolution:`. If it introduces genuinely new product capabilities, use `New Feature:`. Mixed work must be split into linked, separately approved scope where needed; neither ticket substitutes for the other.
+
+### 6A. Architectural Evolution tickets — governed change to architectural foundations
+
+**Title:** `Architectural Evolution: Descriptive Architecture Change`
+
+**Authority:** [explicit owner approval of the ticket category](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/71#issuecomment-7074128490) (2026-11-21 local / 2026-11-22 UTC). This approval establishes the category only, not any individual architectural change.
+
+Use an evolution when supported evidence warrants a material change to existing or approved architectural foundations, domain semantics, shared interfaces, invariants, persistence, or cross-system integration contracts. The goal is to better realize accepted product intent and preserve a coherent architecture across phases and features. An evolution may refine how existing author-facing capabilities work; it must not introduce genuinely additional product scope without a separately approved New Feature. A routine bug fix, implementation of an existing specification, or an internal refactor preserving accepted contracts belongs to its existing owner. A design question with insufficient evidence remains Research. No new phase or automatic reopening/renumbering of phases.
+
+**Required issue sections:**
+
+- **Problem and baseline:** pinned source commit/schema/contracts, affected accepted decisions, limitations and actual evidence; separate implemented state from the completed intended roadmap.
+- **Justification and classification:** explain why ordinary work under an existing phase/feature and a narrower ADR are insufficient; distinguish existing obligations, proposed changed contracts and any genuinely new product capabilities. Link research or other concrete supporting evidence and alternatives, including retaining the architecture.
+- **Proposed architectural delta and non-goals:** precise before/after semantics, types, constraints, authority, APIs and behavior preserved; identify what changes, what remains unchanged, and any specific invariant/decision needing explicit supersession. No speculative rewrite or expansion.
+- **Impact and dependency map:** affected phases/features/ADRs, storage/migrations, authoring and UI, query/discovery, Node/Canvas/Display, permissions, archive/import/export, rendering/performance and external boundaries as applicable. Assign ownership; link rather than duplicate existing gates.
+- **Migration and compatibility:** stable identity/history, backfill or version pins, atomicity, backups, migration dry run, older-version handling, rollback/restore, transition and failure cases; explicit justification if not applicable.
+- **Reconciliation deliverable:** after explicit acceptance, write a versioned evolution specification under [Architectural-Evolutions](Design-Docs/Architectural-Evolutions/Evolutions.md); record ADRs for changed decisions and exact affected normative sections, requirements, API contracts and tests. Avoid a competing truth source. Record old/new contracts and authority before implementation.
+- **Dependency-ordered implementation plan:** minimal integrated slices, test-first gates, readiness, stop/rollback criteria, PR ownership and regression plan. Preserve original phase exits and feature scope unless separate explicit approval changes them.
+- **Verification and closure:** objective architecture-specific acceptance criteria, exact-head integration/regression results, relevant native/runtime and permission evidence, migration/restore and compatibility verification, documentation reconciliation and review. Label unrun evidence, and use genuine development captures when applicable.
+- **Approval/status:** Proposed / Under Review / Accepted / Deferred / Rejected; explicit recorded owner acceptance of the particular delta before normative changes or production implementation; separate design/implementation/verification status, with unresolved details and decision links.
+
+**Lifecycle:** evidence and audit → proposed evolution → explicit owner approval → accepted evolution specification and ADR/design reconciliation → dependency-gated implementation → integration/regression verification → review and closure. Approval of this ticket category does not approve any evolution. An accepted evolution design is not verified implementation. Closure of its originating research is independent of later production success; record the research disposition and link the evolution, retaining research limitations.
+
+**Scope firewall:** do not use an evolution to circumvent New Feature procedures, weaken invariants, enlarge approved feature boundaries, alter phase exits, or hide speculative capabilities. Any changed normative commitments require specifically recorded approvals and reconciled decisions; genuine additional product behavior outside scope requires its own New Feature decision. Existing phased deliverables remain with their owning tickets.
 
 ### 7. Ticket handling lifecycle
 
 1. **Discover and classify.** Inspect actual repository, documentation, previous decisions and all relevant issues; reject duplicate tickets.
 2. **Draft with source links.** Ensure the correct title pattern and appropriate type-specific fields. Link current paths under `ConWorld-Tools`.
 3. **Create in GitHub.** Include all required sections at creation time; do not rely on future comments to fill an otherwise empty ticket.
-4. **Cross-link.** Link prerequisites and parent roadmap phases, related research tickets/studies, feature specifications, and relevant PRs. Update existing indexes only when they are genuine indexes for that type.
+4. **Cross-link.** Link prerequisites and parent roadmap phases, related research tickets/studies, feature and evolution specifications, affected ADRs, and relevant PRs. Update existing indexes only when they are genuine indexes for that type.
 5. **Track work honestly.** Use checkboxes, dated observations, commits and verified outputs. Distinguish `not run` from `passed`, and proposal from an approved/finished study.
-6. **Review before closing.** Verify the exact completion gates, link resulting research/feature/design documents, reconcile accepted decisions and update dependent tickets.
+6. **Review before closing.** Verify the exact completion gates, link resulting research/feature/evolution/design documents, reconcile accepted decisions and update dependent tickets.
 7. **Avoid unsolicited scope expansion.** Research recommendations do not automatically authorize implementation; an interesting prototype is not a new roadmap phase.
 
 ### 8. Example title classifications
@@ -235,6 +260,9 @@ This type is for a capability not already specified by the [product charter](Des
 | Add collaborative cloud editing if not in the accepted roadmap | `New Feature: Multi-User Collaborative World Editing` |
 | Improve family-tree traversal defined in phase 5 | Existing **Roadmap Phase 5** (not a New Feature) |
 | Investigate a contested paper's applicability to affiliation inference | `Research: Evidence-Aware Affiliation Inference` |
+| Reconcile stable entity classification and shared historical fact references across accepted systems after research | `Architectural Evolution: Universal Worldbuilding Ontology and Governed Semantic Extensibility` (proposal; not scope approval) |
+| Add a new standalone semantic-profile design tool beyond accepted authoring scope | `New Feature:` proposal, separately evaluated and approved |
+| Repair a bug in a verified query contract without changing its semantics | Linked task under existing owning phase/feature/evolution |
 
 ### 9. Canonical documentation and authority
 
@@ -245,6 +273,7 @@ This type is for a capability not already specified by the [product charter](Des
 - [AI engineering instructions](Design-Docs/11-AI-Engineering-Instructions.md) — coding and validation practices.
 - [Features](Design-Docs/Features/) — accepted/design-in-progress **post-roadmap feature specifications**.
 - [Research Studies](Design-Docs/Research-Studies/) — **completed or explicitly draft** research documents, never confused with Research ticket proposals.
+- [Architectural Evolutions](Design-Docs/Architectural-Evolutions/Evolutions.md) — explicitly accepted architectural change specifications, reconciled through canonical ADRs and affected contracts.
 
 When documents conflict, follow the accepted decision hierarchy in [the design index](Design-Docs/README.md) and record an ADR/change proposal. New tickets must point to canonical documents, not become competing specifications. Never silently alter those contracts.
 

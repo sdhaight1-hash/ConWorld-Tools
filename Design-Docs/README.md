@@ -25,6 +25,10 @@
 | [12 — Decisions & Reconciliation](12-Decisions-and-Reconciliation.md) | Resolved conflicts, pending ADRs, prior-source map and change policy |
 | [13 — Historical Spatial Model & Procedural Vector Cartography](13-Spatial-and-Nested-Location-Model.md) | Place identity, historical containment, query-bound maps and constrained generation |
 
+## Change governance
+
+The [root ticket policy](../README.md#ai-ticket-creation-policy) defines four governing types: Roadmap Phase, Research, New Feature and [Architectural Evolution](Architectural-Evolutions/Evolutions.md). Individual evolutions require explicit owner acceptance and affected ADR/spec reconciliation before normative or production changes. A proposal or research study does not supersede accepted decisions. Existing phase and feature gates remain authoritative until explicitly reconciled.
+
 ## Document authority
 
 1. **Accepted decisions** in [12](12-Decisions-and-Reconciliation.md), then **invariants** in [01](01-Requirements-and-Invariants.md), then the domain/API contracts govern implementation.

@@ -10,7 +10,7 @@ Implement the ConWorld Tools / Living History Atlas architecture in this reposit
 
 1. Audit HEAD, tree, branches, open issues, existing tests, migrations and this documentation **before proposing commands for the user**. Avoid assumptions about prior work.
 2. Read [01](01-Requirements-and-Invariants.md), [02](02-System-Architecture.md), [03](03-Domain-and-Temporal-Model.md), [08](08-Storage-and-API-Contracts.md), [09](09-Acceptance-and-Verification.md), [10](10-Delivery-Roadmap.md) and relevant specialist docs.
-3. Identify active Roadmap Phase ticket and its parent dependencies. If no phase is agreed, begin at Phase 0. Avoid implementing feature families in the wrong dependency order.
+3. Identify the owning Roadmap Phase, accepted Feature or accepted Architectural Evolution and its dependency gates. Follow the [root ticket policy](../README.md#ai-ticket-creation-policy). Research/proposed evolutions or features authorize no normative or production changes. If no phase is agreed, begin at Phase 0. Avoid implementing feature families in the wrong dependency order.
 4. State assumptions, constraints and unresolved ADRs; test the least complex architecture before adding complexity.
 5. Plan small, traceable changes and confirm expected runnable checks without relying on imagined results.
 
@@ -44,6 +44,7 @@ For each ticket:
 ~~~text
 /Design-Docs/                 canonical specs and decisions
 /Design-Docs/ADRs/             accepted/rejected architecture decisions
+/Design-Docs/Architectural-Evolutions/  accepted evolution specifications
 /crates/atlas-types/
 /crates/atlas-domain/
 /crates/atlas-store/
