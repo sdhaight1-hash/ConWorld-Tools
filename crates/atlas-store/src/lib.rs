@@ -164,6 +164,7 @@ pub struct EvidenceStatement {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ObjectData {
     Person,
+    Place,
     Organization,
     Household,
     FamilyHouse,

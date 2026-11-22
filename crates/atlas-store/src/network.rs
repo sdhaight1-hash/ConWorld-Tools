@@ -8,6 +8,7 @@ use crate::ObjectRef;
 #[serde(rename_all = "snake_case")]
 pub enum IdentityKind {
     Person,
+    Place,
     Organization,
     Household,
     FamilyHouse,
@@ -26,6 +27,7 @@ impl IdentityKind {
     pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Person => "person",
+            Self::Place => "place",
             Self::Organization => "organization",
             Self::Household => "household",
             Self::FamilyHouse => "family_house",
@@ -44,6 +46,7 @@ impl IdentityKind {
     pub(crate) fn data(self) -> crate::ObjectData {
         match self {
             Self::Person => crate::ObjectData::Person,
+            Self::Place => crate::ObjectData::Place,
             Self::Organization => crate::ObjectData::Organization,
             Self::Household => crate::ObjectData::Household,
             Self::FamilyHouse => crate::ObjectData::FamilyHouse,
@@ -62,6 +65,7 @@ impl IdentityKind {
     pub(crate) fn parse(value: &str) -> Result<Self, crate::Error> {
         match value {
             "person" => Ok(Self::Person),
+            "place" => Ok(Self::Place),
             "organization" => Ok(Self::Organization),
             "household" => Ok(Self::Household),
             "family_house" => Ok(Self::FamilyHouse),
@@ -101,6 +105,9 @@ pub enum NetworkKind {
     IdentityRedirect,
     Alliance,
     Settlement,
+    ProperPartWithin,
+    AdminPartOf,
+    LocatedAt,
 }
 
 impl NetworkKind {
@@ -125,6 +132,9 @@ impl NetworkKind {
             Self::IdentityRedirect => "identity_redirect",
             Self::Alliance => "alliance",
             Self::Settlement => "settlement",
+            Self::ProperPartWithin => "proper_part_within",
+            Self::AdminPartOf => "admin_part_of",
+            Self::LocatedAt => "located_at",
         }
     }
 
@@ -149,6 +159,9 @@ impl NetworkKind {
             "identity_redirect" => Ok(Self::IdentityRedirect),
             "alliance" => Ok(Self::Alliance),
             "settlement" => Ok(Self::Settlement),
+            "proper_part_within" => Ok(Self::ProperPartWithin),
+            "admin_part_of" => Ok(Self::AdminPartOf),
+            "located_at" => Ok(Self::LocatedAt),
             _ => Err(crate::Error::WrongKind),
         }
     }

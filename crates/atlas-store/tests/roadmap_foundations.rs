@@ -2869,3 +2869,140 @@ fn chromosome_painter_keeps_contiguous_toy_homologues_and_deterministic_seed() -
     ));
     Ok(())
 }
+
+#[test]
+fn spatial_facts_preserve_temporal_lenses_and_branch_history() -> Result<(), Error> {
+    use atlas_store::network::{IdentityKind, NetworkInput, NetworkKind};
+    let db = tempfile::tempdir().unwrap();
+    let path = db.path().join("spatial.sqlite");
+    let mut store = Store::open(&path)?;
+    let world = seed(&mut store)?;
+    let mut author = view(&world, 13);
+    let mut places = Vec::new();
+    for label in ["Valley", "Town", "Manor"] {
+        places.push(store.create_identity(author, IdentityKind::Place, label, Uuid::new_v4())?);
+        author.revision.0 += 1;
+    }
+    let (valley, town, manor) = (places[0], places[1], places[2]);
+    let make = |subject, target, kind, role: &str, starts_at, ends_before| NetworkInput {
+        subject,
+        target,
+        source: id(&world, 9),
+        kind,
+        role: role.into(),
+        starts_at,
+        ends_before,
+    };
+    let first = make(
+        town,
+        valley,
+        NetworkKind::ProperPartWithin,
+        "physical",
+        13,
+        Some(20),
+    );
+    let fact = store.record_network_fact(author, &first, Uuid::new_v4())?;
+    author.revision.0 += 1;
+    let second = make(
+        manor,
+        town,
+        NetworkKind::ProperPartWithin,
+        "physical",
+        13,
+        None,
+    );
+    store.record_network_fact(author, &second, Uuid::new_v4())?;
+    author.revision.0 += 1;
+    let cycle = make(
+        valley,
+        manor,
+        NetworkKind::ProperPartWithin,
+        "physical",
+        13,
+        Some(20),
+    );
+    assert!(matches!(
+        store.record_network_fact(author, &cycle, Uuid::new_v4()),
+        Err(Error::InvalidInput("spatial containment cycle"))
+    ));
+    let disjoint = NetworkInput {
+        starts_at: 20,
+        ends_before: None,
+        ..cycle
+    };
+    store.record_network_fact(author, &disjoint, Uuid::new_v4())?;
+    author.revision.0 += 1;
+    let admin = make(valley, town, NetworkKind::AdminPartOf, "county", 13, None);
+    store.record_network_fact(author, &admin, Uuid::new_v4())?;
+    author.revision.0 += 1;
+    let placement = make(
+        id(&world, 1),
+        manor,
+        NetworkKind::LocatedAt,
+        "residence",
+        13,
+        None,
+    );
+    store.record_network_fact(author, &placement, Uuid::new_v4())?;
+    author.revision.0 += 1;
+    let spec = query(QueryFilter::WithinPlace {
+        root: valley,
+        kind: NetworkKind::ProperPartWithin,
+        lens: "physical".into(),
+        include_self: false,
+        max_depth: 8,
+    });
+    let rows = store.execute_query(&spec, author)?.rows;
+    assert_eq!(
+        rows.iter().map(|row| row.object).collect::<Vec<_>>(),
+        vec![manor, town]
+    );
+    assert!(
+        store
+            .execute_query(
+                &spec,
+                ViewContext {
+                    day: WorldDay(20),
+                    ..author
+                }
+            )?
+            .rows
+            .is_empty()
+    );
+    assert!(matches!(
+        store.execute_query(
+            &spec,
+            ViewContext {
+                scope: Scope::Public,
+                ..author
+            }
+        ),
+        Err(Error::CapabilityDenied)
+    ));
+    let fork = store.fork(&ForkCommand {
+        world: author.world,
+        parent: author.branch,
+        day: author.day,
+        expected: author.revision,
+        id: Uuid::new_v4(),
+        author: "Fixture".into(),
+        rationale: "Spatial alternative".into(),
+        scope: Scope::Author,
+    })?;
+    author.revision = fork.created_revision;
+    let mut child = ViewContext {
+        branch: fork.id,
+        ..author
+    };
+    store.withdraw_network_fact(child, fact, Uuid::new_v4())?;
+    child.revision.0 += 1;
+    author.revision = child.revision;
+    assert!(store.execute_query(&spec, child)?.rows.is_empty());
+    assert_eq!(store.execute_query(&spec, author)?.rows.len(), 2);
+    store.verify_foreign_keys(Scope::Author)?;
+    drop(store);
+    let store = Store::open(&path)?;
+    assert_eq!(store.execute_query(&spec, author)?.rows.len(), 2);
+    assert!(store.execute_query(&spec, child)?.rows.is_empty());
+    Ok(())
+}

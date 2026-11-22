@@ -79,9 +79,9 @@ The [Phase Zero architecture baseline](ADRs/phase-0-architecture-baseline.md) re
 | ADR-010 | Edit/merge policy for previously published/derived records | Phase 3–4 | Alias/link refactoring and publication fixtures |
 | ADR-011 | React UI versus minimal HTML and view framework-specific accessibility | Phase 0 | Editor and renderer integration prototype |
 | ADR-012 | Simulated branch merger, world import cross-references and external NPC write-back | Later | Explicit conflict test and schema migration plan |
+| ADR-013 (implementation details open) | Spatial schema reuse, uncertainty/frame/geometry validation, procedural constraints, renderer and privacy gates | Phases 3–9 | SP-01–14, real native and archive tests; design direction accepted |
 
 **OPEN** does not permit an AI coder to invent a global policy silently. Propose the smallest coherent decision, test it, then update its ADR/status.
-| ADR-013 (implementation details open) | Spatial schema reuse, uncertainty/frame/geometry validation, procedural constraints, renderer and privacy gates | Phases 3–9 | SP-01–14, real native and archive tests; design direction accepted |
 
 ## Change control
 
