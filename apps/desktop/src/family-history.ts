@@ -19,7 +19,8 @@ export async function openFamilyHistory(panel: HTMLElement, request: FamilyConte
     <details class="family-match"><summary>Compare fictional inheritance</summary><form class="editor-form">
     <label>Compare with <select name="other" required></select></label>
     <label>Model seed <input type="number" name="seed" min="0" max="4294967295" value="1" required></label>
-    <button>Compare segments</button></form><output></output></details>`;
+    <button>Compare segments</button></form><output></output></details>
+    <details class="founder-genome"><summary>Simulated multigenerational ancestry</summary><p>Dimensionless toy founder segments, not real DNA. Unrecorded parents are unresolved founders.</p><button type="button">Compute founder segments</button><div data-genome></div></details>`;
   panel.append(host);
   const form = host.querySelector("form")!;
   const fields = form.querySelector("fieldset")!;
@@ -47,6 +48,24 @@ export async function openFamilyHistory(panel: HTMLElement, request: FamilyConte
       }).join(" · ") : "No shared contributor intervals for this seed.";
     } catch (error) { output.textContent = String(error); }
     finally { submit.disabled = false; }
+  };
+  host.querySelector<HTMLButtonElement>(".founder-genome button")!.onclick = async () => {
+    const result=host.querySelector<HTMLElement>("[data-genome]")!;
+    try {
+      const genome=await invoke<{model:number;homologues:{start:number;end:number;allele:{founder:{id:string};homologue:number;unresolved_parent:boolean}}[][]}>("workspace_founder_genome",{request,seed:Number(new FormData(compare).get("seed"))});
+      if(!host.isConnected)return;
+      result.replaceChildren();
+      for(const [index,segments] of genome.homologues.entries()){
+        const heading=document.createElement("h4");heading.textContent="Toy homologue "+(index+1)+" · model "+genome.model;result.append(heading);
+        const list=document.createElement("ul");
+        for(const segment of segments){
+          const row=document.createElement("li"),person=people.find(p=>p.id===segment.allele.founder.id);
+          row.textContent=(person?.label??segment.allele.founder.id)+" / "+segment.allele.homologue+" · ["+segment.start+", "+segment.end+")";
+          list.append(row);
+        }
+        result.append(list);
+      }
+    }catch(error){result.textContent=String(error);}
   };
   let busy = false;
   async function save(command: string, payload: Record<string, unknown>) {

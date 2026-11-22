@@ -30,6 +30,7 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
       <label>End UTF-8 byte (exclusive) <input name="end" type="number" min="1" required></label>
       <label>Proposed type <select name="kind"><option value="person">Person</option><option value="organization">Organization</option><option value="household">Household</option><option value="family_house">Family house</option><option value="faction">Faction</option><option value="conflict">Conflict</option></select></label>
       <button>Propose ghost identity</button></fieldset></form>
+    <button type="button" data-candidates>Find possible names in selected claim</button><ul data-candidate-results></ul>
     <button type="button" data-review>Review draft identities</button><ul data-ghosts></ul>
     <form data-template class="editor-form"><fieldset><legend>Save persisted page as custom template</legend>
       <p class="hint">Copies authored presentation, not resolved data. Existing instances never auto-update.</p>
@@ -92,6 +93,25 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
       status.textContent = rows.length + " confirmed downstream events.";
     } catch (error) { if (valid()) status.textContent = String(error); }
   };
+  host.querySelector<HTMLButtonElement>("[data-candidates]")!.onclick = async () => {
+    try {
+      const ghostForm = form("[data-ghost]");
+      const rows = await invoke<{label:string;start_byte:number;end_byte:number;existing:Ref[]}[]>("workspace_ghost_candidates", {request,claimId:value(ghostForm,"claim")});
+      if(!valid())return;
+      const list=host.querySelector("[data-candidate-results]")!;list.replaceChildren();
+      for(const candidate of rows) {
+        const row=document.createElement("li");
+        row.textContent=candidate.label+" · "+candidate.existing.length+" possible existing identities ";
+        row.append(action("Select claim span",()=>{
+          (ghostForm.elements.namedItem("start") as HTMLInputElement).value=String(candidate.start_byte);
+          (ghostForm.elements.namedItem("end") as HTMLInputElement).value=String(candidate.end_byte);
+        }));
+        for(const match of candidate.existing) row.append(" · "+match.id);
+        list.append(row);
+      }
+      status.textContent="Possible names only; no identities or facts have been created.";
+    } catch(error){if(valid())status.textContent=String(error);}
+  };
   submit("[data-ghost]", f=>void write("workspace_propose_ghost",{claimId:value(f,"claim"),startByte:Number(value(f,"start")),
     endByte:Number(value(f,"end")),kind:value(f,"kind")}));
   submit("[data-template]", f => void write("workspace_save_custom_template", { sourceId: value(f,"source"), name:value(f,"name"), templateId:value(f,"id") || null }));
@@ -111,8 +131,15 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
       for(const ghost of ghosts){
         const row=document.createElement("li");row.textContent=ghost.label+" · "+ghost.kind+" · claim "+ghost.claim.id+" ";
         if(ghost.reviewed)row.append(ghost.promoted?"Promoted: "+ghost.promoted.id:"Dismissed");
-        else row.append(action("Promote draft",()=>void write("workspace_review_ghost",{proposalId:ghost.id,promote:true})),
-          action("Dismiss draft",()=>void write("workspace_review_ghost",{proposalId:ghost.id,promote:false})));
+        else {
+          const target=document.createElement("input");
+          target.placeholder="Existing matching identity";
+          target.setAttribute("aria-label","Existing identity for "+ghost.label);
+          target.disabled=!editable;
+          row.append(action("Promote draft",()=>void write("workspace_review_ghost",{proposalId:ghost.id,promote:true})),
+            action("Dismiss draft",()=>void write("workspace_review_ghost",{proposalId:ghost.id,promote:false})),
+            target, action("Resolve to existing",()=>void write("workspace_resolve_ghost",{proposalId:ghost.id,targetId:target.value.trim()})));
+        }
         list.append(row);
       }
       status.textContent=ghosts.length+" draft records.";

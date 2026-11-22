@@ -130,3 +130,101 @@ impl crate::Store {
         shared_segments(&pedigree, first, second, seed, MODEL_VERSION)
     }
 }
+
+/// Version 2 toy autosomal model: two dimensionless homologues, founder allele
+/// identity rather than actual DNA. No medical or real population inference.
+pub const FOUNDER_MODEL_VERSION: u16 = 2;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct FounderAllele {
+    pub founder: ObjectRef,
+    pub homologue: u8,
+    pub unresolved_parent: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct FounderSegment {
+    pub start: u32,
+    pub end: u32,
+    pub allele: FounderAllele,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct FounderGenome {
+    pub model: u16,
+    pub homologues: [Vec<FounderSegment>; 2],
+}
+
+impl crate::Store {
+    /// Resolve accepted biological ancestors at exactly one author view. A
+    /// missing parent becomes a distinct unresolved founder; no legal link is used.
+    pub fn founder_genome(
+        &self,
+        view: crate::ViewContext,
+        subject: ObjectRef,
+        seed: u64,
+    ) -> Result<FounderGenome, Error> {
+        use std::collections::{HashMap, HashSet};
+        fn visit(
+            store: &crate::Store, view: crate::ViewContext, subject: ObjectRef, seed: u64,
+            depth: u8, active: &mut HashSet<ObjectRef>,
+            memo: &mut HashMap<ObjectRef, FounderGenome>,
+        ) -> Result<FounderGenome, Error> {
+            if let Some(value) = memo.get(&subject) {
+                return Ok(value.clone());
+            }
+            if depth > 16 || memo.len() + active.len() >= 512 {
+                return Err(Error::QueryBudgetExceeded);
+            }
+            if !active.insert(subject) {
+                return Err(Error::InvalidInput("accepted biological ancestry cycle"));
+            }
+            let mut parents: Vec<_> = store.family_links(view, subject)?.into_iter()
+                .filter(|link| link.child == subject && link.kind == ParentageKind::Biological)
+                .map(|link| link.parent).collect();
+            parents.sort_unstable_by_key(|item| item.id.0);
+            if parents.len() > 2 {
+                return Err(Error::InvalidInput("more than two accepted biological parents"));
+            }
+            let mut homologues = [Vec::new(), Vec::new()];
+            for (slot, segments) in homologues.iter_mut().enumerate() {
+                if let Some(parent) = parents.get(slot) {
+                    let genome = visit(store, view, *parent, seed, depth + 1, active, memo)?;
+                    let id = subject.id.0.as_u128();
+                    let random = mix(seed ^ id as u64 ^ mix((id >> 64) as u64) ^ slot as u64);
+                    let boundary = 1 + (random % u64::from(MODEL_LENGTH - 1)) as u32;
+                    let first = (random >> 63) as usize;
+                    for (index, lo, hi) in [(first, 0, boundary), (1-first, boundary, MODEL_LENGTH)] {
+                        for segment in &genome.homologues[index] {
+                            let start = segment.start.max(lo);
+                            let end = segment.end.min(hi);
+                            if start < end {
+                                if let Some(last) = segments.last_mut() {
+                                    let last: &mut FounderSegment = last;
+                                    if last.end == start && last.allele == segment.allele {
+                                        last.end = end;
+                                        continue;
+                                    }
+                                }
+                                segments.push(FounderSegment { start, end, allele: segment.allele });
+                            }
+                        }
+                    }
+                } else {
+                    segments.push(FounderSegment {
+                        start: 0, end: MODEL_LENGTH,
+                        allele: FounderAllele { founder: subject, homologue: slot as u8, unresolved_parent: true },
+                    });
+                }
+                if segments.len() > 4096 {
+                    return Err(Error::QueryBudgetExceeded);
+                }
+            }
+            active.remove(&subject);
+            let result = FounderGenome { model: FOUNDER_MODEL_VERSION, homologues };
+            memo.insert(subject, result.clone());
+            Ok(result)
+        }
+        visit(self, view, subject, seed, 0, &mut HashSet::new(), &mut HashMap::new())
+    }
+}

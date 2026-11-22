@@ -139,7 +139,7 @@ impl Store {
         person: ObjectRef,
     ) -> Result<Vec<FamilyLink>, Error> {
         let tx = self.conn.unchecked_transaction()?;
-        author_world(&tx, view)?;
+        let (revision, cutoff) = inherited_metadata(&tx, view)?;
         require_person(
             &tx,
             view.world,
@@ -151,12 +151,13 @@ impl Store {
         let mut stmt=tx.prepare("SELECT p.id,parent_id,child_id,kind,starts_at,ends_before,r.rationale
            FROM accepted_parentage p JOIN author_revisions r ON r.world_id=p.world_id AND r.revision=p.recorded_revision
            WHERE p.world_id=?1 AND (parent_id=?2 OR child_id=?2) AND recorded_revision<=?3
-             AND (withdrawn_revision IS NULL OR withdrawn_revision>?3) AND starts_at<=?4 AND (ends_before IS NULL OR ends_before>?4)
+             AND (withdrawn_revision IS NULL OR withdrawn_revision>?3) AND starts_at<=?4 AND (ends_before IS NULL OR ends_before>?5)
            ORDER BY kind,starts_at,p.id LIMIT 2001")?;
         let mut rows = stmt.query(params![
             view.world.0.as_bytes(),
             person.id.0.as_bytes(),
-            view.revision.0,
+            revision.0,
+            cutoff.0,
             view.day.0
         ])?;
         let mut result = Vec::new();

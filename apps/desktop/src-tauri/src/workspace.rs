@@ -2469,6 +2469,41 @@ pub fn workspace_instantiate_custom_template(
 }
 
 #[tauri::command]
+pub fn workspace_ghost_candidates(
+    workspace: State<'_, AuthorWorkspace>,
+    request: NetworkContext,
+    claim_id: String,
+) -> Result<Vec<atlas_store::network::GhostCandidate>, String> {
+    let store = workspace.lock()?;
+    let view = request.resolve(&store)?;
+    store.ghost_candidates(view, reference(view.world, &claim_id)?).map_err(|e|e.to_string())
+}
+
+#[tauri::command]
+pub fn workspace_resolve_ghost(
+    workspace: State<'_, AuthorWorkspace>,
+    request: NetworkContext,
+    proposal_id: String,
+    target_id: String,
+) -> Result<(), String> {
+    let mut store = workspace.lock()?;
+    let view = request.resolve(&store)?;
+    store.resolve_ghost_to_existing(view, id(&proposal_id)?, reference(view.world,&target_id)?, Uuid::new_v4())
+        .map_err(|e|e.to_string())
+}
+
+#[tauri::command]
+pub fn workspace_founder_genome(
+    workspace: State<'_, AuthorWorkspace>,
+    request: FamilyRequest,
+    seed: u32,
+) -> Result<atlas_store::inheritance::FounderGenome, String> {
+    let store = workspace.lock()?;
+    let (context, person) = request.resolve(&store)?;
+    store.founder_genome(context, person, u64::from(seed)).map_err(|e|e.to_string())
+}
+
+#[tauri::command]
 pub fn workspace_create_identity(
     workspace: State<'_, AuthorWorkspace>,
     request: NetworkContext,

@@ -2608,6 +2608,32 @@ fn load_fork(
     .ok_or(Error::NotFound)
 }
 
+/// Resolve the immutable main-branch metadata snapshot inherited by a fork.
+fn inherited_metadata(
+    conn: &Connection,
+    view: ViewContext,
+) -> Result<(AuthorRevision, WorldDay), Error> {
+    require_author(view.scope)?;
+    let world = load_world(conn, view.world)?;
+    if view.revision.0 < 0 || view.revision > world.revision {
+        return Err(Error::InvalidRevision);
+    }
+    let mut branch = view.branch;
+    let mut revision = view.revision;
+    let mut day = view.day;
+    for _ in 0..64 {
+        match load_fork(conn, view.world, branch, revision)? {
+            Some(fork) => {
+                branch = fork.parent;
+                revision = fork.inherited_revision;
+                day = day.min(fork.day);
+            }
+            None => return Ok((revision, day)),
+        }
+    }
+    Err(Error::QueryBudgetExceeded)
+}
+
 fn override_start(
     conn: &Connection,
     object: ObjectRef,

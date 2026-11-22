@@ -118,3 +118,48 @@ pub struct GhostProposal {
     pub reviewed: bool,
     pub promoted: Option<ObjectRef>,
 }
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GhostCandidate {
+    pub label: String,
+    pub start_byte: usize,
+    pub end_byte: usize,
+    pub existing: Vec<ObjectRef>,
+}
+
+/// Find bounded sequences of capitalized words, preserving original UTF-8 bytes.
+/// Single-word candidates remain manual to avoid floods of sentence starters.
+pub(crate) fn capitalized_spans(text: &str) -> Vec<(usize, usize)> {
+    let mut words = Vec::new();
+    let mut start = None;
+    for (index, character) in text.char_indices() {
+        if character.is_alphabetic() {
+            start.get_or_insert(index);
+        } else if let Some(from) = start.take() {
+            words.push((from, index));
+        }
+    }
+    if let Some(from) = start {
+        words.push((from, text.len()));
+    }
+    let mut result = Vec::new();
+    let mut i = 0;
+    while i < words.len() && result.len() < 50 {
+        let (from, end) = words[i];
+        if !text[from..end].chars().next().is_some_and(char::is_uppercase) {
+            i += 1;
+            continue;
+        }
+        let mut j = i + 1;
+        while j < words.len() && j - i < 4 &&
+            text[words[j-1].1..words[j].0].chars().all(char::is_whitespace) &&
+            text[words[j].0..words[j].1].chars().next().is_some_and(char::is_uppercase) {
+            j += 1;
+        }
+        if j - i >= 2 && words[j-1].1 - from <= 200 {
+            result.push((from, words[j-1].1));
+        }
+        i = j;
+    }
+    result
+}

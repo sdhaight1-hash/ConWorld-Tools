@@ -234,18 +234,19 @@ impl Store {
         view: ViewContext,
         focus: ObjectRef,
     ) -> Result<Vec<NetworkFact>, Error> {
-        author_context(&self.conn, view)?;
+        let (revision, cutoff) = inherited_metadata(&self.conn, view)?;
         resolved(&self.conn, view, focus)?;
         let mut stmt = self.conn.prepare(
             "SELECT id,subject_id,target_id,source_id,kind,role,starts_at,ends_before
             FROM network_facts WHERE world_id=?1 AND (subject_id=?2 OR target_id=?2)
             AND recorded_revision<=?3 AND (withdrawn_revision IS NULL OR withdrawn_revision>?3)
-            AND starts_at<=?4 AND (ends_before IS NULL OR ends_before>?4) ORDER BY id LIMIT 501",
+            AND starts_at<=?4 AND (ends_before IS NULL OR ends_before>?5) ORDER BY id LIMIT 501",
         )?;
         let mut rows = stmt.query(params![
             view.world.0.as_bytes(),
             focus.id.0.as_bytes(),
-            view.revision.0,
+            revision.0,
+            cutoff.0,
             view.day.0
         ])?;
         let mut result = Vec::new();
@@ -297,17 +298,18 @@ impl Store {
         max_depth: u8,
         max_visited: usize,
     ) -> Result<crate::conflict::Impact, Error> {
-        author_context(&self.conn, view)?;
+        let (revision, cutoff) = inherited_metadata(&self.conn, view)?;
         let mut stmt = self.conn.prepare(
             "SELECT subject_id,target_id,source_id FROM network_facts
              WHERE world_id=?1 AND kind='confirmed_cause'
              AND recorded_revision<=?2 AND (withdrawn_revision IS NULL OR withdrawn_revision>?2)
-             AND starts_at<=?3 AND (ends_before IS NULL OR ends_before>?3)
+             AND starts_at<=?3 AND (ends_before IS NULL OR ends_before>?4)
              ORDER BY id LIMIT 4001",
         )?;
         let mut rows = stmt.query(params![
             view.world.0.as_bytes(),
-            view.revision.0,
+            revision.0,
+            cutoff.0,
             view.day.0
         ])?;
         let mut links = Vec::new();
@@ -326,6 +328,102 @@ impl Store {
         drop(rows);
         drop(stmt);
         self.confirmed_impact(view, start, &links, max_depth, max_visited)
+    }
+
+    /// Read-only candidate generation. The author still chooses the type and exact span.
+    /// A conservative capitalization heuristic is not a semantic classifier.
+    pub fn ghost_candidates(
+        &self,
+        view: ViewContext,
+        claim: ObjectRef,
+    ) -> Result<Vec<crate::network::GhostCandidate>, Error> {
+        author_context(&self.conn, view)?;
+        let version = resolved(&self.conn, view, claim)?;
+        let ObjectData::Claim { statement, .. } = &version.record.data else {
+            return Err(Error::WrongKind);
+        };
+        if statement.len() > 10_000 {
+            return Err(Error::QueryBudgetExceeded);
+        }
+        let spans = crate::network::capitalized_spans(statement);
+        let mut results = Vec::new();
+        for (start_byte, end_byte) in spans {
+            self.check_query_control()?;
+            let label = &statement[start_byte..end_byte];
+            let spec = QuerySpec {
+                schema_version: QUERY_SCHEMA_VERSION,
+                filter: QueryFilter::Or(vec![
+                    QueryFilter::ExactLabel(label.into()),
+                    QueryFilter::ExactAlias(label.into()),
+                ]),
+                limit: 50,
+            };
+            let found = self.execute_query(&spec, view)?;
+            if found.truncated {
+                return Err(Error::QueryBudgetExceeded);
+            }
+            let existing = found
+                .rows
+                .into_iter()
+                .filter(|item| matches!(item.record.data, ObjectData::Person | ObjectData::Organization |
+                    ObjectData::FamilyHouse | ObjectData::Household | ObjectData::Faction | ObjectData::Conflict))
+                .map(|item| item.object)
+                .collect();
+            results.push(crate::network::GhostCandidate {
+                label: label.into(),
+                start_byte,
+                end_byte,
+                existing,
+            });
+        }
+        Ok(results)
+    }
+
+    /// A reviewed draft can resolve to a pre-existing identity without rewriting
+    /// any canonical record. Preserve the original claim version and span.
+    pub fn resolve_ghost_to_existing(
+        &mut self,
+        view: ViewContext,
+        proposal: Uuid,
+        target: ObjectRef,
+        command_id: Uuid,
+    ) -> Result<(), Error> {
+        let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let world = author_context(&tx, view)?;
+        let (claim, branch, state, recorded, label, kind, day): ([u8;16], [u8;16], i64, i64, String, String, i64) =
+            tx.query_row(
+                "SELECT claim_id,claim_branch,claim_state_revision,claim_revision,label,kind,day
+                 FROM ghost_proposals WHERE world_id=?1 AND id=?2 AND reviewed_revision IS NULL",
+                params![view.world.0.as_bytes(), proposal.as_bytes()],
+                |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?)),
+            ).optional()?.ok_or(Error::NotFound)?;
+        let effective = ViewContext { day: WorldDay(day), ..view };
+        let latest = resolved(&tx, effective, ref_id(view.world, claim))?;
+        if latest.source_branch.0.as_bytes() != &branch || latest.state_revision.0 != state ||
+            latest.recorded_at.0 != recorded {
+            return Err(Error::InvalidInput("ghost source changed"));
+        }
+        let existing = resolved(&tx, effective, target)?;
+        if existing.record.data != IdentityKind::parse(&kind)?.data() {
+            return Err(Error::WrongKind);
+        }
+        let matches_alias = if kind == "person" {
+            active_alias_versions(&tx, effective)?.iter().any(|alias| alias.person == target &&
+                alias.active && alias.label.to_lowercase() == label.to_lowercase())
+        } else {
+            false
+        };
+        if existing.record.label.to_lowercase() != label.to_lowercase() && !matches_alias {
+            return Err(Error::InvalidInput("existing identity name or alias does not match"));
+        }
+        let revision = append_revision(&tx, &world, world.main, view.revision, command_id,
+            ("Local author", "Resolve draft to existing identity"))?;
+        tx.execute(
+            "UPDATE ghost_proposals SET reviewed_revision=?3,promoted_id=?4 WHERE world_id=?1 AND id=?2",
+            params![view.world.0.as_bytes(), proposal.as_bytes(), revision, target.id.0.as_bytes()],
+        )?;
+        tx.commit()?;
+        Ok(())
     }
 
     /// A proposal is explicitly selected from an exact claim version and UTF-8 byte span.
