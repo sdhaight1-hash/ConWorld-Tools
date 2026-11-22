@@ -13,7 +13,7 @@ use crate::{
     WorldId,
 };
 
-use crate::semantic::ConceptProfile;
+use crate::semantic::{AreaTest, ConceptProfile};
 
 pub const QUERY_SCHEMA_VERSION: u16 = 1;
 
@@ -37,6 +37,7 @@ pub enum QueryFilter {
     Kind(ObjectKindFilter),
     ClassifiedAs(ConceptProfile),
     ClassifiedBy(ObjectRef),
+    SiteArea(AreaTest),
     HasSource(ObjectRef),
     And(Vec<QueryFilter>),
     Or(Vec<QueryFilter>),
@@ -138,6 +139,7 @@ pub enum PredicateInput {
     ObjectKind { kind: ObjectKindFilter },
     ClassifiedAs { profile: ConceptProfile },
     ClassifiedBy { descriptor_id: String },
+    SiteArea { test: AreaTest },
     HasSource { source_id: String },
     And { filters: Vec<PredicateInput> },
     Or { filters: Vec<PredicateInput> },
@@ -165,6 +167,10 @@ impl PredicateInput {
             Self::ClaimFullText { text } => QueryFilter::ClaimFullTextPhrase(text),
             Self::ObjectKind { kind } => QueryFilter::Kind(kind),
             Self::ClassifiedAs { profile } => QueryFilter::ClassifiedAs(profile),
+            Self::SiteArea { test } => {
+                test.validate()?;
+                QueryFilter::SiteArea(test)
+            }
             Self::ClassifiedBy { descriptor_id } => QueryFilter::ClassifiedBy(ObjectRef {
                 world,
                 id: crate::ObjectId(
@@ -216,6 +222,7 @@ impl PredicateInput {
             QueryFilter::ClaimFullTextPhrase(text) => Self::ClaimFullText { text: text.clone() },
             QueryFilter::Kind(kind) => Self::ObjectKind { kind: *kind },
             QueryFilter::ClassifiedAs(profile) => Self::ClassifiedAs { profile: *profile },
+            QueryFilter::SiteArea(test) => Self::SiteArea { test: *test },
             QueryFilter::ClassifiedBy(descriptor) => Self::ClassifiedBy {
                 descriptor_id: descriptor.id.0.to_string(),
             },
@@ -352,6 +359,7 @@ fn visit_parameter_leaves(
             "concept_profile",
             ParameterValue::ConceptProfile { value: *profile },
         ),
+        QueryFilter::SiteArea(_) => return Ok(()),
         QueryFilter::ClassifiedBy(descriptor) => (
             "descriptor",
             ParameterValue::Descriptor {
@@ -667,6 +675,7 @@ impl Store {
             QueryFilter::Kind(_)
                 | QueryFilter::ClassifiedAs(_)
                 | QueryFilter::ClassifiedBy(_)
+                | QueryFilter::SiteArea(_)
                 | QueryFilter::HasSource(_)
                 | QueryFilter::And(_)
                 | QueryFilter::Or(_)
@@ -747,6 +756,7 @@ impl Store {
             QueryFilter::Kind(_)
             | QueryFilter::ClassifiedAs(_)
             | QueryFilter::ClassifiedBy(_)
+            | QueryFilter::SiteArea(_)
             | QueryFilter::HasSource(_)
             | QueryFilter::And(_)
             | QueryFilter::Or(_)
@@ -813,6 +823,7 @@ pub(crate) fn validate_predicate(
             search_label(label)?;
         }
         QueryFilter::Kind(_) | QueryFilter::ClassifiedAs(_) => {}
+        QueryFilter::SiteArea(test) => test.validate()?,
         QueryFilter::ClassifiedBy(descriptor) => {
             if descriptor.world != world {
                 return Err(Error::WrongWorld);
@@ -867,6 +878,7 @@ struct PredicatePlan<'a> {
     sources: HashSet<ObjectRef>,
     profiles: HashMap<ConceptProfile, HashSet<ObjectRef>>,
     descriptors: HashMap<ObjectRef, HashSet<ObjectRef>>,
+    area: HashMap<AreaTest, HashSet<ObjectRef>>,
     matched: usize,
 }
 
@@ -903,6 +915,25 @@ impl<'a> PredicatePlan<'a> {
                     self.rows.insert(row.object, row);
                 }
                 self.indexed.insert(key, ids.clone());
+                Ok(Some(ids))
+            }
+            QueryFilter::SiteArea(test) => {
+                if let Some(ids) = self.area.get(test) {
+                    return Ok(Some(ids.clone()));
+                }
+                let versions = store.site_area_matches(view, *test)?;
+                self.matched += versions.len();
+                if self.matched > INDEX_BUDGET {
+                    return Err(Error::QueryBudgetExceeded);
+                }
+                let ids = versions
+                    .iter()
+                    .map(|version| version.object)
+                    .collect::<HashSet<_>>();
+                for version in versions {
+                    self.rows.insert(version.object, version);
+                }
+                self.area.insert(*test, ids.clone());
                 Ok(Some(ids))
             }
             QueryFilter::ClassifiedBy(descriptor) => {
@@ -999,6 +1030,10 @@ fn predicate_matches(filter: &QueryFilter, version: &Version, plan: &PredicatePl
             version.record.label.to_lowercase() == text.trim().to_lowercase()
         }
         QueryFilter::Kind(kind) => ObjectKindFilter::from(&version.record.data) == *kind,
+        QueryFilter::SiteArea(test) => plan
+            .area
+            .get(test)
+            .is_some_and(|ids| ids.contains(&version.object)),
         QueryFilter::ClassifiedBy(descriptor) => plan
             .descriptors
             .get(descriptor)

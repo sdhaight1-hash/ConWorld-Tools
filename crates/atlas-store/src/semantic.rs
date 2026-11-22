@@ -186,6 +186,25 @@ pub enum AreaReading {
     Known { amount: i64, unit: AreaUnit },
 }
 
+/// Explicit, unit-preserving predicates. Unknown is not missing or zero.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[serde(tag = "test", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AreaTest {
+    Unknown,
+    AtLeast { amount: i64, unit: AreaUnit },
+}
+
+impl AreaTest {
+    pub(crate) fn validate(self) -> Result<(), Error> {
+        if let Self::AtLeast { amount, .. } = self
+            && amount < 0
+        {
+            return Err(Error::InvalidInput("site area threshold"));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SiteAreaInput {
     pub place: ObjectRef,

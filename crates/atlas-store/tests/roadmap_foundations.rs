@@ -3585,7 +3585,7 @@ fn site_area_preserves_unknown_zero_units_corrections_and_archive() -> Result<()
     use atlas_store::{
         archive::restore_archive,
         network::IdentityKind,
-        semantic::{AreaReading, AreaUnit, DefinitionPin, FactFamily, FactRef, SiteAreaInput},
+        semantic::{AreaReading, AreaTest, AreaUnit, DefinitionPin, FactFamily, FactRef, SiteAreaInput},
     };
     let dir = tempfile::tempdir()?;
     let mut store = Store::open(dir.path().join("source.sqlite"))?;
@@ -3634,7 +3634,14 @@ fn site_area_preserves_unknown_zero_units_corrections_and_archive() -> Result<()
         starts_at: WorldDay(13),
         ends_before: Some(WorldDay(20)),
     };
+    let unknown = query(QueryFilter::SiteArea(AreaTest::Unknown));
+    let zero = query(QueryFilter::SiteArea(AreaTest::AtLeast {
+        amount: 0,
+        unit: AreaUnit::Hectare,
+    }));
     assert!(store.site_area(author, place)?.is_none());
+    assert!(store.execute_query(&unknown, author)?.rows.is_empty());
+    assert!(store.execute_query(&zero, author)?.rows.is_empty());
     assert!(matches!(
         store.record_site_area(
             author,
@@ -3665,6 +3672,8 @@ fn site_area_preserves_unknown_zero_units_corrections_and_archive() -> Result<()
     let first = store.record_site_area(author, input, None, Uuid::new_v4())?;
     author.revision = AuthorRevision(4);
     assert_eq!(store.site_area(author, place)?.unwrap().input, input);
+    assert_eq!(store.execute_query(&zero, author)?.rows[0].object, place);
+    assert!(store.execute_query(&unknown, author)?.rows.is_empty());
     assert!(matches!(
         store.record_site_area(author, input, None, Uuid::new_v4()),
         Err(Error::InvalidInput("overlapping site area"))
@@ -3683,6 +3692,15 @@ fn site_area_preserves_unknown_zero_units_corrections_and_archive() -> Result<()
     let fact = store.site_area(author, place)?.unwrap();
     assert_eq!(fact.input, corrected);
     assert_eq!(fact.corrects, Some(first));
+    assert!(store.execute_query(&zero, author)?.rows.is_empty());
+    let squared = query(QueryFilter::SiteArea(AreaTest::AtLeast {
+        amount: 120000,
+        unit: AreaUnit::SquareMetre,
+    }));
+    assert_eq!(
+        store.execute_query(&squared, author)?.rows[0].object,
+        place
+    );
     let reference = FactRef {
         world: world.id,
         family: FactFamily::SiteArea,
@@ -3708,6 +3726,8 @@ fn site_area_preserves_unknown_zero_units_corrections_and_archive() -> Result<()
         ..author
     };
     assert_eq!(store.site_area(later, place)?.unwrap().input, next);
+    assert_eq!(store.execute_query(&unknown, later)?.rows[0].object, place);
+    assert!(store.execute_query(&zero, later)?.rows.is_empty());
     assert!(matches!(
         store.site_area(
             ViewContext {

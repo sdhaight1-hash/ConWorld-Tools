@@ -1147,6 +1147,7 @@ impl Store {
             | QueryFilter::Kind(_)
             | QueryFilter::ClassifiedAs(_)
             | QueryFilter::ClassifiedBy(_)
+            | QueryFilter::SiteArea(_)
             | QueryFilter::HasSource(_)
             | QueryFilter::And(_)
             | QueryFilter::Or(_)

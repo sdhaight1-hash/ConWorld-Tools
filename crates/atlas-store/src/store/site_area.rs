@@ -1,6 +1,6 @@
 //! Source-backed site measurements; containment and geometry remain independent.
 use super::*;
-use crate::semantic::{AreaReading, AreaUnit, DefinitionPin, SiteAreaFact, SiteAreaInput};
+use crate::semantic::{AreaReading, AreaTest, AreaUnit, DefinitionPin, SiteAreaFact, SiteAreaInput};
 
 pub(super) const ACTIVE: &str = "
 , active_site_area AS (
@@ -167,6 +167,66 @@ impl Store {
             return Err(Error::Integrity("overlapping site area".into()));
         }
         self.check_query_control()?;
+        Ok(result)
+    }
+
+    pub(crate) fn site_area_matches(
+        &self,
+        view: ViewContext,
+        test: AreaTest,
+    ) -> Result<Vec<Version>, Error> {
+        require_author(view.scope)?;
+        test.validate()?;
+        self.check_query_control()?;
+        let tx = self.conn.unchecked_transaction()?;
+        metadata_world(&tx, view, false)?;
+        let (condition, amount, unit) = match test {
+            AreaTest::Unknown => ("amount IS NULL AND ?5 IS NULL AND ?6 IS NULL", None, None),
+            AreaTest::AtLeast { amount, unit } => {
+                ("amount>=?5 AND unit=?6", Some(amount), Some(unit.key()))
+            }
+        };
+        let mut statement = tx.prepare(&format!(
+            "{METADATA_CTE} {ACTIVE}
+             SELECT id,place_id,descriptor_id,descriptor_branch,descriptor_state_revision,
+                    descriptor_revision,source_id,amount,unit,starts_at,ends_before,
+                    recorded_revision,branch_id,corrects
+             FROM active_site_area WHERE {condition}
+             AND starts_at<=?4 AND (ends_before IS NULL OR ends_before>?4)
+             ORDER BY id LIMIT 2001"
+        ))?;
+        let mut rows = statement.query(params![
+            view.world.0.as_bytes(),
+            view.branch.0.as_bytes(),
+            view.revision.0,
+            view.day.0,
+            amount,
+            unit
+        ])?;
+        let mut scanned = 0;
+        let mut result = Vec::new();
+        let mut seen = HashSet::new();
+        while let Some(row) = rows.next()? {
+            self.check_query_control()?;
+            scanned += 1;
+            if scanned > 2000 {
+                return Err(Error::QueryBudgetExceeded);
+            }
+            if let Some(fact) = read_site_area(&tx, view, row)? {
+                if !seen.insert(fact.input.place) {
+                    return Err(Error::Integrity("overlapping site area".into()));
+                }
+                if let Some(version) = resolve_object(
+                    &tx,
+                    fact.input.place,
+                    view.branch,
+                    view.revision,
+                    view.day,
+                )? {
+                    result.push(version);
+                }
+            }
+        }
         Ok(result)
     }
 }
