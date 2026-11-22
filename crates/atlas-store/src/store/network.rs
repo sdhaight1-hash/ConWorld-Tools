@@ -777,9 +777,7 @@ impl Store {
         let mut path = vec![start];
         for _ in 0..32 {
             let focus = *path.last().ok_or(Error::NotFound)?;
-            let mut targets = self
-                .network_facts_for_focus(view, focus, true)?
-                .into_iter();
+            let mut targets = self.network_facts_for_focus(view, focus, true)?.into_iter();
             let Some(fact) = targets.next() else {
                 return Ok(path);
             };
