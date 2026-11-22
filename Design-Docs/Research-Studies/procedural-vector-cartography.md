@@ -1,6 +1,6 @@
 # Procedural Vector Cartography from NestedLocations Data
 
-**Status:** In Review — architectural direction accepted in ADR-013; original experimental gaps and production verification remain open.  
+**Status:** Reviewed — research closure gates fulfilled by original experiments and section 11 follow-up; feature #68 production verification remains open.  
 **Author:** Lola, research/codesign agent. **Date:** November 21 local / November 22 UTC, 2026.  
 **Origin:** [Research #66](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/66), companion to [#65](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/65) and [NestedLocations](nested-locations.md).  
 **Audited main:** [ea93ada](https://github.com/sdhaight1-hash/ConWorld-Tools/tree/ea93ada3032478edb05fc25a0cbe408a3db61cc9). No production code or contract changes in this research.
@@ -140,6 +140,47 @@ Proposed VC gates, not existing official IDs: VC-01 exact shape/hole/shared edge
 Approve #65 spatial semantics first; propose cartography as separate specialist subsection in spatial contract with renderer/MapView details shared with 02/06/07/08/09 and ADR. No new roadmap phase. Stage 1 = authored and schematic map query, SVG renderer, safe link and accessible map list: prove nested region→town→building and date changes in actual application. Stage 2 = local versioned style/symbol system, Canvas2D fallback, native capture and export. Stage 3 = candidate generation with author locks and explicit acceptance; start bounded planar constraints, add real settlement/floor generation only with specific data and acceptance criteria. Stage 4 = topology/LOD/viewport, wgpu only with benchmark; local vector tiles only if needed. Scope geometric edit authoring deliberately; no general CAD/GIS or automatic terrain simulation.
 
 Research deliverable ready for review; unresolved: geometry library/version/license, real branch-aware spatial schema, map frame and projection contract, exact primitive/picking/label shape API, candidate conflict detection and locks, publication-safe geometry derivation, full candidate-generator prototype for streets/rooms, production native GPU/perf and archive tests. Leave #66 open through architecture review. No normative specs changed and no claims of completed roadmap phase.
+
+## 11. Closure experiment — locked boundaries, unknown places and measured label collisions
+
+Executed 2026-11-22 UTC, on the identical archived original prototype (Git blob 63f69e5cff560925866030094512cb8b0b9a8a04) and [followup.py](cartography-prototype/followup.py), exact executed source Git blob c4e4121ade36fd1a9760b20d70769fc19532ee59 / SHA-256 d530114687687047856e7d9dd9e51cb935f6b7de43b748a05060779d906afda2. Python 3.13.5, Shapely 2.1.2, headless Chromium 144.0.7559.96, Linux 6.18.57 x86_64 glibc2.41. Run `python followup.py` beside prototype.html with Shapely/Playwright and /usr/bin/chromium (adjust executable path for local environment). Research only, no production application/database or new product dependency.
+
+### Constraint and incomplete-input results
+
+Four stable synthetic place IDs: locked polygon 0–20 × 0–80; east anchor (75,40) without geometry; proposed site with no anchor/geometry but allowed box [30,15,55,65]; genuinely unknown with no geometry/anchor/placement constraints. Extent [0,0,100,80]. Generator sorts input IDs and uses version+seed+ID-derived RNG for proposed anchor; subtracts locked polygon from free region and clips Voronoi halfplanes. Returns separate draft geometry and unknown ID list; original data is unchanged. Assertions passed for:
+- Same seed 66 yields identical result after reversing input order and after JSON encode/decode of canonical-input fixture; a newly added unknown record leaves all existing drafts unchanged and is retained in unknown list.
+- Seeds 66/67 preserve original locked polygon coordinates and fixed east anchor; proposed anchor changes across seeds, within its allowed box; input records unchanged. Missing coordinates never default to zero; unconstrained location remains in unplaced list. No generated canonical mutation.
+- Both seed results contain valid polygons, summed area equals union area within 1e-5, union symmetric-difference with extent within 1e-5; exact positive shared boundary length after common precision normalization.
+- Anchor (10,10), inside locked polygon rather than free region, returns actionable error and zero candidate geometries.
+- Negative findings retained: first run failed JSON replay equality because initial polygon tuples became lists after serialization; normalized coordinates to lists. Second run failed exact shared-boundary intersection despite area checks, owing to independent floating clipping; applying Shapely precision grid 1e-8 and area tolerance 1e-5 made the tested fixture pass. This is not a universal tolerance, nor proof of robust topology for arbitrary polygons.
+
+This intentionally limited experiment locks one rectangle and two anchors, uses convex rectangular extent and simple permitted anchor box; no general solver, polygon holes in generated shapes, area/adjacency optimization, cross-platform bitwise guarantees, real database persistence or manual acceptance transaction. Such full-feature gates belong to #68. The original prototype already distinguishes authored, schematic and draft modes; this follow-up closes the missing bounded research demonstration.
+
+### Measured label placement
+
+Identical deterministic 640×360 fixtures, 25/100/250 candidate points, labels "Northbridge i", 12px sans-serif. Baseline uses original estimated boxes and positions. Alternative uses actual SVG getBBox() plus 1.5 px stroke padding, fixed order, four candidate positions with adjusted offsets, accepts only within canvas and nonoverlapping previously placed bounding boxes. Count strictly intersecting pairs of measured padded bounding rectangles, not glyph-level pixel collision. Timings below are single observed alternative placement runs (including DOM work), not medians or matched speed comparison.
+
+| Candidates | Baseline placed | Baseline overlapping pairs | Measured placed | Measured overlapping pairs | Alternative placement ms |
+|---:|---:|---:|---:|---:|---:|
+| 25 | 19 | 0 | 25 | 0 | 3.7 |
+| 100 | 37 | 1 | 57 | 0 | 16.7 |
+| 250 | 44 | 2 | 64 | 0 | 65.7 |
+
+All measured-placement assertions passed (nonzero placement within input count, zero overlapping accepted pairs). Suppression at density is necessary (186 omitted of 250); maintain an accessible list, priority and stable tie-breaking in product. Improvements are jointly from actual font bounds and changed candidate offsets, not isolated causal effects of measurement. Single font/viewport, no obstacles besides label boxes, no multilingual/rotated text, no GPU or target performance inference. At 250 labels repeated DOM measurement is expensive; measure/cache glyph metrics and add spatial label index only when needed. No claim of optimal solver.
+
+### Raster/link-only comparison (small fixture)
+
+Ran a separate Chromium evaluation using the original regional fixture at day100/main/public: 8 features, SVG UTF-8 1,643 bytes with 8 data-id attributes; Canvas2D PNG 32,863 bytes (640×360, image/png). Reproduction: load prototype.html via Playwright set_content; evaluate the following async function:
+~~~js
+async()=>{const fs=lab.region(100,'main',false);const s=lab.svg(fs);const c=document.createElement('canvas');c.width=640;c.height=360;lab.canvas(fs,c.getContext('2d'));const png=await new Promise(r=>c.toBlob(r,'image/png'));return {features:fs.length,svgBytes:new TextEncoder().encode(s).length,pngBytes:png.size,svgFeatureIds:(s.match(/data-id=/g)||[]).length}}
+~~~
+A static PNG needs separately authored links/hotspots, does not retain individual vector features and cannot independently re-style them. PNG excludes hotspot metadata; SVG and raster text rendering differ; not a general size/performance comparison or equivalent raster appearance. Original section 8 retains measured large-feature renderer comparison and its limitations. Pan/zoom, regeneration throughput, memory and full native/archive benchmarks remain product tests. This is sufficient for backend choice at research scope, not a release benchmark.
+
+### Evidence and closure decision
+
+Actual browser screenshot from the follow-up constraint result: [archived capture](../../Development-Screenshots/2026-11-22_03-19-09Z_phase-04_cartography_research-66-locked-unknown-fixture_01.png) (800×630 original rendered browser, resized to 400×315 and quantized to eight colors for archive transfer; original SHA-256 306dd7bd237794e574695f45278130815ee06d680198c4288957c00e8baad518; archived SHA-256 0900049b21e93b09a4593d453dd2bcf3201abf58db3ca816f28aad057d9bf51c; Git blob 9076a153ee7fc8f306ecb8dd4658b1474584aee4). Captured 03:19:09 UTC and visually inspected. Green locked region, purple dashed draft cells, explicit unplaced record. This is isolated Chromium fixture output, not native production runtime. Recreate with script; original not committed.
+
+All five original #66 research deliverable/closure gates now supported at research scale: cited comparative study; three modes and bounded locked generation/unknown retention/topology checks; backend/style comparison and historical/nested prototype; actual archived evidence, metrics and unrun limitations; architecture and cross-links reviewed under ADR-013 and explicit owner-approved [New Feature #68](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/68). Recommend close research as completed; no feature SP gate marked passed. The research questions have enough evidence for the chosen incremental architecture; general constraint solving, real scoped branch/identity persistence, safe projection, archive and native GPU/performance remain implementation acceptance obligations of #68, including the deferred advanced algorithms and unchanged scope. No code outside research files changed and no new roadmap phase.
 
 ## References
 
