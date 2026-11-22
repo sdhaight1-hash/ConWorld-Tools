@@ -2500,3 +2500,38 @@ fn branch_local_network_and_parentage_corrections_never_change_parent_or_sibling
     store.verify_foreign_keys(Scope::Author)?;
     Ok(())
 }
+
+#[test]
+fn designated_succession_and_reversible_identity_redirect_are_explicit() -> Result<(), Error> {
+    use atlas_store::network::{IdentityKind,NetworkInput,NetworkKind};
+    let mut store=Store::open(":memory:")?;
+    let world=seed(&mut store)?;
+    let mut author=view(&world,13);
+    let title=store.create_identity(author,IdentityKind::Title,"Crown",Uuid::new_v4())?;
+    author.revision=AuthorRevision(author.revision.0+1);
+    let rule=store.create_identity(author,IdentityKind::SuccessionRule,"Charter",Uuid::new_v4())?;
+    author.revision=AuthorRevision(author.revision.0+1);
+    let make=|subject,target,kind,role:&str|NetworkInput{subject,target,kind,role:role.into(),source:id(&world,9),starts_at:13,ends_before:None};
+    store.record_network_fact(author,&make(rule,title,NetworkKind::RuleOf,"designated_heir"),Uuid::new_v4())?;
+    author.revision=AuthorRevision(author.revision.0+1);
+    assert!(!store.succession_preview(author,title)?.eligible);
+    store.record_network_fact(author,&make(id(&world,2),title,NetworkKind::HeirDesignation,"charter nominee"),Uuid::new_v4())?;
+    author.revision=AuthorRevision(author.revision.0+1);
+    assert!(store.succession_preview(author,title)?.eligible);
+    store.enact_designated_succession(author,title,id(&world,9),Uuid::new_v4())?;
+    author.revision=AuthorRevision(author.revision.0+1);
+    assert_eq!(store.succession_preview(author,title)?.incumbent,Some(id(&world,2)));
+    assert!(!store.succession_preview(author,title)?.eligible);
+    let duplicate=id(&world,12); let target=id(&world,1);
+    let link=store.record_network_fact(author,&make(duplicate,target,NetworkKind::IdentityRedirect,"reviewed identity"),Uuid::new_v4())?;
+    author.revision=AuthorRevision(author.revision.0+1);
+    assert_eq!(store.canonical_identity(author,duplicate)?,vec![duplicate,target]);
+    assert!(matches!(store.record_network_fact(author,&make(target,duplicate,NetworkKind::IdentityRedirect,"cycle"),Uuid::new_v4()),Err(Error::InvalidInput(_))));
+    let old=author;
+    store.withdraw_network_fact(author,link,Uuid::new_v4())?;
+    author.revision=AuthorRevision(author.revision.0+1);
+    assert_eq!(store.canonical_identity(author,duplicate)?,vec![duplicate]);
+    assert_eq!(store.canonical_identity(old,duplicate)?,vec![duplicate,target]);
+    assert!(store.get_object(duplicate,author)?.is_some());
+    Ok(())
+}

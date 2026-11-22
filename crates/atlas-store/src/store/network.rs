@@ -107,6 +107,22 @@ impl Store {
             return Err(Error::WrongKind);
         }
         match input.kind {
+            NetworkKind::HeirDesignation
+                if matches!(subject.record.data, ObjectData::Person)
+                    && matches!(target.record.data, ObjectData::Title) => {}
+            NetworkKind::IdentityRedirect
+                if subject.record.data == target.record.data &&
+                    matches!(subject.record.data, ObjectData::Person | ObjectData::Organization |
+                        ObjectData::Household | ObjectData::FamilyHouse | ObjectData::Faction |
+                        ObjectData::Conflict | ObjectData::Office | ObjectData::Title | ObjectData::Asset |
+                        ObjectData::Population | ObjectData::ConflictIssue | ObjectData::ConflictPhase |
+                        ObjectData::SuccessionRule) => {}
+            NetworkKind::Alliance
+                if matches!(subject.record.data, ObjectData::Faction)
+                    && matches!(target.record.data, ObjectData::Faction) => {}
+            NetworkKind::Settlement
+                if matches!(subject.record.data, ObjectData::Faction)
+                    && matches!(target.record.data, ObjectData::Conflict | ObjectData::ConflictIssue) => {}
             NetworkKind::Membership
                 if matches!(subject.record.data, ObjectData::Person)
                     && institution(&target.record.data) => {}
@@ -194,7 +210,7 @@ impl Store {
         let kind = input.kind.name();
         let duplicate: bool = tx.query_row(
             &format!("{METADATA_CTE} SELECT EXISTS(SELECT 1 FROM active_network WHERE kind=?5
-             AND ((subject_id=?6 AND target_id=?7) OR (?5='marriage' AND subject_id=?7 AND target_id=?6))
+             AND ((subject_id=?6 AND target_id=?7) OR (?5 IN ('marriage','alliance') AND subject_id=?7 AND target_id=?6))
              AND (?8 IS NULL OR starts_at<?8) AND (ends_before IS NULL OR ends_before>?4))"),
             params![view.world.0.as_bytes(),view.branch.0.as_bytes(),view.revision.0,input.starts_at,
                 kind,input.subject.id.0.as_bytes(),input.target.id.0.as_bytes(),input.ends_before], |row| row.get(0))?;
@@ -205,7 +221,7 @@ impl Store {
         // A multi-seat body uses multiple office identities.
         if matches!(
             input.kind,
-            NetworkKind::OfficeHolding | NetworkKind::TitleHolding | NetworkKind::RuleOf
+            NetworkKind::OfficeHolding | NetworkKind::TitleHolding | NetworkKind::RuleOf | NetworkKind::HeirDesignation
         ) {
             let occupied: bool = tx.query_row(
                 &format!("{METADATA_CTE} SELECT EXISTS(SELECT 1 FROM active_network WHERE kind=?5
@@ -216,10 +232,18 @@ impl Store {
                 return Err(Error::InvalidInput("overlapping exclusive role"));
             }
         }
+        if input.kind == NetworkKind::IdentityRedirect {
+            let occupied:bool=tx.query_row(
+                &format!("{METADATA_CTE} SELECT EXISTS(SELECT 1 FROM active_network WHERE kind='identity_redirect'
+                 AND subject_id=?5 AND (?6 IS NULL OR starts_at<?6) AND (ends_before IS NULL OR ends_before>?4))"),
+                params![view.world.0.as_bytes(),view.branch.0.as_bytes(),view.revision.0,input.starts_at,input.subject.id.0.as_bytes(),input.ends_before],
+                |row|row.get(0))?;
+            if occupied {return Err(Error::InvalidInput("overlapping identity redirects"));}
+        }
         // Conservative whole-history DAG: never allow a confirmed cause or succession cycle.
         if matches!(
             input.kind,
-            NetworkKind::ConfirmedCause | NetworkKind::Succession
+            NetworkKind::ConfirmedCause | NetworkKind::Succession | NetworkKind::IdentityRedirect
         ) {
             let mut edges = HashMap::<ObjectRef, Vec<ObjectRef>>::new();
             let mut stmt = tx.prepare(&format!("{METADATA_CTE} SELECT subject_id,target_id FROM active_network WHERE kind=?5 LIMIT 4001"))?;
@@ -356,6 +380,46 @@ impl Store {
         drop(rows);
         drop(stmt);
         self.confirmed_impact(view, start, &links, max_depth, max_visited)
+    }
+
+    /// Resolve explicitly reviewed identity redirects without rewriting canonical references.
+    pub fn canonical_identity(&self, view:ViewContext, start:ObjectRef)->Result<Vec<ObjectRef>,Error>{
+        let mut path=vec![start];
+        for _ in 0..32 {
+            let focus=*path.last().ok_or(Error::NotFound)?;
+            let facts=self.network_facts(view,focus)?;
+            let mut targets=facts.into_iter().filter(|fact|fact.input.kind==NetworkKind::IdentityRedirect && fact.input.subject==focus);
+            let Some(fact)=targets.next() else {return Ok(path);};
+            if targets.next().is_some() || path.contains(&fact.input.target) {return Err(Error::Integrity("ambiguous identity redirect".into()));}
+            path.push(fact.input.target);
+        }
+        Err(Error::QueryBudgetExceeded)
+    }
+
+    /// An explicit, sourced designated heir is the only supported automatic rule.
+    /// Other rule names are records, not sufficient birth-order/eligibility evidence.
+    pub fn succession_preview(&self,view:ViewContext,title:ObjectRef)->Result<crate::network::SuccessionPreview,Error>{
+        metadata_world(&self.conn,view,false)?;
+        if !matches!(resolved(&self.conn,view,title)?.record.data,ObjectData::Title){return Err(Error::WrongKind);}
+        let facts=self.network_facts(view,title)?;
+        let rule=facts.iter().find(|fact|fact.input.kind==NetworkKind::RuleOf && fact.input.target==title).map(|fact|fact.input.role.clone());
+        let incumbent=facts.iter().find(|fact|fact.input.kind==NetworkKind::TitleHolding && fact.input.target==title).map(|fact|fact.input.subject);
+        let designated=facts.iter().find(|fact|fact.input.kind==NetworkKind::HeirDesignation && fact.input.target==title).map(|fact|fact.input.subject);
+        let eligible=rule.as_deref()==Some("designated_heir") && incumbent.is_none() && designated.is_some();
+        let explanation=if incumbent.is_some() {"Title currently occupied."}
+          else if rule.as_deref()!=Some("designated_heir") {"No executable designated-heir rule; other laws require explicit interpretation."}
+          else if designated.is_none() {"No active sourced heir designation."}
+          else {"Vacant title and active designated heir. Author confirmation required."};
+        Ok(crate::network::SuccessionPreview{rule,incumbent,designated,eligible,explanation:explanation.into()})
+    }
+
+    pub fn enact_designated_succession(&mut self,view:ViewContext,title:ObjectRef,source:ObjectRef,command_id:Uuid)->Result<Uuid,Error>{
+        let preview=self.succession_preview(view,title)?;
+        if !preview.eligible {return Err(Error::InvalidInput("succession not eligible"));}
+        self.record_network_fact(view,&NetworkInput{
+            subject:preview.designated.ok_or(Error::NotFound)?,target:title,source,kind:NetworkKind::TitleHolding,
+            role:"designated succession".into(),starts_at:view.day.0,ends_before:None,
+        },command_id)
     }
 
     /// Read-only candidate generation. The author still chooses the type and exact span.

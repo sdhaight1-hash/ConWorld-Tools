@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
-type Context = { world_id: string; day: number; revision: number };
+type Context = { world_id: string; branch_id?: string; day: number; revision: number };
+const selectedBranches = new Map<string, string>();
 type Ref = { world: string; id: string };
 type Fact = { id: string; input: { kind: string; role: string }; subject_label: string; target_label: string };
 type Ghost = { id: string; claim: Ref; label: string; kind: string; reviewed: boolean; promoted: Ref | null };
@@ -7,11 +8,14 @@ type Ghost = { id: string; claim: Ref; label: string; kind: string; reviewed: bo
 export function openNetworkStudio(parent: HTMLElement, request: Context, editable: boolean,
   refresh: () => Promise<void>, valid: () => boolean) {
   parent.querySelector("[data-network-studio]")?.remove();
+  const selected = selectedBranches.get(request.world_id);
+  if (selected) request = { ...request, branch_id: selected };
   const host = document.createElement("details");
   host.dataset.networkStudio = "";
   host.className = "query-panel";
   host.innerHTML = `<summary>Institution, causal and draft identity studio</summary>
     <p class="hint">Author-only. Stable object IDs come from historical search. Source evidence is required for network facts.</p>
+    <section class="branch-controls"><h3>Alternate historical timelines</h3><p data-selected-branch></p><button type="button" data-load-branches>Load branches</button><select aria-label="Historical branch" data-branch hidden></select><button type="button" data-fork>Create fork at selected day</button><p class="hint">Branch applies only to this network studio; the main graph and page editor remain on main.</p></section>
     <form data-identity class="editor-form"><fieldset><legend>Create typed identity</legend>
       <label>Identity label <input name="label" required maxlength="800"></label>
       <label>Identity type <select name="kind"><option value="organization">Organization</option><option value="household">Household</option><option value="family_house">Family house</option><option value="faction">Faction</option><option value="conflict">Conflict</option><option value="office">Office</option><option value="title">Hereditary or legal title</option><option value="asset">Asset</option><option value="population">Fictional population</option><option value="conflict_issue">Conflict issue</option><option value="conflict_phase">Conflict phase</option><option value="succession_rule">Succession rule</option><option value="person">Person</option></select></label>
@@ -19,11 +23,12 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
     <form data-fact class="editor-form"><fieldset><legend>Record sourced network fact</legend>
       <label>Subject identity <input name="subject" required></label><label>Target identity <input name="target" required></label>
       <label>Evidence source identity <input name="source" required></label>
-      <label>Fact type <select name="kind"><option value="membership">Membership</option><option value="marriage">Marriage</option><option value="succession">Institutional succession</option><option value="confirmed_cause">Confirmed cause</option><option value="alleged_cause">Alleged cause</option><option value="conflict_position">Faction conflict stance</option><option value="office_holding">Office holding</option><option value="office_of">Office in institution</option><option value="title_holding">Title holding</option><option value="title_of">Title of institution</option><option value="ownership">Ownership</option><option value="issue_of">Issue in conflict</option><option value="phase_of">Phase in conflict</option><option value="rule_of">Succession rule of title</option><option value="population_member">Founder population affiliation</option></select></label>
+      <label>Fact type <select name="kind"><option value="membership">Membership</option><option value="marriage">Marriage</option><option value="succession">Institutional succession</option><option value="confirmed_cause">Confirmed cause</option><option value="alleged_cause">Alleged cause</option><option value="conflict_position">Faction conflict stance</option><option value="office_holding">Office holding</option><option value="office_of">Office in institution</option><option value="title_holding">Title holding</option><option value="title_of">Title of institution</option><option value="ownership">Ownership</option><option value="issue_of">Issue in conflict</option><option value="phase_of">Phase in conflict</option><option value="rule_of">Succession rule of title</option><option value="population_member">Founder population affiliation</option><option value="heir_designation">Designated heir</option><option value="identity_redirect">Reviewed same identity redirect</option><option value="alliance">Faction alliance</option><option value="settlement">Faction settlement</option></select></label>
       <label>Role or causal rationale <input name="role" required maxlength="800"></label>
       <label>Starts at day <input name="start" type="number" required></label><label>Ends before day <input name="end" type="number"></label>
       <button>Record network fact</button></fieldset></form>
-    <form data-focus class="editor-form"><label>Network focus identity <input name="focus" required></label><button>Inspect network facts</button><button type="button" data-impact>Explore confirmed impact</button></form><ul data-facts></ul><ul data-impact-results></ul>
+    <form data-focus class="editor-form"><label>Network focus identity <input name="focus" required></label><button>Inspect network facts</button><button type="button" data-impact>Explore confirmed impact</button></form><ul data-facts></ul><ul data-impact-results></ul><button type="button" data-resolve-identity>Trace reviewed identity</button><output data-identity-path></output>
+    <form data-succession class="editor-form"><fieldset><legend>Designated succession</legend><label>Title identity <input name="title" required></label><label>Transfer evidence source <input name="source"></label><button type="button" data-preview-succession>Preview eligibility</button><button data-enact disabled>Confirm transfer</button><output data-succession-result></output></fieldset></form>
     <form data-ghost class="editor-form"><fieldset><legend>Propose identity from a claim</legend>
       <label>Claim identity <input name="claim" required></label>
       <label>Start UTF-8 byte <input name="start" type="number" min="0" required></label>
@@ -46,6 +51,37 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
   const ref = (id: string) => ({ world: request.world_id, id });
   (form("[data-fact]").elements.namedItem("start") as HTMLInputElement).value = String(request.day);
   host.querySelectorAll("fieldset").forEach(field => field.disabled = !editable);
+  const selectedLabel=host.querySelector<HTMLElement>("[data-selected-branch]")!;
+  selectedLabel.textContent = request.branch_id ? "Alternate branch: "+request.branch_id : "Main history";
+  const chooser=host.querySelector<HTMLSelectElement>("[data-branch]")!;
+  const choose=(id:string | undefined)=>{
+    if(id)selectedBranches.set(request.world_id,id);else selectedBranches.delete(request.world_id);
+    if(id)request={...request,branch_id:id};else {const {branch_id:_,...main}=request;request=main;}
+    selectedLabel.textContent=id?"Alternate branch: "+id:"Main history";
+    for(const selector of ["[data-facts]","[data-impact-results]","[data-identity-path]","[data-succession-result]","[data-ghosts]","[data-candidate-results]","[data-templates]"])host.querySelector(selector)?.replaceChildren();
+    host.querySelector<HTMLButtonElement>("[data-enact]")!.disabled=true;
+  };
+  host.querySelector<HTMLButtonElement>("[data-load-branches]")!.onclick=async()=>{
+    try {
+      const branches=await invoke<{id:string;day:number|null;created_revision:number}[]>("workspace_metadata_branches",{request});
+      if(!valid())return;
+      chooser.replaceChildren();
+      for(const branch of branches)chooser.add(new Option(branch.day===null?"Main history":"Fork day "+branch.day+" · "+branch.id,branch.day===null?"":branch.id));
+      chooser.value=request.branch_id??"";chooser.hidden=false;
+    }catch(error){if(valid())status.textContent=String(error);}
+  };
+  chooser.onchange=()=>choose(chooser.value||undefined);
+  const forkButton=host.querySelector<HTMLButtonElement>("[data-fork]")!;
+  forkButton.disabled=!editable;
+  forkButton.onclick=async()=>{
+    if(!valid()||busy||!editable)return;
+    busy=true;
+    try{
+      const id=await invoke<string>("workspace_fork_metadata",{request});
+      if(valid()){choose(id);await refresh();}
+    }catch(error){if(valid())status.textContent=String(error);}
+    finally{busy=false;}
+  };
   let busy = false;
   async function write(command: string, args: Record<string, unknown>) {
     if (!valid() || busy || !editable) return;
@@ -112,6 +148,28 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
       status.textContent="Possible names only; no identities or facts have been created.";
     } catch(error){if(valid())status.textContent=String(error);}
   };
+  host.querySelector<HTMLButtonElement>("[data-resolve-identity]")!.onclick=async()=>{
+    const out=host.querySelector<HTMLOutputElement>("[data-identity-path]")!;
+    try{
+      const ctx=request;
+      const chain=await invoke<Ref[]>("workspace_canonical_identity",{request:ctx,focus:value(form("[data-focus]"),"focus")});
+      if(valid()&&ctx===request)out.textContent=chain.map(x=>x.id).join(" → ");
+    }catch(error){if(valid())out.textContent=String(error);}
+  };
+  const succession=form("[data-succession]");
+  const enact=host.querySelector<HTMLButtonElement>("[data-enact]")!;
+  let approvedTitle="";
+  succession.oninput=()=>{approvedTitle="";enact.disabled=true;};
+  host.querySelector<HTMLButtonElement>("[data-preview-succession]")!.onclick=async()=>{
+    const ctx=request,title=value(succession,"title"),out=host.querySelector<HTMLOutputElement>("[data-succession-result]")!;
+    try{
+      const result=await invoke<{eligible:boolean;explanation:string;designated:Ref|null}>("workspace_succession_preview",{request:ctx,title});
+      if(!valid()||ctx!==request||title!==value(succession,"title"))return;
+      out.textContent=result.explanation+(result.designated?" · "+result.designated.id:"");
+      approvedTitle=result.eligible?title:"";enact.disabled=!editable||!result.eligible;
+    }catch(error){if(valid())out.textContent=String(error);}
+  };
+  submit("[data-succession]",f=>{if(approvedTitle===value(f,"title")&&!enact.disabled)void write("workspace_enact_succession",{title:approvedTitle,source:value(f,"source")});});
   submit("[data-ghost]", f=>void write("workspace_propose_ghost",{claimId:value(f,"claim"),startByte:Number(value(f,"start")),
     endByte:Number(value(f,"end")),kind:value(f,"kind")}));
   submit("[data-template]", f => void write("workspace_save_custom_template", { sourceId: value(f,"source"), name:value(f,"name"), templateId:value(f,"id") || null }));

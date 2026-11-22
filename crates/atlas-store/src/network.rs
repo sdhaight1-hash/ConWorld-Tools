@@ -97,6 +97,10 @@ pub enum NetworkKind {
     PhaseOf,
     RuleOf,
     PopulationMember,
+    HeirDesignation,
+    IdentityRedirect,
+    Alliance,
+    Settlement,
 }
 
 impl NetworkKind {
@@ -117,6 +121,10 @@ impl NetworkKind {
             Self::PhaseOf => "phase_of",
             Self::RuleOf => "rule_of",
             Self::PopulationMember => "population_member",
+            Self::HeirDesignation => "heir_designation",
+            Self::IdentityRedirect => "identity_redirect",
+            Self::Alliance => "alliance",
+            Self::Settlement => "settlement",
         }
     }
 
@@ -137,6 +145,10 @@ impl NetworkKind {
             "phase_of" => Ok(Self::PhaseOf),
             "rule_of" => Ok(Self::RuleOf),
             "population_member" => Ok(Self::PopulationMember),
+            "heir_designation" => Ok(Self::HeirDesignation),
+            "identity_redirect" => Ok(Self::IdentityRedirect),
+            "alliance" => Ok(Self::Alliance),
+            "settlement" => Ok(Self::Settlement),
             _ => Err(crate::Error::WrongKind),
         }
     }
@@ -228,4 +240,21 @@ pub(crate) fn capitalized_spans(text: &str) -> Vec<(usize, usize)> {
         i = j;
     }
     result
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct BranchSummary {
+    pub id: crate::BranchId,
+    pub parent: Option<crate::BranchId>,
+    pub day: Option<i64>,
+    pub created_revision: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct SuccessionPreview {
+    pub rule: Option<String>,
+    pub incumbent: Option<ObjectRef>,
+    pub designated: Option<ObjectRef>,
+    pub eligible: bool,
+    pub explanation: String,
 }

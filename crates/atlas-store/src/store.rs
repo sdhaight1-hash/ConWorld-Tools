@@ -24,7 +24,7 @@ mod network;
 mod templates;
 
 // Version 29 adds version-pinned template layout variants without changing tables.
-pub(crate) const SCHEMA_VERSION: i64 = 34;
+pub(crate) const SCHEMA_VERSION: i64 = 35;
 
 // Candidate queries bind world (?1), focus/phrase (?2), author revision (?3),
 // limit (?4) and branch (?5). Follow only immutable inherited revisions.
@@ -206,6 +206,9 @@ impl Store {
         }
         if version < 34 {
             tx.execute_batch(include_str!("../migrations/0034.sql"))?;
+        }
+        if version < 35 {
+            tx.execute_batch(include_str!("../migrations/0035.sql"))?;
         }
         if version < SCHEMA_VERSION {
             verify_foreign_keys(&tx)?;
@@ -1729,6 +1732,18 @@ impl Store {
         let version = read_calendar(&tx, world.id, id, revision)?;
         tx.commit()?;
         Ok(version)
+    }
+
+    pub fn metadata_branches(&self, view: ViewContext) -> Result<Vec<crate::network::BranchSummary>, Error> {
+        let world = metadata_world(&self.conn, view, false)?;
+        let mut result = vec![crate::network::BranchSummary { id: world.main, parent: None, day: None, created_revision: 0 }];
+        let mut stmt=self.conn.prepare("SELECT branch_id,parent_id,fork_day,created_revision FROM branch_forks WHERE world_id=?1 AND created_revision<=?2 ORDER BY created_revision LIMIT 201")?;
+        let mut rows=stmt.query(params![view.world.0.as_bytes(),view.revision.0])?;
+        while let Some(row)=rows.next()? {
+            if result.len()>200 { return Err(Error::QueryBudgetExceeded); }
+            result.push(crate::network::BranchSummary { id: BranchId(Uuid::from_bytes(row.get(0)?)), parent: Some(BranchId(Uuid::from_bytes(row.get(1)?))), day: Some(row.get(2)?), created_revision:row.get(3)? });
+        }
+        Ok(result)
     }
 
     pub fn branch_fork(

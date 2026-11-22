@@ -2428,6 +2428,36 @@ impl NetworkContext {
 }
 
 #[tauri::command]
+pub fn workspace_metadata_branches(workspace:State<'_,AuthorWorkspace>,request:NetworkContext)->Result<Vec<atlas_store::network::BranchSummary>,String>{
+    let store=workspace.lock()?;
+    store.metadata_branches(request.resolve(&store)?).map_err(|e|e.to_string())
+}
+#[tauri::command]
+pub fn workspace_fork_metadata(workspace:State<'_,AuthorWorkspace>,request:NetworkContext)->Result<String,String>{
+    let mut store=workspace.lock()?;
+    let context=request.resolve(&store)?;
+    let fork=store.fork(&atlas_store::ForkCommand{world:context.world,parent:context.branch,day:context.day,expected:context.revision,id:Uuid::new_v4(),author:"Local author".into(),rationale:"Create alternate history".into(),scope:Scope::Author}).map_err(|e|e.to_string())?;
+    Ok(fork.id.0.to_string())
+}
+#[tauri::command]
+pub fn workspace_canonical_identity(workspace:State<'_,AuthorWorkspace>,request:NetworkContext,focus:String)->Result<Vec<ObjectRef>,String>{
+    let store=workspace.lock()?;
+    let context=request.resolve(&store)?;
+    store.canonical_identity(context,reference(context.world,&focus)?).map_err(|e|e.to_string())
+}
+#[tauri::command]
+pub fn workspace_succession_preview(workspace:State<'_,AuthorWorkspace>,request:NetworkContext,title:String)->Result<atlas_store::network::SuccessionPreview,String>{
+    let store=workspace.lock()?;
+    let context=request.resolve(&store)?;
+    store.succession_preview(context,reference(context.world,&title)?).map_err(|e|e.to_string())
+}
+#[tauri::command]
+pub fn workspace_enact_succession(workspace:State<'_,AuthorWorkspace>,request:NetworkContext,title:String,source:String)->Result<(),String>{
+    let mut store=workspace.lock()?;
+    let context=request.resolve(&store)?;
+    store.enact_designated_succession(context,reference(context.world,&title)?,reference(context.world,&source)?,Uuid::new_v4()).map(|_|()).map_err(|e|e.to_string())
+}
+#[tauri::command]
 pub fn workspace_custom_templates(
     workspace: State<'_, AuthorWorkspace>,
     request: NetworkContext,
