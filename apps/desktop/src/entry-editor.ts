@@ -9,7 +9,7 @@ export type Binding = { world: string; query_id: string; definition_revision: nu
 export type Block = { id: string; audience: string; content: { Text?: string; Stack?: Block[]; Panel?: Block[];
   Grid?: { columns: number; children: Block[] }; Template?: { key: string; version: number; children: Block[] };
   SavedQuery?: Binding; ObjectLink?: ObjectLink; Query?: unknown; FamilyTable?: { world: string; id: string }; NetworkTable?: { world: string; id: string };
-  PublishedReferences?: { world: string; id: string } } };
+  PublishedReferences?: { world: string; id: string }; ImpactTable?: { world: string; id: string } } };
 type Document = { schema_version: number; entry: { world: string; id: string }; root: Block };
 type Display = { content: { Text?: string; Stack?: Display[]; Panel?: Display[];
   Grid?: { columns: number; children: Display[] }; ObjectLink?: ObjectLink;
@@ -354,7 +354,7 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
         let control: HTMLInputElement | HTMLSelectElement;
         if (parameter.default.type === "object_kind") {
           control = document.createElement("select");
-          for (const kind of ["person", "organization", "household", "family_house", "definition", "relationship", "event_involvement", "actor_action",
+          for (const kind of ["person", "organization", "household", "family_house", "faction", "conflict", "definition", "relationship", "event_involvement", "actor_action",
             "historical_event", "source", "claim"]) control.add(new Option(kind.replaceAll("_", " "), kind));
         } else {
           control = document.createElement("input");

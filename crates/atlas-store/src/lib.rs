@@ -167,6 +167,8 @@ pub enum ObjectData {
     Organization,
     Household,
     FamilyHouse,
+    Faction,
+    Conflict,
     Definition {
         definition: Definition,
         description: String,

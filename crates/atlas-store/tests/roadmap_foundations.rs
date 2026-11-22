@@ -1840,6 +1840,7 @@ fn institutional_network_ghost_and_public_projection() -> Result<(), Error> {
     };
     store.record_network_fact(author, &cause, Uuid::new_v4())?;
     author.revision = AuthorRevision(4);
+    assert_eq!(store.persisted_impact(author, cause.subject, 4, 10)?.events, vec![cause.target]);
     let reversed = NetworkInput {
         subject: cause.target,
         target: cause.subject,
@@ -1963,5 +1964,41 @@ fn institutional_network_ghost_and_public_projection() -> Result<(), Error> {
     assert!(store.network_facts(author, group)?.is_empty());
     assert_eq!(store.network_facts(old, group)?.len(), 1);
     store.verify_foreign_keys(Scope::Author)?;
+    Ok(())
+}
+
+#[test]
+fn conflict_positions_are_dated_sourced_and_distinct_from_membership() -> Result<(), Error> {
+    use atlas_store::network::{IdentityKind, NetworkInput, NetworkKind};
+
+    let mut store = Store::open(":memory:")?;
+    let world = seed(&mut store)?;
+    let mut author = view(&world, 13);
+    let faction = store.create_identity(author, IdentityKind::Faction, "Workers Guild", Uuid::new_v4())?;
+    author.revision = AuthorRevision(2);
+    let conflict = store.create_identity(author, IdentityKind::Conflict, "Strike", Uuid::new_v4())?;
+    author.revision = AuthorRevision(3);
+    let position = NetworkInput {
+        subject: faction,
+        target: conflict,
+        source: id(&world, 9),
+        kind: NetworkKind::ConflictPosition,
+        role: "opposes".into(),
+        starts_at: 13,
+        ends_before: Some(20),
+    };
+    store.record_network_fact(author, &position, Uuid::new_v4())?;
+    author.revision = AuthorRevision(4);
+    let invalid = NetworkInput { role: "unrecognized".into(), ..position.clone() };
+    assert!(matches!(
+        store.record_network_fact(author, &invalid, Uuid::new_v4()),
+        Err(Error::InvalidInput(_))
+    ));
+    let changed = NetworkInput { role: "mediates".into(), starts_at: 20, ends_before: None, ..position };
+    store.record_network_fact(author, &changed, Uuid::new_v4())?;
+    author.revision = AuthorRevision(5);
+    assert_eq!(store.network_facts(author, conflict)?[0].input.role, "opposes");
+    author.day = WorldDay(20);
+    assert_eq!(store.network_facts(author, conflict)?[0].input.role, "mediates");
     Ok(())
 }

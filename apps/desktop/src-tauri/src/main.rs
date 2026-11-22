@@ -229,6 +229,7 @@ fn main() {
             workspace::workspace_search_public_pages,
             workspace::workspace_create_identity,
             workspace::workspace_network_facts,
+            workspace::workspace_persisted_impact,
             workspace::workspace_record_network_fact,
             workspace::workspace_withdraw_network_fact,
             workspace::workspace_propose_ghost,

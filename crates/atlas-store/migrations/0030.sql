@@ -3,7 +3,7 @@ CREATE TABLE objects_v30 (
     world_id BLOB NOT NULL REFERENCES worlds(id),
     id BLOB NOT NULL CHECK(length(id)=16),
     kind TEXT NOT NULL CHECK(kind IN ('person','historical_event','source','claim',
-        'relationship','event_involvement','actor_action','definition','organization','household','family_house')),
+        'relationship','event_involvement','actor_action','definition','organization','household','family_house','faction','conflict')),
     PRIMARY KEY(world_id,id),
     UNIQUE(world_id,id,kind)
 ) STRICT;
@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS network_facts (
     subject_id BLOB NOT NULL,
     target_id BLOB NOT NULL CHECK(subject_id<>target_id),
     source_id BLOB NOT NULL,
-    kind TEXT NOT NULL CHECK(kind IN ('membership','marriage','succession','confirmed_cause','alleged_cause')),
+    kind TEXT NOT NULL CHECK(kind IN ('membership','marriage','succession','confirmed_cause','alleged_cause','conflict_position')),
     role TEXT NOT NULL CHECK(length(trim(role))>0),
     starts_at INTEGER NOT NULL,
     ends_before INTEGER CHECK(ends_before IS NULL OR starts_at<ends_before),
@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS ghost_proposals (
     start_byte INTEGER NOT NULL,
     end_byte INTEGER NOT NULL CHECK(end_byte>start_byte),
     label TEXT NOT NULL CHECK(length(trim(label))>0),
-    kind TEXT NOT NULL CHECK(kind IN ('person','organization','household','family_house')),
+    kind TEXT NOT NULL CHECK(kind IN ('person','organization','household','family_house','faction','conflict')),
     day INTEGER NOT NULL,
     recorded_revision INTEGER NOT NULL,
     reviewed_revision INTEGER,

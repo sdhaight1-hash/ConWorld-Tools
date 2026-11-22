@@ -16,7 +16,10 @@ fn author_context(conn: &Connection, view: ViewContext) -> Result<World, Error> 
 fn institution(data: &ObjectData) -> bool {
     matches!(
         data,
-        ObjectData::Organization | ObjectData::Household | ObjectData::FamilyHouse
+        ObjectData::Organization
+            | ObjectData::Household
+            | ObjectData::FamilyHouse
+            | ObjectData::Faction
     )
 }
 
@@ -111,6 +114,14 @@ impl Store {
                     && matches!(target.record.data, ObjectData::Person) => {}
             NetworkKind::Succession
                 if institution(&subject.record.data) && institution(&target.record.data) => {}
+            NetworkKind::ConflictPosition
+                if matches!(subject.record.data, ObjectData::Faction)
+                    && matches!(target.record.data, ObjectData::Conflict) =>
+            {
+                if !matches!(input.role.as_str(), "supports" | "opposes" | "mediates" | "neutral") {
+                    return Err(Error::InvalidInput("conflict stance"));
+                }
+            }
             NetworkKind::ConfirmedCause | NetworkKind::AllegedCause => {
                 let (
                     ObjectData::HistoricalEvent { occurrence: cause },
@@ -273,6 +284,41 @@ impl Store {
             });
         }
         Ok(result)
+    }
+
+    /// Traverse only persisted, active, confirmed event links; allegations never enter the DAG.
+    pub fn persisted_impact(
+        &self,
+        view: ViewContext,
+        start: ObjectRef,
+        max_depth: u8,
+        max_visited: usize,
+    ) -> Result<crate::conflict::Impact, Error> {
+        author_context(&self.conn, view)?;
+        let mut stmt = self.conn.prepare(
+            "SELECT subject_id,target_id,source_id FROM network_facts
+             WHERE world_id=?1 AND kind='confirmed_cause'
+             AND recorded_revision<=?2 AND (withdrawn_revision IS NULL OR withdrawn_revision>?2)
+             AND starts_at<=?3 AND (ends_before IS NULL OR ends_before>?3)
+             ORDER BY id LIMIT 4001",
+        )?;
+        let mut rows = stmt.query(params![view.world.0.as_bytes(), view.revision.0, view.day.0])?;
+        let mut links = Vec::new();
+        while let Some(row) = rows.next()? {
+            self.check_query_control()?;
+            if links.len() == 4000 {
+                return Err(Error::QueryBudgetExceeded);
+            }
+            links.push(crate::conflict::CausalLink {
+                cause: ref_id(view.world, row.get(0)?),
+                consequence: ref_id(view.world, row.get(1)?),
+                source: ref_id(view.world, row.get(2)?),
+                status: crate::conflict::LinkStatus::Confirmed,
+            });
+        }
+        drop(rows);
+        drop(stmt);
+        self.confirmed_impact(view, start, &links, max_depth, max_visited)
     }
 
     /// A proposal is explicitly selected from an exact claim version and UTF-8 byte span.

@@ -182,7 +182,7 @@ export function editCanvasTree(host: HTMLElement, original: Block, worldId: stri
       pin.textContent = "Template: " + node.content.Template.key + " · version " + node.content.Template.version;
       controls.append(pin);
     }
-    const liveFocus = node.content.NetworkTable ?? node.content.PublishedReferences;
+    const liveFocus = node.content.NetworkTable ?? node.content.ImpactTable ?? node.content.PublishedReferences;
     if (liveFocus) {
       const target = document.createElement("input");
       target.value = liveFocus.id;
@@ -191,7 +191,7 @@ export function editCanvasTree(host: HTMLElement, original: Block, worldId: stri
       target.addEventListener("input", () => { liveFocus.id = target.value.trim(); recordChange(); });
       field("Reference subject identity", target);
       const description = document.createElement("p");
-      description.textContent = node.content.NetworkTable ? "Private sourced historical facts." :
+      description.textContent = node.content.NetworkTable ? "Private sourced historical facts." : node.content.ImpactTable ? "Confirmed persisted event impact. Author only." :
         "Only current released backlinks, never private registry data.";
       controls.append(description);
     }
@@ -235,7 +235,7 @@ export function editCanvasTree(host: HTMLElement, original: Block, worldId: stri
         let input: HTMLInputElement | HTMLSelectElement;
         if (parameter.default.type === "object_kind") {
           input = document.createElement("select");
-          for (const kind of ["person", "organization", "household", "family_house", "definition", "relationship", "event_involvement", "actor_action",
+          for (const kind of ["person", "organization", "household", "family_house", "faction", "conflict", "definition", "relationship", "event_involvement", "actor_action",
             "historical_event", "source", "claim"]) input.add(new Option(kind.replaceAll("_", " "), kind));
         } else {
           input = document.createElement("input");
@@ -267,7 +267,7 @@ export function editCanvasTree(host: HTMLElement, original: Block, worldId: stri
       audience.add(new Option("Existing character audience", "character"));
       audience.value = "character";
     } else audience.value = node.audience;
-    audience.disabled = !editable || node === root || !!node.content.SavedQuery || !!node.content.Query || !!node.content.FamilyTable || !!node.content.NetworkTable;
+    audience.disabled = !editable || node === root || !!node.content.SavedQuery || !!node.content.Query || !!node.content.FamilyTable || !!node.content.NetworkTable || !!node.content.ImpactTable;
     audience.addEventListener("change", () => {
       if (audience.value === "character") return;
       node.audience = audience.value;
@@ -305,7 +305,7 @@ export function editCanvasTree(host: HTMLElement, original: Block, worldId: stri
         commit("Inserted version-pinned template; existing components unchanged.");
       }, all.length > 494 || row.depth > 12));
       const history = document.createElement("select");
-      for (const [value, label] of [["person_events", "Person event history"], ["family", "Accepted family links"], ["network", "Sourced historical network"], ["published_refs", "Published references"], ["actors", "Event actors"],
+      for (const [value, label] of [["person_events", "Person event history"], ["family", "Accepted family links"], ["network", "Sourced historical network"], ["impact", "Confirmed event impact"], ["published_refs", "Published references"], ["actors", "Event actors"],
         ["witnesses", "Event witnesses"], ["victims", "Event victims"], ["stakeholders", "Event stakeholders"]]) {
         history.add(new Option(label, value));
       }

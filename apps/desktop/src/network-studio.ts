@@ -14,21 +14,21 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
     <p class="hint">Author-only. Stable object IDs come from historical search. Source evidence is required for network facts.</p>
     <form data-identity class="editor-form"><fieldset><legend>Create typed identity</legend>
       <label>Identity label <input name="label" required maxlength="800"></label>
-      <label>Identity type <select name="kind"><option value="organization">Organization</option><option value="household">Household</option><option value="family_house">Family house</option><option value="person">Person</option></select></label>
+      <label>Identity type <select name="kind"><option value="organization">Organization</option><option value="household">Household</option><option value="family_house">Family house</option><option value="faction">Faction</option><option value="conflict">Conflict</option><option value="person">Person</option></select></label>
       <button>Create identity</button></fieldset></form>
     <form data-fact class="editor-form"><fieldset><legend>Record sourced network fact</legend>
       <label>Subject identity <input name="subject" required></label><label>Target identity <input name="target" required></label>
       <label>Evidence source identity <input name="source" required></label>
-      <label>Fact type <select name="kind"><option value="membership">Membership</option><option value="marriage">Marriage</option><option value="succession">Institutional succession</option><option value="confirmed_cause">Confirmed cause</option><option value="alleged_cause">Alleged cause</option></select></label>
+      <label>Fact type <select name="kind"><option value="membership">Membership</option><option value="marriage">Marriage</option><option value="succession">Institutional succession</option><option value="confirmed_cause">Confirmed cause</option><option value="alleged_cause">Alleged cause</option><option value="conflict_position">Faction conflict stance</option></select></label>
       <label>Role or causal rationale <input name="role" required maxlength="800"></label>
       <label>Starts at day <input name="start" type="number" required></label><label>Ends before day <input name="end" type="number"></label>
       <button>Record network fact</button></fieldset></form>
-    <form data-focus class="editor-form"><label>Network focus identity <input name="focus" required></label><button>Inspect network facts</button></form><ul data-facts></ul>
+    <form data-focus class="editor-form"><label>Network focus identity <input name="focus" required></label><button>Inspect network facts</button><button type="button" data-impact>Explore confirmed impact</button></form><ul data-facts></ul><ul data-impact-results></ul>
     <form data-ghost class="editor-form"><fieldset><legend>Propose identity from a claim</legend>
       <label>Claim identity <input name="claim" required></label>
       <label>Start UTF-8 byte <input name="start" type="number" min="0" required></label>
       <label>End UTF-8 byte (exclusive) <input name="end" type="number" min="1" required></label>
-      <label>Proposed type <select name="kind"><option value="person">Person</option><option value="organization">Organization</option><option value="household">Household</option><option value="family_house">Family house</option></select></label>
+      <label>Proposed type <select name="kind"><option value="person">Person</option><option value="organization">Organization</option><option value="household">Household</option><option value="family_house">Family house</option><option value="faction">Faction</option><option value="conflict">Conflict</option></select></label>
       <button>Propose ghost identity</button></fieldset></form>
     <button type="button" data-review>Review draft identities</button><ul data-ghosts></ul><p data-status role="status"></p>`;
   parent.prepend(host);
@@ -73,6 +73,18 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
       status.textContent=facts.length+" recorded facts.";
     }catch(error){if(valid())status.textContent=String(error);}
   });
+  host.querySelector<HTMLButtonElement>("[data-impact]")!.onclick = async () => {
+    try {
+      const rows = await invoke<[Ref, string][]>("workspace_persisted_impact", {request, focus: value(form("[data-focus]"), "focus")});
+      if (!valid()) return;
+      const list = host.querySelector("[data-impact-results]")!;
+      list.replaceChildren();
+      for (const [object, label] of rows) {
+        const row = document.createElement("li"); row.textContent = label + " · " + object.id; list.append(row);
+      }
+      status.textContent = rows.length + " confirmed downstream events.";
+    } catch (error) { if (valid()) status.textContent = String(error); }
+  };
   submit("[data-ghost]", f=>void write("workspace_propose_ghost",{claimId:value(f,"claim"),startByte:Number(value(f,"start")),
     endByte:Number(value(f,"end")),kind:value(f,"kind")}));
   host.querySelector<HTMLButtonElement>("[data-review]")!.onclick=async()=>{

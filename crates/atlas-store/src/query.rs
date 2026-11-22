@@ -65,6 +65,8 @@ pub enum ObjectKindFilter {
     Organization,
     Household,
     FamilyHouse,
+    Faction,
+    Conflict,
     Definition,
     Relationship,
     EventInvolvement,
@@ -838,6 +840,8 @@ fn predicate_matches(filter: &QueryFilter, version: &Version, plan: &PredicatePl
                 | (ObjectData::Organization, ObjectKindFilter::Organization)
                 | (ObjectData::Household, ObjectKindFilter::Household)
                 | (ObjectData::FamilyHouse, ObjectKindFilter::FamilyHouse)
+                | (ObjectData::Faction, ObjectKindFilter::Faction)
+                | (ObjectData::Conflict, ObjectKindFilter::Conflict)
                 | (ObjectData::Definition { .. }, ObjectKindFilter::Definition)
                 | (
                     ObjectData::Relationship { .. },

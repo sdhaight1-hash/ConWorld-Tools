@@ -1061,6 +1061,8 @@ impl AuthorWorkspace {
                         ObjectData::Organization => "organization",
                         ObjectData::Household => "household",
                         ObjectData::FamilyHouse => "family_house",
+                        ObjectData::Faction => "faction",
+                        ObjectData::Conflict => "conflict",
                         ObjectData::Definition { .. } => "definition",
                         ObjectData::Relationship { .. } => "relationship",
                         ObjectData::EventInvolvement { .. } => "event_involvement",
@@ -2439,6 +2441,29 @@ pub fn workspace_network_facts(
     store
         .network_facts(view, reference(view.world, &focus)?)
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn workspace_persisted_impact(
+    workspace: State<'_, AuthorWorkspace>,
+    request: NetworkContext,
+    focus: String,
+) -> Result<Vec<(ObjectRef, String)>, String> {
+    let store = workspace.lock()?;
+    let context = request.resolve(&store)?;
+    let impact = store
+        .persisted_impact(context, reference(context.world, &focus)?, 8, 200)
+        .map_err(|e| e.to_string())?;
+    if impact.truncated {
+        return Err("Impact exceeds the traversal budget; narrow the historical view.".into());
+    }
+    let mut result = Vec::new();
+    for object in impact.events {
+        if let Some(version) = store.get_object(object, context).map_err(|e| e.to_string())? {
+            result.push((object, version.record.label));
+        }
+    }
+    Ok(result)
 }
 
 #[tauri::command]

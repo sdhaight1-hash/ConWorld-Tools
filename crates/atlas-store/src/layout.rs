@@ -49,6 +49,7 @@ pub enum ElementContent {
     SavedQuery(SavedQueryBinding),
     FamilyTable(ObjectRef),
     NetworkTable(ObjectRef),
+    ImpactTable(ObjectRef),
     PublishedReferences(ObjectRef),
     ObjectLink(ObjectLink),
 }
@@ -217,6 +218,7 @@ impl LayoutDocument {
                 }
                 ElementContent::FamilyTable(person)
                 | ElementContent::NetworkTable(person)
+                | ElementContent::ImpactTable(person)
                 | ElementContent::PublishedReferences(person) => {
                     if person.world != self.entry.world {
                         return Err(Error::WrongWorld);
@@ -249,7 +251,8 @@ impl LayoutDocument {
                 ElementContent::Query(_)
                 | ElementContent::SavedQuery(_)
                 | ElementContent::FamilyTable(_)
-                | ElementContent::NetworkTable(_) => {
+                | ElementContent::NetworkTable(_)
+                | ElementContent::ImpactTable(_) => {
                     return Err(Error::CapabilityDenied);
                 }
                 ElementContent::Stack(children)
@@ -296,7 +299,8 @@ impl LayoutDocument {
                 ElementContent::Query(_)
                 | ElementContent::SavedQuery(_)
                 | ElementContent::FamilyTable(_)
-                | ElementContent::NetworkTable(_) => {
+                | ElementContent::NetworkTable(_)
+                | ElementContent::ImpactTable(_) => {
                     return Err(Error::CapabilityDenied);
                 }
             }
@@ -484,7 +488,8 @@ fn project(
         ElementContent::Query(_)
         | ElementContent::SavedQuery(_)
         | ElementContent::FamilyTable(_)
-        | ElementContent::NetworkTable(_) => {
+        | ElementContent::NetworkTable(_)
+        | ElementContent::ImpactTable(_) => {
             if view.scope != Scope::Author {
                 return Err(Error::CapabilityDenied);
             }
@@ -492,6 +497,20 @@ fn project(
                 return Err(Error::QueryBudgetExceeded);
             }
             budget.queries += 1;
+            if let ElementContent::ImpactTable(start) = &element.content {
+                let impact = store.persisted_impact(view, *start, 8, 200)?;
+                let truncated = impact.truncated || impact.events.len() > 50;
+                let mut records = Vec::new();
+                for object in impact.events.into_iter().take(50) {
+                    if let Some(version) = store.get_object(object, view)? {
+                        records.push((object, version.record.label));
+                    }
+                }
+                return Ok(Some(DisplayElement {
+                    id: element.id,
+                    content: DisplayContent::QueryRows { records, truncated },
+                }));
+            }
             if let ElementContent::NetworkTable(focus) = &element.content {
                 let facts = store.network_facts(view, *focus)?;
                 let truncated = facts.len() > 50;

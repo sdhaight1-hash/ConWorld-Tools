@@ -3127,6 +3127,8 @@ fn write_version(
         ObjectData::Organization => ("organization", &EventDate::Unknown, None),
         ObjectData::Household => ("household", &EventDate::Unknown, None),
         ObjectData::FamilyHouse => ("family_house", &EventDate::Unknown, None),
+        ObjectData::Faction => ("faction", &EventDate::Unknown, None),
+        ObjectData::Conflict => ("conflict", &EventDate::Unknown, None),
         ObjectData::Definition {
             definition,
             description,
@@ -3499,6 +3501,8 @@ fn read_version(
         "organization" => ObjectData::Organization,
         "household" => ObjectData::Household,
         "family_house" => ObjectData::FamilyHouse,
+        "faction" => ObjectData::Faction,
+        "conflict" => ObjectData::Conflict,
         "relationship" => {
             let (subject, target, kind, trust): ([u8; 16], [u8; 16], String, Option<u8>) = conn.query_row(
                 "SELECT subject_id, target_id, relation_kind, trust FROM relationship_versions
