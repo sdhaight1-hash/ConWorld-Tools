@@ -2804,6 +2804,13 @@ impl From<atlas_store::semantic::ResolvedFact> for SemanticFactSummary {
                 Some(input.descriptor.version.object),
                 format!("{:?} classification", input.profile),
             ),
+            SemanticFactData::SiteArea(input) => (
+                input.place,
+                None,
+                Some(input.source),
+                Some(input.descriptor.version.object),
+                format!("Site area: {:?}", input.reading),
+            ),
         };
         Self {
             reference: fact.reference,

@@ -3579,3 +3579,157 @@ fn semantic_network_relations_require_curated_endpoint_profiles() -> Result<(), 
     store.verify_foreign_keys(Scope::Author)?;
     Ok(())
 }
+
+#[test]
+fn site_area_preserves_unknown_zero_units_corrections_and_archive() -> Result<(), Error> {
+    use atlas_store::{
+        archive::restore_archive,
+        network::IdentityKind,
+        semantic::{AreaReading, AreaUnit, DefinitionPin, FactFamily, FactRef, SiteAreaInput},
+    };
+    let dir = tempfile::tempdir()?;
+    let mut store = Store::open(dir.path().join("source.sqlite"))?;
+    let world = seed(&mut store)?;
+    let mut author = view(&world, 13);
+    let place = store.create_identity(
+        author,
+        IdentityKind::Place,
+        "Estuary workshop",
+        Uuid::new_v4(),
+    )?;
+    author.revision = AuthorRevision(2);
+    let descriptor = ObjectRef::new(world.id);
+    author.revision = store.apply(&Command {
+        world: world.id,
+        branch: world.main,
+        expected: author.revision,
+        id: Uuid::new_v4(),
+        author: "Fixture".into(),
+        rationale: "Area measurement vocabulary".into(),
+        scope: Scope::Author,
+        changes: vec![Change::Create(
+            descriptor,
+            Record {
+                label: "Recorded site area".into(),
+                valid: ValidInterval::default(),
+                data: ObjectData::Definition {
+                    definition: Definition::Tag,
+                    description: "Survey area".into(),
+                },
+                source: None,
+            },
+        )],
+    })?;
+    let pin = DefinitionPin {
+        version: store.get_object(descriptor, author)?.unwrap().reference(),
+    };
+    let input = SiteAreaInput {
+        place,
+        descriptor: pin,
+        source: id(&world, 9),
+        reading: AreaReading::Known {
+            amount: 0,
+            unit: AreaUnit::Hectare,
+        },
+        starts_at: WorldDay(13),
+        ends_before: Some(WorldDay(20)),
+    };
+    assert!(store.site_area(author, place)?.is_none());
+    assert!(matches!(
+        store.record_site_area(
+            author,
+            SiteAreaInput {
+                place: id(&world, 1),
+                ..input
+            },
+            None,
+            Uuid::new_v4()
+        ),
+        Err(Error::WrongKind)
+    ));
+    assert!(matches!(
+        store.record_site_area(
+            author,
+            SiteAreaInput {
+                reading: AreaReading::Known {
+                    amount: -1,
+                    unit: AreaUnit::Hectare,
+                },
+                ..input
+            },
+            None,
+            Uuid::new_v4()
+        ),
+        Err(Error::InvalidInput("site area amount"))
+    ));
+    let first = store.record_site_area(author, input, None, Uuid::new_v4())?;
+    author.revision = AuthorRevision(4);
+    assert_eq!(store.site_area(author, place)?.unwrap().input, input);
+    assert!(matches!(
+        store.record_site_area(author, input, None, Uuid::new_v4()),
+        Err(Error::InvalidInput("overlapping site area"))
+    ));
+    let prior = author;
+    let corrected = SiteAreaInput {
+        reading: AreaReading::Known {
+            amount: 120000,
+            unit: AreaUnit::SquareMetre,
+        },
+        ..input
+    };
+    let second = store.record_site_area(author, corrected, Some(first), Uuid::new_v4())?;
+    author.revision = AuthorRevision(5);
+    assert_eq!(store.site_area(prior, place)?.unwrap().input, input);
+    let fact = store.site_area(author, place)?.unwrap();
+    assert_eq!(fact.input, corrected);
+    assert_eq!(fact.corrects, Some(first));
+    let reference = FactRef {
+        world: world.id,
+        family: FactFamily::SiteArea,
+        id: second,
+    };
+    assert!(store.resolve_semantic_fact(reference, prior)?.is_none());
+    assert!(
+        store
+            .semantic_fact_backlinks(descriptor, author)?
+            .iter()
+            .any(|fact| fact.reference == reference)
+    );
+    let next = SiteAreaInput {
+        reading: AreaReading::Unknown,
+        starts_at: WorldDay(20),
+        ends_before: None,
+        ..input
+    };
+    store.record_site_area(author, next, None, Uuid::new_v4())?;
+    author.revision = AuthorRevision(6);
+    let later = ViewContext {
+        day: WorldDay(20),
+        ..author
+    };
+    assert_eq!(store.site_area(later, place)?.unwrap().input, next);
+    assert!(matches!(
+        store.site_area(
+            ViewContext {
+                scope: Scope::Public,
+                ..later
+            },
+            place
+        ),
+        Err(Error::CapabilityDenied)
+    ));
+    let backup = dir.path().join("backup.sqlite");
+    let restored = dir.path().join("restored.sqlite");
+    store.backup_to(&backup, Scope::Author)?;
+    restore_archive(&backup, &restored, Scope::Author)?;
+    let reopened = Store::open(&restored)?;
+    assert_eq!(
+        reopened.site_area(prior, place)?,
+        store.site_area(prior, place)?
+    );
+    assert_eq!(
+        reopened.site_area(later, place)?,
+        store.site_area(later, place)?
+    );
+    Ok(())
+}

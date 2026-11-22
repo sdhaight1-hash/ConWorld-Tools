@@ -60,6 +60,39 @@ impl Store {
                 data: SemanticFactData::Classification(assignment.input),
             }));
         }
+        if reference.family == FactFamily::SiteArea {
+            use super::site_area::{ACTIVE as AREA, read_site_area};
+            let mut statement = conn.prepare(&format!(
+                "{METADATA_CTE} {AREA}
+                 SELECT p.id,p.place_id,p.descriptor_id,p.descriptor_branch,p.descriptor_state_revision,
+                        p.descriptor_revision,p.source_id,p.amount,p.unit,p.starts_at,p.ends_before,
+                        p.recorded_revision,p.branch_id,p.corrects,r.rationale
+                 FROM active_site_area p JOIN author_revisions r
+                 ON r.world_id=p.world_id AND r.revision=p.recorded_revision
+                 WHERE p.id=?5 AND p.starts_at<=?4 AND (p.ends_before IS NULL OR p.ends_before>?4)"
+            ))?;
+            let mut rows = statement.query(params![
+                view.world.0.as_bytes(),
+                view.branch.0.as_bytes(),
+                view.revision.0,
+                view.day.0,
+                reference.id.as_bytes()
+            ])?;
+            let Some(row) = rows.next()? else {
+                return Ok(None);
+            };
+            let Some(measurement) = read_site_area(conn, view, row)? else {
+                return Ok(None);
+            };
+            self.check_query_control()?;
+            return Ok(Some(ResolvedFact {
+                reference,
+                recorded_at: measurement.recorded_at,
+                source_branch: measurement.source_branch,
+                rationale: row.get(14)?,
+                data: SemanticFactData::SiteArea(measurement.input),
+            }));
+        }
         let select = match reference.family {
             FactFamily::Network => {
                 "SELECT p.subject_id,p.target_id,p.source_id,p.kind,p.role,p.starts_at,
@@ -73,7 +106,7 @@ impl Store {
                  FROM active_parentage p JOIN author_revisions r
                  ON r.world_id=p.world_id AND r.revision=p.recorded_revision"
             }
-            FactFamily::Classification => unreachable!("handled by classification resolver"),
+            FactFamily::Classification | FactFamily::SiteArea => unreachable!("handled by typed fact resolver"),
         };
         let mut statement = conn.prepare(&format!(
             "{METADATA_CTE} {select}
@@ -143,7 +176,7 @@ impl Store {
                     accepted: true,
                 })
             }
-            FactFamily::Classification => unreachable!("handled by classification resolver"),
+            FactFamily::Classification | FactFamily::SiteArea => unreachable!("handled by typed fact resolver"),
         };
         let result = ResolvedFact {
             reference,
@@ -163,7 +196,7 @@ impl Store {
         target: ObjectRef,
         view: ViewContext,
     ) -> Result<Vec<ResolvedFact>, Error> {
-        use super::classification::ACTIVE;
+        use super::{classification::ACTIVE, site_area::ACTIVE as AREA};
         SemanticRef::Object(target).validate_author_context(view)?;
         self.check_query_control()?;
         let tx = self.conn.unchecked_transaction()?;
@@ -172,7 +205,7 @@ impl Store {
             return Ok(Vec::new());
         }
         let mut statement = tx.prepare(&format!(
-            "{METADATA_CTE} {ACTIVE}
+            "{METADATA_CTE} {ACTIVE} {AREA}
              SELECT 0 AS family,id FROM active_network
                WHERE (subject_id=?5 OR target_id=?5 OR source_id=?5)
                AND starts_at<=?4 AND (ends_before IS NULL OR ends_before>?4)
@@ -183,6 +216,10 @@ impl Store {
              UNION ALL
              SELECT 2,id FROM active_classification
                WHERE (subject_id=?5 OR source_id=?5 OR descriptor_id=?5)
+               AND starts_at<=?4 AND (ends_before IS NULL OR ends_before>?4)
+             UNION ALL
+             SELECT 3,id FROM active_site_area
+               WHERE (place_id=?5 OR source_id=?5 OR descriptor_id=?5)
                AND starts_at<=?4 AND (ends_before IS NULL OR ends_before>?4)
              ORDER BY family,id LIMIT 2001"
         ))?;
@@ -205,6 +242,7 @@ impl Store {
                 0 => FactFamily::Network,
                 1 => FactFamily::Parentage,
                 2 => FactFamily::Classification,
+                3 => FactFamily::SiteArea,
                 _ => return Err(Error::Integrity("unknown semantic fact family".into())),
             };
             let reference = FactRef {
