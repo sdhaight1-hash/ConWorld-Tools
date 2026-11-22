@@ -1,0 +1,8 @@
+{
+  "equality_assertions": 20,
+  "invalid_cases_rejected": 9,
+  "records": 6,
+  "profile_versions": 7,
+  "new_category_without_base_kind_change": true,
+  "old_unit_interpretation_preserved": true
+}
