@@ -1,6 +1,6 @@
 //! Canonical author-only curated classification persistence and bounded reads.
 use super::*;
-use crate::query::{classification_candidate_matches, classification_seek_anchor};
+use crate::query::{classification_candidate_matches, classification_seek_anchors};
 use crate::semantic::{Classification, ClassificationInput, ConceptProfile, DefinitionPin};
 
 pub(super) const ACTIVE: &str = "
@@ -368,35 +368,61 @@ impl Store {
         metadata_world(&tx, view, false)?;
         let mut nodes = 0;
         validate_predicate(filter, view.world, 0, &mut nodes)?;
-        let anchor = classification_seek_anchor(filter)
+        let anchors = classification_seek_anchors(filter)
             .ok_or(Error::InvalidInput("classification page filter"))?;
-        let terms = match filter {
-            QueryFilter::And(children) => children.as_slice(),
-            _ => std::slice::from_ref(filter),
-        };
-        // Check every descriptor before returning an empty result, even if
-        // another term is absent or cannot match any candidate.
-        let mut missing = false;
-        for term in terms {
-            if let QueryFilter::ClassifiedBy(descriptor) = term {
-                missing |= !visible_tag_descriptor(&tx, view, *descriptor)?;
+        // Validate every descriptor, including negated or non-selected
+        // alternatives, before a result can be returned.
+        let mut pending = vec![filter];
+        let mut invisible = HashSet::new();
+        while let Some(term) = pending.pop() {
+            match term {
+                QueryFilter::And(children) | QueryFilter::Or(children) => {
+                    pending.extend(children.iter());
+                }
+                QueryFilter::Not(inner) => pending.push(inner),
+                QueryFilter::ClassifiedBy(descriptor) => {
+                    if !visible_tag_descriptor(&tx, view, *descriptor)? {
+                        invisible.insert(*descriptor);
+                    }
+                }
+                _ => {}
             }
         }
-        if missing {
-            return Ok((Vec::new(), false));
-        }
-        let (condition, value) = match anchor {
-            QueryFilter::ClassifiedAs(profile) => {
-                ("p.profile=?7", Value::Text(profile.key().into()))
-            }
-            QueryFilter::ClassifiedBy(descriptor) => (
-                "p.descriptor_id=?7",
-                Value::Blob(descriptor.id.0.as_bytes().to_vec()),
-            ),
-            _ => unreachable!("positive classification anchor"),
-        };
         let label = after.map_or("", |(label, _)| label);
         let id = after.map_or([0; 16], |(_, object)| *object.id.0.as_bytes());
+        let mut parameters = vec![
+            Value::Blob(view.world.0.as_bytes().to_vec()),
+            Value::Blob(view.branch.0.as_bytes().to_vec()),
+            Value::Integer(view.revision.0),
+            Value::Integer(view.day.0),
+            Value::Text(label.into()),
+            Value::Blob(id.to_vec()),
+        ];
+        let mut conditions = Vec::new();
+        for anchor in anchors {
+            let (column, value) = match anchor {
+                QueryFilter::ClassifiedAs(profile) => {
+                    ("profile", Value::Text(profile.key().into()))
+                }
+                QueryFilter::ClassifiedBy(descriptor) => {
+                    if invisible.contains(descriptor) {
+                        continue;
+                    }
+                    (
+                        "descriptor_id",
+                        Value::Blob(descriptor.id.0.as_bytes().to_vec()),
+                    )
+                }
+                _ => unreachable!("positive classification anchor"),
+            };
+            parameters.push(value);
+            conditions.push(format!("p.{column}=?{}", parameters.len()));
+        }
+        if conditions.is_empty() {
+            return Ok((Vec::new(), false));
+        }
+        // SQL identifiers are fixed allowlisted strings, all values are bound.
+        let condition = conditions.join(" OR ");
         let mut statement = tx.prepare(&format!(
             "{METADATA_CTE} {ACTIVE}
              SELECT DISTINCT v.label,v.object_id
@@ -405,19 +431,11 @@ impl Store {
              AND EXISTS (SELECT 1 FROM eligible l
                  WHERE l.branch_id=v.branch_id AND v.revision<=l.rev)
              AND EXISTS (SELECT 1 FROM active_classification p
-                 WHERE p.subject_id=v.object_id AND {condition}
+                 WHERE p.subject_id=v.object_id AND ({condition})
                  AND p.starts_at<=?4 AND (p.ends_before IS NULL OR p.ends_before>?4))
              ORDER BY v.label,v.object_id LIMIT 2001"
         ))?;
-        let mut rows = statement.query(params![
-            view.world.0.as_bytes(),
-            view.branch.0.as_bytes(),
-            view.revision.0,
-            view.day.0,
-            label,
-            &id[..],
-            &value
-        ])?;
+        let mut rows = statement.query(rusqlite::params_from_iter(parameters.iter()))?;
         let mut subject_matches = tx.prepare(&format!(
             "{METADATA_CTE} {ACTIVE}
              SELECT p.id,p.subject_id,p.profile,p.descriptor_id,p.descriptor_branch,
@@ -471,7 +489,10 @@ impl Store {
                 }
                 if let Some(assignment) = read_classification(&tx, view, row)? {
                     profiles.insert(assignment.input.profile);
-                    descriptors.insert(assignment.input.descriptor.version.object);
+                    let descriptor = assignment.input.descriptor.version.object;
+                    if !invisible.contains(&descriptor) {
+                        descriptors.insert(descriptor);
+                    }
                 }
             }
             if !classification_candidate_matches(filter, &version, &profiles, &descriptors) {

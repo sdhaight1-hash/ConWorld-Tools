@@ -4675,6 +4675,57 @@ fn classification_descriptor_pages_deduplicate_and_pin_cursor_context() -> Resul
         assert!(!result.truncated);
         assert!(page.next_cursor.is_none());
     }
+    // Every OR alternative has a positive anchor, while the NOT is only
+    // a residual. Duplicate matching profiles must not duplicate the row.
+    let boolean = QuerySpec {
+        limit: 1,
+        ..query(QueryFilter::Or(vec![
+            QueryFilter::ClassifiedAs(ConceptProfile::Culture),
+            QueryFilter::And(vec![
+                QueryFilter::ClassifiedAs(ConceptProfile::Language),
+                QueryFilter::Not(Box::new(QueryFilter::ClassifiedAs(
+                    ConceptProfile::Culture,
+                ))),
+            ]),
+        ]))
+    };
+    for (context, ordered) in [(old, [first, second]), (author, [second, first])] {
+        let one = store.execute_query_page(&boolean, context, None)?;
+        assert_eq!(one.rows[0].object, ordered[0]);
+        let direct = store.execute_query(&boolean, context)?;
+        assert_eq!(one.rows, direct.rows);
+        assert!(direct.truncated);
+        let two = store.execute_query_page(&boolean, context, one.next_cursor.as_ref())?;
+        assert_eq!(two.rows[0].object, ordered[1]);
+        assert!(two.next_cursor.is_none());
+    }
+    let absent = query(QueryFilter::Or(vec![
+        QueryFilter::ClassifiedBy(id(&world, 9999)),
+        QueryFilter::ClassifiedAs(ConceptProfile::Culture),
+    ]));
+    assert_eq!(store.execute_query(&absent, author)?.rows[0].object, first);
+    let invalid_alternative = query(QueryFilter::Or(vec![
+        QueryFilter::ClassifiedAs(ConceptProfile::Language),
+        QueryFilter::And(vec![
+            QueryFilter::ClassifiedAs(ConceptProfile::Material),
+            QueryFilter::Not(Box::new(QueryFilter::ClassifiedBy(first))),
+        ]),
+    ]));
+    assert!(matches!(
+        store.execute_query(&invalid_alternative, author),
+        Err(Error::WrongKind)
+    ));
+    let control = atlas_store::query::QueryControl::new(std::time::Duration::from_secs(30))?;
+    control.cancel();
+    assert!(matches!(
+        store.execute_query_page_controlled(&boolean, author, None, &control),
+        Err(Error::QueryCancelled)
+    ));
+    assert_eq!(
+        store.execute_query_page(&boolean, author, None)?.rows[0].object,
+        second
+    );
+
     let invalid = query(QueryFilter::And(vec![
         QueryFilter::ClassifiedBy(id(&world, 9999)),
         QueryFilter::ClassifiedBy(first),

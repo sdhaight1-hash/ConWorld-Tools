@@ -581,7 +581,7 @@ fn validate_query_request(spec: &QuerySpec, view: ViewContext) -> Result<(), Err
 impl Store {
     pub fn execute_query(&self, spec: &QuerySpec, view: ViewContext) -> Result<QueryResult, Error> {
         validate_query_request(spec, view)?;
-        if classification_seek_anchor(&spec.filter).is_some() {
+        if classification_seek_anchors(&spec.filter).is_some() {
             let (rows, truncated) =
                 self.classification_page(view, &spec.filter, None, spec.limit)?;
             return Ok(QueryResult {
@@ -618,7 +618,7 @@ impl Store {
 
     /// Page only complete, bounded author queries. Reevaluate the immutable
     /// recorded view on each call; do not cache raw rows or trust offsets.
-    /// Positive classification conjunctions seek an indexed label/UUID window.
+    /// Bounded classification Boolean expressions seek an indexed label/UUID window.
     /// Other predicates retain the existing bounded materialization planner.
     pub fn execute_query_page(
         &self,
@@ -635,7 +635,7 @@ impl Store {
         {
             return Err(Error::InvalidInput("query cursor context"));
         }
-        if classification_seek_anchor(&spec.filter).is_some() {
+        if classification_seek_anchors(&spec.filter).is_some() {
             let boundary = after.map(|cursor| (cursor.label.as_str(), cursor.last));
             let (rows, has_more) =
                 self.classification_page(view, &spec.filter, boundary, spec.limit)?;
@@ -1048,35 +1048,63 @@ impl<'a> PredicatePlan<'a> {
     }
 }
 
-/// The existing desktop combines flat predicates. Only a positive semantic
-/// anchor with local conjunctions is eligible for the seek path; arbitrary
-/// boolean, text-index, spatial and source predicates keep their original plan.
-pub(crate) fn classification_seek_anchor(filter: &QueryFilter) -> Option<&QueryFilter> {
-    match filter {
-        QueryFilter::ClassifiedAs(_) | QueryFilter::ClassifiedBy(_) => Some(filter),
-        QueryFilter::And(children)
-            if children.iter().all(|child| {
-                matches!(
-                    child,
-                    QueryFilter::ClassifiedAs(_)
-                        | QueryFilter::ClassifiedBy(_)
-                        | QueryFilter::Kind(_)
-                        | QueryFilter::LabelContains(_)
-                        | QueryFilter::ExactLabel(_)
-                )
-            }) =>
-        {
-            children
-                .iter()
-                .find(|child| matches!(child, QueryFilter::ClassifiedBy(_)))
-                .or_else(|| {
-                    children
-                        .iter()
-                        .find(|child| matches!(child, QueryFilter::ClassifiedAs(_)))
-                })
+/// Select a conservative positive classification candidate union. Every
+/// matching object must satisfy at least one chosen leaf. AND can use any
+/// bounded arm; OR needs a bounded arm in every alternative. NOT never
+/// supplies a universe. Unsupported leaves retain the existing planner.
+pub(crate) fn classification_seek_anchors(filter: &QueryFilter) -> Option<Vec<&QueryFilter>> {
+    fn walk<'a>(
+        filter: &'a QueryFilter,
+        depth: usize,
+        nodes: &mut usize,
+    ) -> Option<Vec<&'a QueryFilter>> {
+        *nodes += 1;
+        if depth > MAX_PREDICATE_DEPTH || *nodes > MAX_PREDICATE_NODES {
+            return None;
         }
-        _ => None,
+        match filter {
+            QueryFilter::ClassifiedAs(_) | QueryFilter::ClassifiedBy(_) => Some(vec![filter]),
+            QueryFilter::Kind(_) | QueryFilter::LabelContains(_) | QueryFilter::ExactLabel(_) => {
+                Some(Vec::new())
+            }
+            QueryFilter::Not(inner) => {
+                walk(inner, depth + 1, nodes)?;
+                Some(Vec::new())
+            }
+            QueryFilter::And(children) | QueryFilter::Or(children) => {
+                if !(2..=MAX_BOOLEAN_CHILDREN).contains(&children.len()) {
+                    return None;
+                }
+                let conjunction = matches!(filter, QueryFilter::And(_));
+                let mut anchors = Vec::new();
+                let mut unbounded = false;
+                for child in children {
+                    let candidate = walk(child, depth + 1, nodes)?;
+                    if candidate.is_empty() {
+                        unbounded = true;
+                    } else if conjunction {
+                        if anchors.is_empty() || candidate.len() < anchors.len() {
+                            anchors = candidate;
+                        }
+                    } else {
+                        for leaf in candidate {
+                            if !anchors.contains(&leaf) {
+                                anchors.push(leaf);
+                            }
+                        }
+                    }
+                }
+                if !conjunction && unbounded {
+                    anchors.clear();
+                }
+                Some(anchors)
+            }
+            _ => None,
+        }
     }
+    let mut nodes = 0;
+    let anchors = walk(filter, 0, &mut nodes)?;
+    (!anchors.is_empty()).then_some(anchors)
 }
 
 /// Reuse the same local predicate evaluator and exact classification identities
@@ -1093,10 +1121,16 @@ pub(crate) fn classification_candidate_matches(
         QueryFilter::And(children) => children.iter().all(|child| {
             classification_candidate_matches(child, version, profiles, descriptors)
         }),
+        QueryFilter::Or(children) => children.iter().any(|child| {
+            classification_candidate_matches(child, version, profiles, descriptors)
+        }),
+        QueryFilter::Not(inner) => {
+            !classification_candidate_matches(inner, version, profiles, descriptors)
+        }
         QueryFilter::Kind(_) | QueryFilter::LabelContains(_) | QueryFilter::ExactLabel(_) => {
             predicate_matches(filter, version, &PredicatePlan::default())
         }
-        _ => unreachable!("classification seek conjunction validated"),
+        _ => unreachable!("classification seek expression validated"),
     }
 }
 

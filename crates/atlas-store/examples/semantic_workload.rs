@@ -258,6 +258,39 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ids.len(),
         started.elapsed().as_millis()
     );
+    let boolean = QuerySpec {
+        filter: QueryFilter::Or(vec![
+            QueryFilter::ClassifiedAs(ConceptProfile::Culture),
+            QueryFilter::And(vec![
+                QueryFilter::ClassifiedAs(ConceptProfile::Language),
+                QueryFilter::Not(Box::new(QueryFilter::ClassifiedAs(
+                    ConceptProfile::Culture,
+                ))),
+            ]),
+        ]),
+        ..spec.clone()
+    };
+    let started = Instant::now();
+    let control = QueryControl::new(Duration::from_secs(30))?;
+    let first = store.execute_query_page_controlled(&boolean, view, None, &control)?;
+    let second =
+        store.execute_query_page_controlled(&boolean, view, first.next_cursor.as_ref(), &control)?;
+    assert_eq!(first.rows.len(), 500);
+    assert_eq!(second.rows.len(), 500);
+    assert_eq!(second.next_cursor.is_some(), count > 1000);
+    let mut ids = std::collections::HashSet::new();
+    for row in first.rows.iter().chain(&second.rows) {
+        assert!(ids.insert(row.object));
+    }
+    assert_eq!(
+        store.execute_query_controlled(&boolean, view, &control)?.rows,
+        first.rows
+    );
+    println!(
+        "boolean_first_two_pages=2 distinct={} elapsed_ms={}",
+        ids.len(),
+        started.elapsed().as_millis()
+    );
     let control = QueryControl::new(Duration::from_secs(30))?;
     control.cancel();
     assert!(matches!(
