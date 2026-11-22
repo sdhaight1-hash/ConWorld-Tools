@@ -92,6 +92,16 @@ impl Store {
     }
 
     pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
+        Self::open_internal(path.as_ref(), false)
+    }
+
+    /// Open the live author database, preserving a verified pre-migration copy.
+    /// Archive restoration and explicit lower-level fixture opens remain separate.
+    pub fn open_with_migration_backup(path: impl AsRef<Path>) -> Result<Self, Error> {
+        Self::open_internal(path.as_ref(), true)
+    }
+
+    fn open_internal(path: &Path, preserve: bool) -> Result<Self, Error> {
         let mut conn = Connection::open(path)?;
         conn.busy_timeout(Duration::from_secs(5))?;
         // SQLite requires an unchecked connection during the registry rebuild.
@@ -119,6 +129,12 @@ impl Store {
             _ => return Err(Error::WrongDatabase),
         }
         verify_semantic_schema_lineage(&tx, version)?;
+        if preserve && (1..SCHEMA_VERSION).contains(&version) && path != Path::new(":memory:") {
+            // The immediate transaction already excludes competing writers.
+            // No migration DDL has run on an existing database at this point.
+            // A separate read-only connection can take the committed snapshot.
+            crate::archive::preserve_before_migration(path, version)?;
+        }
         if version < 2 {
             tx.execute_batch(include_str!("../migrations/0002.sql"))?;
         }

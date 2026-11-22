@@ -4389,6 +4389,12 @@ fn ontology_migration_from_reconstructed_schema_36_preserves_fact_history() -> R
          INSERT INTO objects(world_id,id,kind) VALUES(randomblob(16),randomblob(16),'person');",
     )?;
     drop(connection);
+    assert!(Store::open_with_migration_backup(&broken).is_err());
+    assert!(!std::fs::read_dir(dir.path())?
+        .collect::<Result<Vec<_>, _>>()?
+        .iter()
+        .any(|entry| entry.file_name().to_string_lossy().starts_with("broken.sqlite.pre-schema-")));
+    // The lower-level migration must still roll back independently.
     assert!(Store::open(&broken).is_err());
     let connection = rusqlite::Connection::open(&broken)?;
     let revision: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
@@ -4406,8 +4412,8 @@ fn ontology_migration_from_reconstructed_schema_36_preserves_fact_history() -> R
     assert!(manifest.schema >= 40);
     let reopened = Store::open(&restored)?;
     assert_eq!(reopened.get_object(id(&world, 2), author)?, expected_person);
-    for (reference, fact) in references.iter().zip(expected) {
-        assert_eq!(reopened.resolve_semantic_fact(*reference, author)?, fact);
+    for (reference, fact) in references.iter().zip(&expected) {
+        assert_eq!(&reopened.resolve_semantic_fact(*reference, author)?, fact);
     }
     assert!(
         reopened
@@ -4415,7 +4421,34 @@ fn ontology_migration_from_reconstructed_schema_36_preserves_fact_history() -> R
             .is_empty()
     );
     reopened.verify_foreign_keys(Scope::Author)?;
-    assert_eq!(inspect_archive(&path, Scope::Author)?.schema, 36);
+    let old_manifest = inspect_archive(&path, Scope::Author)?;
+    assert_eq!(old_manifest.schema, 36);
+
+    let live = Store::open_with_migration_backup(&path)?;
+    let backups = || -> Result<Vec<std::path::PathBuf>, Error> {
+        Ok(std::fs::read_dir(dir.path())?
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("schema36.sqlite.pre-schema-36-")
+            })
+            .map(|entry| entry.path())
+            .collect())
+    };
+    let files = backups()?;
+    assert_eq!(files.len(), 1);
+    assert_eq!(inspect_archive(&files[0], Scope::Author)?, old_manifest);
+    assert_eq!(live.get_object(id(&world, 2), author)?, expected_person);
+    for (reference, fact) in references.iter().zip(&expected) {
+        assert_eq!(&live.resolve_semantic_fact(*reference, author)?, fact);
+    }
+    drop(live);
+    drop(Store::open_with_migration_backup(&path)?);
+    assert_eq!(backups()?, files);
+    assert_eq!(inspect_archive(&path, Scope::Author)?.schema, 44);
     Ok(())
 }
 

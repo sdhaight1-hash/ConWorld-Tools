@@ -71,3 +71,5 @@ See the [Phase Zero verification log](Phase-0-Verification.md) for the desktop a
 ## Review notes (non-normative)
 
 - [Entry ontology review — 2026-11-22](Entry-Ontology-Review-2026-11-22.md): actual registry parity, existing-scope gaps and proposed worldbuilding taxonomy; recommendations only, no feature scope or production changes.
+
+- [Ontology consolidation acceptance review — 2026-11-22](Architectural-Evolutions/ontology-consolidation-review-2026-11-22.md): exact green baseline, scope/gate evidence, verified native capture, protected live migration and release fixture candidate; implementation verification still required.

@@ -562,7 +562,7 @@ impl AuthorWorkspace {
 
     pub fn open(path: impl AsRef<Path>) -> Result<Self, atlas_store::Error> {
         Ok(Self {
-            store: Mutex::new(Store::open(path)?),
+            store: Mutex::new(Store::open_with_migration_backup(path)?),
             continuation: Mutex::new(None),
             query_jobs: Mutex::new(QueryJobs::default()),
         })

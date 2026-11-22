@@ -27,6 +27,17 @@ jobs:
       - run: cargo +stable fmt --all -- --check
       - run: cargo +stable clippy -p atlas-store --all-targets --locked -- -D warnings
       - run: cargo +stable test -p atlas-store --locked
+      - name: Verify migration from the actual schema-36 predecessor
+        shell: bash
+        run: |
+          set -euo pipefail
+          legacy="$RUNNER_TEMP/schema36-source"
+          fixture="$RUNNER_TEMP/schema36-release.sqlite"
+          git fetch --depth=1 origin 5777f0faea7dd5c4aa93908d35d3cfd7cfea773f
+          git worktree add --detach "$legacy" 5777f0faea7dd5c4aa93908d35d3cfd7cfea773f
+          cp crates/atlas-store/examples/migration_baseline.rs "$legacy/crates/atlas-store/examples/"
+          cargo +stable run --manifest-path "$legacy/Cargo.toml" -p atlas-store --example migration_baseline --locked -- "$fixture"
+          ATLAS_SCHEMA36_FIXTURE="$fixture" cargo +stable test -p atlas-store --locked --test migration_release released_schema_36_preserves_identity_history_and_verified_recovery -- --ignored --exact --nocapture
       - name: Compare actual author task alternatives A/B/C
         shell: bash
         run: |
