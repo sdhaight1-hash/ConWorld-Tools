@@ -1,4 +1,4 @@
-CREATE TABLE media_assets (
+CREATE TABLE IF NOT EXISTS media_assets (
     world_id BLOB NOT NULL,
     id BLOB NOT NULL CHECK(length(id)=16),
     name TEXT NOT NULL CHECK(length(trim(name))>0 AND length(name)<=200),
@@ -10,4 +10,4 @@ CREATE TABLE media_assets (
     PRIMARY KEY(world_id,id),
     FOREIGN KEY(world_id,revision) REFERENCES author_revisions(world_id,revision)
 ) STRICT;
-CREATE INDEX media_assets_revision ON media_assets(world_id,revision);
+CREATE INDEX IF NOT EXISTS media_assets_revision ON media_assets(world_id,revision);

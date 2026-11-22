@@ -192,6 +192,10 @@ impl Store {
         if version < 27 {
             tx.execute_batch(include_str!("../migrations/0027.sql"))?;
         }
+        // Legacy upgrade fixtures may retain a newer trigger while rebuilding the fact table.
+        if version < 34 {
+            tx.execute_batch("DROP TRIGGER IF EXISTS metadata_withdrawal_validate;")?;
+        }
         if version < 30 {
             tx.execute_batch(include_str!("../migrations/0030.sql"))?;
         }

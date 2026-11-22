@@ -1,4 +1,4 @@
-DROP TRIGGER metadata_withdrawal_validate;
+DROP TRIGGER IF EXISTS metadata_withdrawal_validate;
 CREATE TABLE network_facts_v35 (
     world_id BLOB NOT NULL,
     id BLOB NOT NULL CHECK(length(id)=16),
