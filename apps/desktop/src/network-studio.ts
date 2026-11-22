@@ -110,10 +110,43 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
     areaAmount.required = areaStatus.value === "known";
   };
   host.querySelectorAll("fieldset").forEach(field => field.disabled = !editable);
+  // Inspection remains usable at a pinned revision; only the annotation write is disabled.
+  annotationFields();
+  function annotationFields() {
+    const f = form("[data-fact-annotation]");
+    f.querySelector("fieldset")!.disabled = false;
+    (f.querySelector('button[type="submit"]') as HTMLButtonElement).disabled = !editable;
+    (f.elements.namedItem("claim") as HTMLInputElement).disabled = !editable;
+  }
   const selectedLabel=host.querySelector<HTMLElement>("[data-selected-branch]")!;
   selectedLabel.textContent = request.branch_id ? "Alternate branch: "+request.branch_id : "Main history";
   const chooser=host.querySelector<HTMLSelectElement>("[data-branch]")!;
+  let inspection = 0;
+  const clear = (...selectors: string[]) => selectors.forEach(selector => host.querySelector(selector)?.replaceChildren());
+  const beginInspection = (...selectors: string[]) => {
+    clear(...selectors);
+    status.textContent = "";
+    const token = ++inspection;
+    const ctx = request;
+    return { ctx, current: () => valid() && ctx === request && token === inspection };
+  };
+  // Any focus edit invalidates rows and their write actions immediately.
+  for (const [selector, results] of [
+    ["[data-classification-focus]", ["[data-classifications]"]],
+    ["[data-semantic-focus]", ["[data-semantic-links]", "[data-semantic-detail]", "[data-annotations]"]],
+    ["[data-semantic-fact]", ["[data-semantic-detail]"]],
+    ["[data-fact-annotation]", ["[data-annotations]"]],
+    ["[data-area-focus]", ["[data-area-result]"]],
+    ["[data-focus]", ["[data-facts]", "[data-impact-results]", "[data-identity-path]"]],
+    ["[data-ghost]", ["[data-candidate-results]"]],
+    ["[data-succession]", ["[data-succession-result]"]],
+  ] as const) {
+    form(selector).addEventListener("input", () => {
+      ++inspection; clear(...results); status.textContent = "";
+    });
+  }
   const choose=(id:string | undefined)=>{
+    ++inspection; status.textContent = "";
     if(id)selectedBranches.set(request.world_id,id);else selectedBranches.delete(request.world_id);
     if(id)request={...request,branch_id:id};else {const {branch_id:_,...main}=request;request=main;}
     selectedLabel.textContent=id?"Alternate branch: "+id:"Main history";
@@ -129,7 +162,7 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
       chooser.value=request.branch_id??"";chooser.hidden=false;
     }catch(error){if(valid())status.textContent=String(error);}
   };
-  chooser.onchange=()=>choose(chooser.value||undefined);
+  chooser.onchange=()=>{ if (busy) { chooser.value=request.branch_id??""; return; } choose(chooser.value||undefined); };
   const forkButton=host.querySelector<HTMLButtonElement>("[data-fork]")!;
   forkButton.disabled=!editable;
   forkButton.onclick=async()=>{
@@ -145,6 +178,7 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
   async function write(command: string, args: Record<string, unknown>) {
     if (!valid() || busy || !editable) return;
     busy = true;
+    ++inspection;
     try { await invoke(command, { request, ...args }); if (valid()) await refresh(); }
     catch (error) { if (valid()) status.textContent = String(error); }
     finally { busy = false; }
@@ -160,11 +194,11 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
     ends_before: value(f,"end") ? Number(value(f,"end")) : null,
   } }));
   submit("[data-classification-focus]", async f => {
-    const ctx = request;
+    const { ctx, current } = beginInspection("[data-classifications]");
     const subjectId = value(f,"subject");
     try {
       const rows = await invoke<Classification[]>("workspace_classifications", { request: ctx, subjectId });
-      if (!valid() || ctx !== request || subjectId !== value(f,"subject")) return;
+      if (!current() || subjectId !== value(f,"subject")) return;
       const list = host.querySelector("[data-classifications]")!;
       list.replaceChildren();
       for (const classification of rows) {
@@ -176,7 +210,7 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
         list.append(row);
       }
       status.textContent = rows.length + " recorded classifications.";
-    } catch (error) { if (valid() && ctx === request) status.textContent = String(error); }
+    } catch (error) { if (current()) status.textContent = String(error); }
   });
   function describeFact(fact: SemanticFact) {
     return fact.description + " · " + fact.reference.family + " / " + fact.reference.id +
@@ -186,22 +220,22 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
       " · revision " + fact.recorded_at + " · " + fact.rationale;
   }
   async function resolveFact(reference: FactReference) {
-    const ctx = request;
+    const { ctx, current } = beginInspection("[data-semantic-detail]");
     try {
       const fact = await invoke<SemanticFact | null>("workspace_semantic_fact", { request: ctx, reference });
-      if (!valid() || ctx !== request) return;
+      if (!current()) return;
       host.querySelector("[data-semantic-detail]")!.textContent = fact ? describeFact(fact) : "Fact is not active in this historical view.";
-    } catch (error) { if (valid() && ctx === request) status.textContent = String(error); }
+    } catch (error) { if (current()) status.textContent = String(error); }
   }
   submit("[data-semantic-fact]", f => void resolveFact({
     ...ref(value(f,"id")), family: value(f,"family") as FactReference["family"],
   }));
   submit("[data-semantic-focus]", async f => {
-    const ctx = request;
+    const { ctx, current } = beginInspection("[data-semantic-links]", "[data-semantic-detail]");
     const targetId = value(f,"target");
     try {
       const facts = await invoke<SemanticFact[]>("workspace_semantic_fact_backlinks", { request: ctx, targetId });
-      if (!valid() || ctx !== request || targetId !== value(f,"target")) return;
+      if (!current() || targetId !== value(f,"target")) return;
       const list = host.querySelector("[data-semantic-links]")!;
       list.replaceChildren();
       for (const fact of facts) {
@@ -221,7 +255,7 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
         row.append(inspect, annotate); list.append(row);
       }
       status.textContent = facts.length + " active semantic backlinks.";
-    } catch (error) { if (valid() && ctx === request) status.textContent = String(error); }
+    } catch (error) { if (current()) status.textContent = String(error); }
   });
   const annotationForm = form("[data-fact-annotation]");
   const annotationRef = (f: HTMLFormElement): FactReference => ({
@@ -232,11 +266,11 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
     void write("workspace_annotate_semantic_fact", { fact: annotationRef(f), claimId: value(f,"claim") });
   });
   host.querySelector<HTMLButtonElement>("[data-read-annotations]")!.onclick = async () => {
-    const ctx = request;
+    const { ctx, current } = beginInspection("[data-annotations]");
     const fact = annotationRef(annotationForm);
     try {
       const rows = await invoke<{ id: string; claim: Ref; recorded_at: number }[]>("workspace_semantic_fact_annotations", { request: ctx, fact });
-      if (!valid() || ctx !== request || fact.id !== annotationRef(annotationForm).id || fact.family !== annotationRef(annotationForm).family) return;
+      if (!current() || fact.id !== annotationRef(annotationForm).id || fact.family !== annotationRef(annotationForm).family) return;
       const list = host.querySelector("[data-annotations]")!;
       list.replaceChildren(...rows.map(annotation => {
         const row = document.createElement("li");
@@ -244,7 +278,7 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
         return row;
       }));
       status.textContent = rows.length + " sourced annotations.";
-    } catch (error) { if (valid() && ctx === request) status.textContent = String(error); }
+    } catch (error) { if (current()) status.textContent = String(error); }
   };
   submit("[data-retire-descriptor]", f => void write("workspace_retire_semantic_descriptor", { descriptorId: value(f,"descriptor") }));
   submit("[data-site-area]", f => {
@@ -262,10 +296,11 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
     } });
   });
   submit("[data-area-focus]", async f => {
-    const ctx = request, placeId = value(f,"place");
+    const { ctx, current } = beginInspection("[data-area-result]");
+    const placeId = value(f,"place");
     try {
       const area = await invoke<SiteArea | null>("workspace_site_area", { request: ctx, placeId });
-      if (!valid() || ctx !== request || placeId !== value(f,"place")) return;
+      if (!current() || placeId !== value(f,"place")) return;
       const out = host.querySelector("[data-area-result]")!;
       out.replaceChildren();
       if (!area) { out.textContent = "No recorded area at this date and revision."; return; }
@@ -282,7 +317,7 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
         if (area.reading.status === "known") areaUnit.value = area.reading.unit;
         areaStatus.dispatchEvent(new Event("change"));
       }));
-    } catch (error) { if (valid() && ctx === request) status.textContent = String(error); }
+    } catch (error) { if (current()) status.textContent = String(error); }
   });
   submit("[data-fact]", f => void write("workspace_record_network_fact", { input: {
     subject:ref(value(f,"subject")),target:ref(value(f,"target")),source:ref(value(f,"source")),
@@ -302,9 +337,10 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
     button.disabled=!editable;button.onclick=run;return button;
   }
   submit("[data-focus]", async f => {
+    const { ctx, current } = beginInspection("[data-facts]");
     try {
-      const facts=await invoke<Fact[]>("workspace_network_facts",{request,focus:value(f,"focus")});
-      if(!valid())return;
+      const facts=await invoke<Fact[]>("workspace_network_facts",{request:ctx,focus:value(f,"focus")});
+      if(!current())return;
       const list=host.querySelector("[data-facts]")!;list.replaceChildren();
       for(const fact of facts){
         const row=document.createElement("li");
@@ -312,25 +348,27 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
         row.append(action("Withdraw fact",()=>void write("workspace_withdraw_network_fact",{factId:fact.id})));list.append(row);
       }
       status.textContent=facts.length+" recorded facts.";
-    }catch(error){if(valid())status.textContent=String(error);}
+    }catch(error){if(current())status.textContent=String(error);}
   });
   host.querySelector<HTMLButtonElement>("[data-impact]")!.onclick = async () => {
+    const { ctx, current } = beginInspection("[data-impact-results]");
     try {
-      const rows = await invoke<[Ref, string][]>("workspace_persisted_impact", {request, focus: value(form("[data-focus]"), "focus")});
-      if (!valid()) return;
+      const rows = await invoke<[Ref, string][]>("workspace_persisted_impact", {request:ctx, focus: value(form("[data-focus]"), "focus")});
+      if (!current()) return;
       const list = host.querySelector("[data-impact-results]")!;
       list.replaceChildren();
       for (const [object, label] of rows) {
         const row = document.createElement("li"); row.textContent = label + " · " + object.id; list.append(row);
       }
       status.textContent = rows.length + " confirmed downstream events.";
-    } catch (error) { if (valid()) status.textContent = String(error); }
+    } catch (error) { if (current()) status.textContent = String(error); }
   };
   host.querySelector<HTMLButtonElement>("[data-candidates]")!.onclick = async () => {
+    const { ctx, current } = beginInspection("[data-candidate-results]");
     try {
       const ghostForm = form("[data-ghost]");
-      const rows = await invoke<{label:string;start_byte:number;end_byte:number;existing:Ref[]}[]>("workspace_ghost_candidates", {request,claimId:value(ghostForm,"claim")});
-      if(!valid())return;
+      const rows = await invoke<{label:string;start_byte:number;end_byte:number;existing:Ref[]}[]>("workspace_ghost_candidates", {request:ctx,claimId:value(ghostForm,"claim")});
+      if(!current())return;
       const list=host.querySelector("[data-candidate-results]")!;list.replaceChildren();
       for(const candidate of rows) {
         const row=document.createElement("li");
@@ -343,45 +381,49 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
         list.append(row);
       }
       status.textContent="Possible names only; no identities or facts have been created.";
-    } catch(error){if(valid())status.textContent=String(error);}
+    } catch(error){if(current())status.textContent=String(error);}
   };
   host.querySelector<HTMLButtonElement>("[data-resolve-identity]")!.onclick=async()=>{
     const out=host.querySelector<HTMLOutputElement>("[data-identity-path]")!;
+    const { ctx, current }=beginInspection("[data-identity-path]");
     try{
-      const ctx=request;
       const chain=await invoke<Ref[]>("workspace_canonical_identity",{request:ctx,focus:value(form("[data-focus]"),"focus")});
-      if(valid()&&ctx===request)out.textContent=chain.map(x=>x.id).join(" → ");
-    }catch(error){if(valid())out.textContent=String(error);}
+      if(current())out.textContent=chain.map(x=>x.id).join(" → ");
+    }catch(error){if(current())out.textContent=String(error);}
   };
   const succession=form("[data-succession]");
   const enact=host.querySelector<HTMLButtonElement>("[data-enact]")!;
   let approvedTitle="";
   succession.oninput=()=>{approvedTitle="";enact.disabled=true;};
   host.querySelector<HTMLButtonElement>("[data-preview-succession]")!.onclick=async()=>{
-    const ctx=request,title=value(succession,"title"),out=host.querySelector<HTMLOutputElement>("[data-succession-result]")!;
+    const {ctx,current}=beginInspection("[data-succession-result]");
+    approvedTitle="";enact.disabled=true;
+    const title=value(succession,"title"),out=host.querySelector<HTMLOutputElement>("[data-succession-result]")!;
     try{
       const result=await invoke<{eligible:boolean;explanation:string;designated:Ref|null}>("workspace_succession_preview",{request:ctx,title});
-      if(!valid()||ctx!==request||title!==value(succession,"title"))return;
+      if(!current()||title!==value(succession,"title"))return;
       out.textContent=result.explanation+(result.designated?" · "+result.designated.id:"");
       approvedTitle=result.eligible?title:"";enact.disabled=!editable||!result.eligible;
-    }catch(error){if(valid())out.textContent=String(error);}
+    }catch(error){if(current())out.textContent=String(error);}
   };
   submit("[data-succession]",f=>{if(approvedTitle===value(f,"title")&&!enact.disabled)void write("workspace_enact_succession",{title:approvedTitle,source:value(f,"source")});});
   submit("[data-ghost]", f=>void write("workspace_propose_ghost",{claimId:value(f,"claim"),startByte:Number(value(f,"start")),
     endByte:Number(value(f,"end")),kind:value(f,"kind")}));
   submit("[data-template]", f => void write("workspace_save_custom_template", { sourceId: value(f,"source"), name:value(f,"name"), templateId:value(f,"id") || null }));
   host.querySelector<HTMLButtonElement>("[data-template-list]")!.onclick = async () => {
+    const { ctx, current }=beginInspection("[data-templates]");
     try {
-      const templates = await invoke<{id:string;name:string;revision:number}[]>("workspace_custom_templates",{request});
-      if(!valid())return;
+      const templates = await invoke<{id:string;name:string;revision:number}[]>("workspace_custom_templates",{request:ctx});
+      if(!current())return;
       const list=host.querySelector("[data-templates]")!;list.replaceChildren();
       for(const template of templates){const row=document.createElement("li");row.textContent=template.name+" · "+template.id+" · revision "+template.revision;list.append(row);}
-    } catch(error){if(valid())status.textContent=String(error);}
+    } catch(error){if(current())status.textContent=String(error);}
   };
   host.querySelector<HTMLButtonElement>("[data-review]")!.onclick=async()=>{
+    const {ctx,current}=beginInspection("[data-ghosts]");
     try{
-      const ghosts=await invoke<Ghost[]>("workspace_ghost_proposals",{request});
-      if(!valid())return;
+      const ghosts=await invoke<Ghost[]>("workspace_ghost_proposals",{request:ctx});
+      if(!current())return;
       const list=host.querySelector("[data-ghosts]")!;list.replaceChildren();
       for(const ghost of ghosts){
         const row=document.createElement("li");row.textContent=ghost.label+" · "+ghost.kind+" · claim "+ghost.claim.id+" ";
@@ -398,6 +440,6 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
         list.append(row);
       }
       status.textContent=ghosts.length+" draft records.";
-    }catch(error){if(valid())status.textContent=String(error);}
+    }catch(error){if(current())status.textContent=String(error);}
   };
 }

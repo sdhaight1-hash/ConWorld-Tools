@@ -2381,3 +2381,53 @@ test("classification authoring and evidence backlinks use historical author comm
     { command: "workspace_withdraw_classification", args: { request: { revision: 7 }, factId: "classification" } },
   ]);
 });
+
+test("semantic inspection invalidates pending replies and stale actions when focus changes", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "archive", name: "Archive", revision: 4 };
+    let release: (() => void) | undefined;
+    Object.assign(window, {
+      isTauri: true, __releaseSemantic: () => release?.(), __semanticPending: false,
+      __TAURI_INTERNALS__: {
+        invoke: async (command: string, args: Record<string, unknown>) => {
+          switch (command) {
+            case "platform_scene": return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+            case "northbridge_history": return { day: 0, relationships: [], cause: null };
+            case "workspace_worlds": return [world];
+            case "workspace_snapshot": return { world, day: args.day, view_revision: 4,
+              people: [], relationships: [], events: [], definitions: [] };
+            case "workspace_saved_queries": return [];
+            case "workspace_classifications": {
+              if (args.subjectId === "old") {
+                await new Promise<void>(resolve => {
+                  release = resolve;
+                  Object.assign(window, { __semanticPending: true });
+                });
+              }
+              return [{ id: String(args.subjectId), profile: String(args.subjectId), descriptor_id: "tag",
+                descriptor_revision: 3, source_id: "folio", starts_at: 0, ends_before: null, recorded_at: 4 }];
+            }
+            default: throw new Error("Unexpected mock command: " + command);
+          }
+        },
+      },
+    });
+  });
+  await page.goto("/");
+  const studio=page.locator("[data-network-studio]");
+  await studio.locator("summary").click();
+  const focus=studio.getByLabel("Classification focus concept");
+  const inspect=studio.getByRole("button", { name: "Inspect classifications" });
+  const results=studio.locator("[data-classifications]");
+  await focus.fill("old");
+  await inspect.click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __semanticPending: boolean }).__semanticPending)).toBe(true);
+  await focus.fill("new");
+  await inspect.click();
+  await expect(results).toContainText("new");
+  await page.evaluate(() => (window as unknown as { __releaseSemantic: () => void }).__releaseSemantic());
+  await expect(results).not.toContainText("old");
+  await focus.fill("different");
+  await expect(results).toBeEmpty();
+  await expect(results.getByRole("button", { name: "Withdraw classification" })).toHaveCount(0);
+});

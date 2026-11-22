@@ -99,3 +99,7 @@ Combined schema 43 adds an author-only annotation link targeting a stable family
 Fact annotations now also resolve in reverse through the original claim identity, deduplicating against direct fact backlinks and reauthorizing both the claim source and target fact. The desktop backlink row provides a keyboard-operable selection action for annotation; mock-native command regression includes annotation and retirement controls. No native capture is claimed.
 
 The desktop regression writes chronological UTC annotation form/list captures to Development-Screenshots and uploads them as the phase-03-semantic-annotation artifact. These are Playwright browser captures with synthetic native IPC, not evidence that the actual Tauri/SQLite runtime was exercised. Do not index or cite any image until it exists and is checked.
+
+## AE-05/06 inspection invalidation
+
+The network/semantic inspector now invalidates stale results and action controls on focus edits, branch switches, new reads and writes. Each read has a generation token and historical context; late replies cannot overwrite a newer result. Pinned historical annotation inspection remains enabled while mutation is disabled. Added deferred mock-native response regression. Exact-head CI pending.
