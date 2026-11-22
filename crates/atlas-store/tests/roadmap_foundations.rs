@@ -4535,6 +4535,12 @@ fn annotations_and_retirement_are_historical_and_branch_local() -> Result<(), Er
         store.semantic_fact_annotations(author, fact)?[0].claim,
         claim
     );
+    let annotations = store.semantic_fact_annotations(author, fact)?;
+    let encoded = serde_json::to_value(&annotations).unwrap();
+    assert_eq!(encoded[0]["recorded_at"], serde_json::json!(5));
+    let decoded: Vec<atlas_store::semantic::FactAnnotation> =
+        serde_json::from_value(encoded).unwrap();
+    assert_eq!(decoded, annotations);
     assert!(matches!(
         store.annotate_semantic_fact(author, fact, claim, Uuid::new_v4()),
         Err(Error::InvalidInput("duplicate fact annotation"))
