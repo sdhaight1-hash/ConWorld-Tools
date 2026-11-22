@@ -45,6 +45,17 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
     <form data-semantic-fact class="editor-form"><label>Fact family <select name="family"><option value="network">Network</option><option value="parentage">Parentage</option><option value="classification">Classification</option><option value="site_area">Site area</option></select></label>
       <label>Stable fact identity <input name="id" required></label><button>Resolve fact</button></form>
     <p data-semantic-detail role="status"></p>
+    <form data-fact-annotation class="editor-form"><fieldset><legend>Annotate a resolved fact</legend>
+      <label>Annotation fact family <select name="family"><option value="network">Network</option><option value="parentage">Parentage</option><option value="classification">Classification</option><option value="site_area">Site area</option></select></label>
+      <label>Annotation fact UUID <input name="fact" required></label>
+      <label>Sourced claim UUID <input name="claim"></label>
+      <button type="submit">Link sourced annotation</button><button type="button" data-read-annotations>Inspect annotations</button>
+    </fieldset></form><ul data-annotations aria-label="Sourced fact annotations"></ul>
+    <form data-retire-descriptor class="editor-form"><fieldset><legend>Retire semantic descriptor</legend>
+      <p class="hint">Blocks new assignments from this day in the selected branch. Existing pinned records are retained.</p>
+      <label>Retire Tag definition UUID <input name="descriptor" required></label>
+      <label><input type="checkbox" name="confirm" required> Confirm retirement</label>
+      <button>Retire descriptor</button></fieldset></form>
     <form data-site-area class="editor-form"><fieldset><legend>Record sourced site area</legend>
       <p class="hint">An area reading does not change containment or map geometry. Missing, unknown and known zero differ; units are never converted automatically.</p>
       <label>Measured Place identity <input name="place" required></label>
@@ -106,7 +117,7 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
     if(id)selectedBranches.set(request.world_id,id);else selectedBranches.delete(request.world_id);
     if(id)request={...request,branch_id:id};else {const {branch_id:_,...main}=request;request=main;}
     selectedLabel.textContent=id?"Alternate branch: "+id:"Main history";
-    for(const selector of ["[data-area-result]","[data-classifications]","[data-semantic-links]","[data-semantic-detail]","[data-facts]","[data-impact-results]","[data-identity-path]","[data-succession-result]","[data-ghosts]","[data-candidate-results]","[data-templates]"])host.querySelector(selector)?.replaceChildren();
+    for(const selector of ["[data-annotations]","[data-area-result]","[data-classifications]","[data-semantic-links]","[data-semantic-detail]","[data-facts]","[data-impact-results]","[data-identity-path]","[data-succession-result]","[data-ghosts]","[data-candidate-results]","[data-templates]"])host.querySelector(selector)?.replaceChildren();
     host.querySelector<HTMLButtonElement>("[data-enact]")!.disabled=true;
   };
   host.querySelector<HTMLButtonElement>("[data-load-branches]")!.onclick=async()=>{
@@ -204,6 +215,30 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
       status.textContent = facts.length + " active semantic backlinks.";
     } catch (error) { if (valid() && ctx === request) status.textContent = String(error); }
   });
+  const annotationForm = form("[data-fact-annotation]");
+  const annotationRef = (f: HTMLFormElement): FactReference => ({
+    ...ref(value(f,"fact")), family: value(f,"family") as FactReference["family"],
+  });
+  submit("[data-fact-annotation]", f => {
+    if (!value(f,"claim").trim()) { status.textContent = "Select an existing sourced claim."; return; }
+    void write("workspace_annotate_semantic_fact", { fact: annotationRef(f), claimId: value(f,"claim") });
+  });
+  host.querySelector<HTMLButtonElement>("[data-read-annotations]")!.onclick = async () => {
+    const ctx = request;
+    const fact = annotationRef(annotationForm);
+    try {
+      const rows = await invoke<{ id: string; claim: Ref; recorded_at: number }[]>("workspace_semantic_fact_annotations", { request: ctx, fact });
+      if (!valid() || ctx !== request || fact.id !== annotationRef(annotationForm).id || fact.family !== annotationRef(annotationForm).family) return;
+      const list = host.querySelector("[data-annotations]")!;
+      list.replaceChildren(...rows.map(annotation => {
+        const row = document.createElement("li");
+        row.textContent = "Claim " + annotation.claim.id + " · annotation " + annotation.id + " · revision " + annotation.recorded_at;
+        return row;
+      }));
+      status.textContent = rows.length + " sourced annotations.";
+    } catch (error) { if (valid() && ctx === request) status.textContent = String(error); }
+  };
+  submit("[data-retire-descriptor]", f => void write("workspace_retire_semantic_descriptor", { descriptorId: value(f,"descriptor") }));
   submit("[data-site-area]", f => {
     const amount = Number(value(f,"amount"));
     if (value(f,"status") === "known" && (!value(f,"amount") || !Number.isSafeInteger(amount) || amount < 0)) {

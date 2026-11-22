@@ -2929,6 +2929,61 @@ pub fn workspace_semantic_fact(
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+pub fn workspace_annotate_semantic_fact(
+    workspace: State<'_, AuthorWorkspace>,
+    request: NetworkContext,
+    fact: atlas_store::semantic::FactRef,
+    claim_id: String,
+) -> Result<String, String> {
+    let mut store = workspace.lock()?;
+    let view = request.resolve(&store)?;
+    store
+        .annotate_semantic_fact(
+            view,
+            fact,
+            reference(view.world, &claim_id)?,
+            Uuid::new_v4(),
+        )
+        .map(|id| id.to_string())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn workspace_semantic_fact_annotations(
+    workspace: State<'_, AuthorWorkspace>,
+    request: NetworkContext,
+    fact: atlas_store::semantic::FactRef,
+) -> Result<Vec<atlas_store::semantic::FactAnnotation>, String> {
+    let store = workspace.lock()?;
+    store
+        .semantic_fact_annotations(request.resolve(&store)?, fact)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn workspace_retire_semantic_descriptor(
+    workspace: State<'_, AuthorWorkspace>,
+    request: NetworkContext,
+    descriptor_id: String,
+) -> Result<(), String> {
+    let mut store = workspace.lock()?;
+    let view = request.resolve(&store)?;
+    let descriptor = store
+        .get_object(reference(view.world, &descriptor_id)?, view)
+        .map_err(|e| e.to_string())?
+        .ok_or("Descriptor is unavailable")?;
+    store
+        .retire_semantic_descriptor(
+            view,
+            atlas_store::semantic::DefinitionPin {
+                version: descriptor.reference(),
+            },
+            Uuid::new_v4(),
+        )
+        .map_err(|e| e.to_string())
+}
+
 #[derive(Deserialize)]
 pub struct SiteAreaRequest {
     place_id: String,

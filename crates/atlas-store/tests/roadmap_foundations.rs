@@ -3863,6 +3863,8 @@ fn ontology_migration_from_reconstructed_schema_36_preserves_fact_history() -> R
     connection.execute_batch(
         "PRAGMA foreign_keys=OFF;
          BEGIN IMMEDIATE;
+         DROP TABLE IF EXISTS fact_annotations;
+         DROP TABLE IF EXISTS descriptor_retirements;
          DROP TABLE IF EXISTS site_area_withdrawals;
          DROP TABLE IF EXISTS site_area_facts;
          DROP TABLE classification_withdrawals;
@@ -3918,5 +3920,199 @@ fn ontology_migration_from_reconstructed_schema_36_preserves_fact_history() -> R
     );
     reopened.verify_foreign_keys(Scope::Author)?;
     assert_eq!(inspect_archive(&path, Scope::Author)?.schema, 36);
+    Ok(())
+}
+
+#[test]
+fn annotations_and_retirement_are_historical_and_branch_local() -> Result<(), Error> {
+    use atlas_store::{
+        archive::restore_archive,
+        network::IdentityKind,
+        semantic::{ClassificationInput, ConceptProfile, DefinitionPin, FactFamily, FactRef},
+    };
+    let dir = tempfile::tempdir()?;
+    let mut store = Store::open(dir.path().join("source.sqlite"))?;
+    let world = seed(&mut store)?;
+    let mut author = view(&world, 13);
+    let concept = store.create_identity(
+        author,
+        IdentityKind::Concept,
+        "Estuary speech",
+        Uuid::new_v4(),
+    )?;
+    author.revision = AuthorRevision(2);
+    let definition = ObjectRef::new(world.id);
+    let claim = ObjectRef::new(world.id);
+    author.revision = store.apply(&Command {
+        world: world.id,
+        branch: world.main,
+        expected: author.revision,
+        id: Uuid::new_v4(),
+        author: "Fixture".into(),
+        rationale: "Vocabulary and testimony".into(),
+        scope: Scope::Author,
+        changes: vec![
+            Change::Create(
+                definition,
+                Record {
+                    label: "Language".into(),
+                    data: ObjectData::Definition {
+                        definition: Definition::Tag,
+                        description: "Language vocabulary".into(),
+                    },
+                    valid: ValidInterval::default(),
+                    source: None,
+                },
+            ),
+            Change::Create(
+                claim,
+                Record {
+                    label: "Register annotation".into(),
+                    data: ObjectData::Claim {
+                        subject: id(&world, 6),
+                        predicate: "annotation".into(),
+                        statement: "The register uses a different name.".into(),
+                        audience: ClaimAudience::Author,
+                    },
+                    valid: interval(10, None),
+                    source: Some(id(&world, 9)),
+                },
+            ),
+        ],
+    })?;
+    let pin = DefinitionPin {
+        version: store.get_object(definition, author)?.unwrap().reference(),
+    };
+    let input = ClassificationInput {
+        subject: concept,
+        profile: ConceptProfile::Language,
+        descriptor: pin,
+        source: id(&world, 9),
+        starts_at: author.day,
+        ends_before: None,
+    };
+    let fact = FactRef {
+        world: world.id,
+        family: FactFamily::Classification,
+        id: store.record_classification(author, input, Uuid::new_v4())?,
+    };
+    author.revision = AuthorRevision(4);
+    assert!(matches!(
+        store.annotate_semantic_fact(author, fact, id(&world, 1), Uuid::new_v4()),
+        Err(Error::WrongKind)
+    ));
+    assert!(matches!(
+        store.annotate_semantic_fact(
+            author,
+            FactRef {
+                family: FactFamily::Network,
+                ..fact
+            },
+            claim,
+            Uuid::new_v4()
+        ),
+        Err(Error::NotFound)
+    ));
+    assert!(matches!(
+        store.annotate_semantic_fact(
+            author,
+            fact,
+            ObjectRef::new(WorldId(Uuid::new_v4())),
+            Uuid::new_v4()
+        ),
+        Err(Error::WrongWorld)
+    ));
+    let prior = author;
+    let annotation = store.annotate_semantic_fact(author, fact, claim, Uuid::new_v4())?;
+    author.revision = AuthorRevision(5);
+    assert!(store.semantic_fact_annotations(prior, fact)?.is_empty());
+    assert_eq!(
+        store.semantic_fact_annotations(author, fact)?[0].id,
+        annotation
+    );
+    assert_eq!(
+        store.semantic_fact_annotations(author, fact)?[0].claim,
+        claim
+    );
+    assert!(matches!(
+        store.annotate_semantic_fact(author, fact, claim, Uuid::new_v4()),
+        Err(Error::InvalidInput("duplicate fact annotation"))
+    ));
+    assert!(matches!(
+        store.semantic_fact_annotations(
+            ViewContext {
+                scope: Scope::Public,
+                ..author
+            },
+            fact
+        ),
+        Err(Error::CapabilityDenied)
+    ));
+    let fork = store.fork(&ForkCommand {
+        world: world.id,
+        parent: world.main,
+        day: author.day,
+        expected: author.revision,
+        id: Uuid::new_v4(),
+        author: "Fixture".into(),
+        rationale: "Retire vocabulary in alternate history".into(),
+        scope: Scope::Author,
+    })?;
+    let mut child = ViewContext {
+        branch: fork.id,
+        revision: fork.created_revision,
+        ..author
+    };
+    let child_pin = DefinitionPin {
+        version: store.get_object(definition, child)?.unwrap().reference(),
+    };
+    store.retire_semantic_descriptor(child, child_pin, Uuid::new_v4())?;
+    child.revision = AuthorRevision(child.revision.0 + 1);
+    assert_eq!(
+        store.semantic_fact_annotations(child, fact)?[0].id,
+        annotation
+    );
+    assert!(matches!(
+        store.record_classification(
+            child,
+            ClassificationInput {
+                profile: ConceptProfile::Culture,
+                descriptor: child_pin,
+                ..input
+            },
+            Uuid::new_v4()
+        ),
+        Err(Error::InvalidInput("retired semantic descriptor"))
+    ));
+    assert_eq!(
+        store.classifications(child, Some(concept), None)?[0].input,
+        input
+    );
+    let mut main = ViewContext {
+        branch: world.main,
+        ..child
+    };
+    store.record_classification(
+        main,
+        ClassificationInput {
+            profile: ConceptProfile::Culture,
+            ..input
+        },
+        Uuid::new_v4(),
+    )?;
+    main.revision = AuthorRevision(main.revision.0 + 1);
+    let backup = dir.path().join("backup.sqlite");
+    let restored = dir.path().join("restored.sqlite");
+    store.backup_to(&backup, Scope::Author)?;
+    restore_archive(&backup, &restored, Scope::Author)?;
+    let reopened = Store::open(&restored)?;
+    assert_eq!(
+        reopened.semantic_fact_annotations(child, fact)?,
+        store.semantic_fact_annotations(child, fact)?
+    );
+    assert_eq!(
+        reopened.classifications(main, Some(concept), None)?.len(),
+        2
+    );
     Ok(())
 }
