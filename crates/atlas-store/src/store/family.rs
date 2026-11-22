@@ -12,7 +12,14 @@ impl Store {
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let world = metadata_world(&tx, view, true)?;
-        metadata_world(&tx, ViewContext { day: input.starts_at, ..view }, true)?;
+        metadata_world(
+            &tx,
+            ViewContext {
+                day: input.starts_at,
+                ..view
+            },
+            true,
+        )?;
         for person in [input.parent, input.child] {
             require_person(
                 &tx,
@@ -61,7 +68,9 @@ impl Store {
             &format!("{METADATA_CTE} SELECT EXISTS(SELECT 1 FROM active_parentage WHERE parent_id=?5 AND child_id=?6
              AND kind=?7 AND starts_at<=?8 AND (ends_before IS NULL OR ends_before>?4))"),
             params![w,view.branch.0.as_bytes(),view.revision.0,lo,parent,child,kind,hi], |r| r.get(0))?;
-        if duplicate { return Err(Error::InvalidInput("overlapping accepted parentage")); }
+        if duplicate {
+            return Err(Error::InvalidInput("overlapping accepted parentage"));
+        }
         let (cycle, work): (bool, usize) = tx.query_row(
             &format!("{METADATA_CTE}, descendants(person,lo,hi) AS (
                VALUES(?5,?4,?6) UNION
@@ -71,8 +80,12 @@ impl Store {
                LIMIT 10001)
              SELECT max(person=?7),count(*) FROM descendants"),
             params![w,view.branch.0.as_bytes(),view.revision.0,lo,child,hi,parent], |r| Ok((r.get(0)?,r.get(1)?)))?;
-        if cycle { return Err(Error::InvalidInput("accepted ancestry cycle")); }
-        if work > 10_000 { return Err(Error::QueryBudgetExceeded); }
+        if cycle {
+            return Err(Error::InvalidInput("accepted ancestry cycle"));
+        }
+        if work > 10_000 {
+            return Err(Error::QueryBudgetExceeded);
+        }
         let id = Uuid::new_v4();
         tx.execute("INSERT INTO accepted_parentage(world_id,id,parent_id,child_id,kind,starts_at,ends_before,recorded_revision)
             VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",params![w,id.as_bytes(),parent,child,kind,lo,input.ends_before.map(|v|v.0),rev])?;
@@ -92,13 +105,29 @@ impl Store {
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let world = metadata_world(&tx, view, true)?;
-        require_person(&tx,view.world,person,view.branch,view.revision.0,view.day)?;
+        require_person(
+            &tx,
+            view.world,
+            person,
+            view.branch,
+            view.revision.0,
+            view.day,
+        )?;
         let exists: bool = tx.query_row(
             &format!("{METADATA_CTE} SELECT EXISTS(SELECT 1 FROM active_parentage WHERE id=?5 AND (parent_id=?6 OR child_id=?6))"),
             params![view.world.0.as_bytes(),view.branch.0.as_bytes(),view.revision.0,view.day.0,link.as_bytes(),person.id.0.as_bytes()],
             |row| row.get(0))?;
-        if !exists { return Err(Error::NotFound); }
-        let rev = append_revision(&tx,&world,view.branch,view.revision,command,("Local author",rationale))?;
+        if !exists {
+            return Err(Error::NotFound);
+        }
+        let rev = append_revision(
+            &tx,
+            &world,
+            view.branch,
+            view.revision,
+            command,
+            ("Local author", rationale),
+        )?;
         tx.execute("INSERT INTO metadata_withdrawals(world_id,branch_id,kind,fact_id,revision) VALUES(?1,?2,'parentage',?3,?4)",
             params![view.world.0.as_bytes(),view.branch.0.as_bytes(),link.as_bytes(),rev])?;
         tx.commit()?;
@@ -125,7 +154,13 @@ impl Store {
            FROM active_parentage p JOIN author_revisions r ON r.world_id=p.world_id AND r.revision=p.recorded_revision
            WHERE (parent_id=?5 OR child_id=?5) AND starts_at<=?4 AND (ends_before IS NULL OR ends_before>?4)
            ORDER BY kind,starts_at,p.id LIMIT 2001"))?;
-        let mut rows=stmt.query(params![view.world.0.as_bytes(),view.branch.0.as_bytes(),view.revision.0,view.day.0,person.id.0.as_bytes()])?;
+        let mut rows = stmt.query(params![
+            view.world.0.as_bytes(),
+            view.branch.0.as_bytes(),
+            view.revision.0,
+            view.day.0,
+            person.id.0.as_bytes()
+        ])?;
         let mut result = Vec::new();
         let mut count = 0;
         while let Some(row) = rows.next()? {

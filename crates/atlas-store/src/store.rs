@@ -1734,14 +1734,29 @@ impl Store {
         Ok(version)
     }
 
-    pub fn metadata_branches(&self, view: ViewContext) -> Result<Vec<crate::network::BranchSummary>, Error> {
+    pub fn metadata_branches(
+        &self,
+        view: ViewContext,
+    ) -> Result<Vec<crate::network::BranchSummary>, Error> {
         let world = metadata_world(&self.conn, view, false)?;
-        let mut result = vec![crate::network::BranchSummary { id: world.main, parent: None, day: None, created_revision: 0 }];
+        let mut result = vec![crate::network::BranchSummary {
+            id: world.main,
+            parent: None,
+            day: None,
+            created_revision: 0,
+        }];
         let mut stmt=self.conn.prepare("SELECT branch_id,parent_id,fork_day,created_revision FROM branch_forks WHERE world_id=?1 AND created_revision<=?2 ORDER BY created_revision LIMIT 201")?;
-        let mut rows=stmt.query(params![view.world.0.as_bytes(),view.revision.0])?;
-        while let Some(row)=rows.next()? {
-            if result.len()>200 { return Err(Error::QueryBudgetExceeded); }
-            result.push(crate::network::BranchSummary { id: BranchId(Uuid::from_bytes(row.get(0)?)), parent: Some(BranchId(Uuid::from_bytes(row.get(1)?))), day: Some(row.get(2)?), created_revision:row.get(3)? });
+        let mut rows = stmt.query(params![view.world.0.as_bytes(), view.revision.0])?;
+        while let Some(row) = rows.next()? {
+            if result.len() > 200 {
+                return Err(Error::QueryBudgetExceeded);
+            }
+            result.push(crate::network::BranchSummary {
+                id: BranchId(Uuid::from_bytes(row.get(0)?)),
+                parent: Some(BranchId(Uuid::from_bytes(row.get(1)?))),
+                day: Some(row.get(2)?),
+                created_revision: row.get(3)?,
+            });
         }
         Ok(result)
     }
