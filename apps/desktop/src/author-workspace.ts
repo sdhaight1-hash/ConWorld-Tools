@@ -1,3 +1,4 @@
+import { objectKinds } from "./object-kinds";
 import { openFamilyHistory } from "./family-history";
 import { openNetworkStudio } from "./network-studio";
 import { openMediaStudio } from "./media-studio";
@@ -160,6 +161,9 @@ export async function showAuthorWorkspace(
   const pathForm = document.querySelector<HTMLFormElement>("#author-path-form")!;
   const participantEventsForm = document.querySelector<HTMLFormElement>("#author-participant-events-form")!;
   const compositeForm = document.querySelector<HTMLFormElement>("#author-composite-form")!;
+  const kindFilter = compositeForm.elements.namedItem("kind") as HTMLSelectElement;
+  kindFilter.replaceChildren(new Option("Any kind", ""), ...objectKinds.map(kind =>
+    new Option(kind.charAt(0).toUpperCase() + kind.slice(1).replaceAll("_", " "), kind)));
   const queryResults = document.querySelector<HTMLUListElement>("#author-query-results")!;
   const nextSearchPage = document.querySelector<HTMLButtonElement>("#author-next-search-page")!;
   const cancelSearch = document.querySelector<HTMLButtonElement>("#author-cancel-query")!;
@@ -1111,7 +1115,7 @@ export async function showAuthorWorkspace(
       let control: HTMLInputElement | HTMLSelectElement;
       if (parameter.default.type === "object_kind") {
         control = document.createElement("select");
-        for (const kind of ["person", "concept", "place", "organization", "household", "family_house", "faction", "conflict", "office", "title", "asset", "population", "conflict_issue", "conflict_phase", "succession_rule", "definition", "relationship", "event_involvement", "actor_action", "historical_event", "source", "claim"]) {
+        for (const kind of objectKinds) {
           control.add(new Option(kind.replaceAll("_", " "), kind));
         }
       } else if (parameter.default.type === "concept_profile") {
@@ -1371,14 +1375,15 @@ export async function showAuthorWorkspace(
       void (async () => {
         try {
           if (form !== worldForm) {
-            currentDay();
+            const day = currentDay();
             if (selectedRevision() !== null) throw new Error("Archived author revisions are read-only.");
-            if (!snapshot || snapshot.world.id !== worldSelect.value) throw new Error("Wait for the world to load.");
+            if (!snapshot || snapshot.world.id !== worldSelect.value || snapshot.day !== day ||
+                snapshot.view_revision !== snapshot.world.revision) throw new Error("Refresh the selected historical view before saving.");
             if (snapshot.scene_limited) throw new Error("Graph editing requires a complete scene.");
           }
           saving = true;
           syncButtons();
-          const savedNode = await action({ world_id: worldSelect.value, expected_revision: snapshot?.world.revision ?? 0 });
+          const savedNode = await action({ world_id: snapshot?.world.id ?? worldSelect.value, expected_revision: snapshot?.view_revision ?? 0 });
           if (form !== worldForm) await refresh();
           if (form === worldForm || form === personForm) field(form, "name").value = "";
           if (form === evidenceForm) {
@@ -1406,8 +1411,8 @@ export async function showAuthorWorkspace(
     revisionInput.value = "";
     await refreshWorlds(world.id);
   });
-  bind(personForm, async ({ world_id }) => {
-    await invoke("workspace_create_person", { worldId: world_id, name: value(personForm, "name") });
+  bind(personForm, async ({ world_id, expected_revision }) => {
+    await invoke("workspace_create_person", { worldId: world_id, expectedRevision: expected_revision, name: value(personForm, "name") });
   });
   field<HTMLSelectElement>(aliasForm, "alias_id").addEventListener("change", () => {
     const alias = snapshot?.aliases?.find((entry) => entry.id === value(aliasForm, "alias_id"));

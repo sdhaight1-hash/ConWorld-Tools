@@ -335,6 +335,7 @@ struct ActionSummary {
 #[derive(Deserialize)]
 pub struct RelationshipInput {
     world_id: String,
+    expected_revision: i64,
     subject_id: String,
     target_id: String,
     kind: String,
@@ -1466,12 +1467,15 @@ impl AuthorWorkspace {
         }
     }
 
-    fn create_person(&self, world_id: &str, name: &str) -> Result<(), String> {
+    fn create_person(
+        &self,
+        world_id: &str,
+        expected_revision: i64,
+        name: &str,
+    ) -> Result<(), String> {
         let name = nonempty(name, "Person name")?;
         let mut store = self.lock()?;
-        let world = store
-            .world(WorldId(id(world_id)?), Scope::Author)
-            .map_err(|error| error.to_string())?;
+        let world = Self::edit_world(&store, world_id, expected_revision)?;
         let person = ObjectRef::new(world.id);
         commit(
             &mut store,
@@ -1491,9 +1495,7 @@ impl AuthorWorkspace {
     fn create_relationship(&self, request: RelationshipInput) -> Result<(), String> {
         let kind = nonempty(&request.kind, "Relationship kind")?;
         let mut store = self.lock()?;
-        let world = store
-            .world(WorldId(id(&request.world_id)?), Scope::Author)
-            .map_err(|error| error.to_string())?;
+        let world = Self::edit_world(&store, &request.world_id, request.expected_revision)?;
         let subject = reference(world.id, &request.subject_id)?;
         let target = reference(world.id, &request.target_id)?;
         commit(
@@ -3296,9 +3298,10 @@ pub fn workspace_review_ghost(
 pub fn workspace_create_person(
     workspace: State<'_, AuthorWorkspace>,
     world_id: String,
+    expected_revision: i64,
     name: String,
 ) -> Result<(), String> {
-    workspace.create_person(&world_id, &name)
+    workspace.create_person(&world_id, expected_revision, &name)
 }
 
 #[tauri::command]
@@ -3498,6 +3501,41 @@ mod tests {
     }
 
     #[test]
+    fn creation_commands_reject_stale_revisions_without_writing()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let workspace = AuthorWorkspace::open(":memory:")?;
+        let world = workspace.create_world("Revision guard")?;
+        workspace.create_person(&world.id, 0, "Alice")?;
+        assert!(
+            workspace
+                .create_person(&world.id, 0, "Stale person")
+                .is_err()
+        );
+        workspace.create_person(&world.id, 1, "Beatrice")?;
+        let view = workspace.snapshot(&world.id, 0, None)?;
+        assert_eq!(view.view_revision, 2);
+        assert_eq!(view.people.len(), 2);
+        let request = |expected_revision| RelationshipInput {
+            world_id: world.id.clone(),
+            expected_revision,
+            subject_id: view.people[0].id.clone(),
+            target_id: view.people[1].id.clone(),
+            kind: "friendship".into(),
+            trust: Some(75),
+            tags: String::new(),
+            day: 10,
+        };
+        workspace.create_relationship(request(2))?;
+        assert!(workspace.create_relationship(request(2)).is_err());
+        let after = workspace.snapshot(&world.id, 10, None)?;
+        assert_eq!(after.view_revision, 3);
+        assert_eq!(after.people.len(), 2);
+        assert_eq!(after.relationships.len(), 1);
+        assert_eq!(workspace.snapshot(&world.id, 9, None)?.relationships.len(), 0);
+        Ok(())
+    }
+
+    #[test]
     fn at_08_09_13_configured_roles_and_reports_preserve_outcomes_and_visibility()
     -> Result<(), Box<dyn std::error::Error>> {
         let directory = tempfile::tempdir()?;
@@ -3505,9 +3543,9 @@ mod tests {
         let workspace = AuthorWorkspace::open(&path)?;
         let world = workspace.create_world("Northbridge")?;
         let id = world.id;
-        workspace.create_person(&id, "Alice")?;
-        workspace.create_person(&id, "Beatrice")?;
-        workspace.create_person(&id, "Morgan")?;
+        workspace.create_person(&id, 0, "Alice")?;
+        workspace.create_person(&id, 1, "Beatrice")?;
+        workspace.create_person(&id, 2, "Morgan")?;
         let seed = workspace.snapshot(&id, 0, None)?;
         let alice = seed.people[0].id.clone();
         let morgan = seed.people[2].id.clone();
@@ -3659,7 +3697,7 @@ mod tests {
             HashSet::from(["actor", "victim", "Mediator", "Financier"])
         );
         let foreign = workspace.create_world("Other world")?;
-        workspace.create_person(&foreign.id, "Unrelated")?;
+        workspace.create_person(&foreign.id, 0, "Unrelated")?;
         let foreign_id = workspace.snapshot(&foreign.id, 11, None)?.people[0]
             .id
             .clone();
@@ -3698,8 +3736,8 @@ mod tests {
             let workspace = AuthorWorkspace::open(&database)?;
             let world = workspace.create_world("Archive")?;
             world_id = world.id;
-            workspace.create_person(&world_id, "Alice")?;
-            workspace.create_person(&world_id, "Beatrice")?;
+            workspace.create_person(&world_id, 0, "Alice")?;
+            workspace.create_person(&world_id, 1, "Beatrice")?;
             let people = workspace.snapshot(&world_id, 0, None)?.people;
             alice = people
                 .iter()
@@ -3715,6 +3753,7 @@ mod tests {
                 .clone();
             workspace.create_relationship(RelationshipInput {
                 world_id: world_id.clone(),
+                expected_revision: 2,
                 subject_id: alice.clone(),
                 target_id: beatrice.clone(),
                 kind: "friendship".into(),
@@ -3885,9 +3924,9 @@ mod tests {
     -> Result<(), Box<dyn std::error::Error>> {
         let workspace = AuthorWorkspace::open(":memory:")?;
         let world = workspace.create_world("Search fixture")?;
-        workspace.create_person(&world.id, "Alice Vale")?;
-        workspace.create_person(&world.id, "Alice Vale")?;
-        workspace.create_person(&world.id, "Beatrice Thorne")?;
+        workspace.create_person(&world.id, 0, "Alice Vale")?;
+        workspace.create_person(&world.id, 1, "Alice Vale")?;
+        workspace.create_person(&world.id, 2, "Beatrice Thorne")?;
         let matches = workspace.search(
             &world.id,
             0,
@@ -3972,6 +4011,7 @@ mod tests {
             .id;
         workspace.create_relationship(RelationshipInput {
             world_id: world.id.clone(),
+            expected_revision: 3,
             subject_id: matches.rows[0].id.clone(),
             target_id: beatrice,
             kind: "friendship".into(),
@@ -4008,8 +4048,8 @@ mod tests {
     -> Result<(), Box<dyn std::error::Error>> {
         let workspace = AuthorWorkspace::open(":memory:")?;
         let world = workspace.create_world("Path fixture")?;
-        for name in ["Alice", "Beatrice", "Cara"] {
-            workspace.create_person(&world.id, name)?;
+        for (revision, name) in [(0, "Alice"), (1, "Beatrice"), (2, "Cara")] {
+            workspace.create_person(&world.id, revision, name)?;
         }
         let people = workspace.snapshot(&world.id, 0, None)?.people;
         let person = |name: &str| {
@@ -4020,9 +4060,10 @@ mod tests {
                 .id
                 .clone()
         };
-        for (from, to) in [("Alice", "Beatrice"), ("Beatrice", "Cara")] {
+        for (revision, from, to) in [(3, "Alice", "Beatrice"), (4, "Beatrice", "Cara")] {
             workspace.create_relationship(RelationshipInput {
                 world_id: world.id.clone(),
+                expected_revision: revision,
                 subject_id: person(from),
                 target_id: person(to),
                 kind: "friendship".into(),

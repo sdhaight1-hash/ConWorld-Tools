@@ -2478,3 +2478,48 @@ test("semantic inspection invalidates pending replies and stale actions when foc
   await expect(studio.locator("[data-status]")).toContainText("Select Culture documented language");
   await expect(studio.locator("[data-picker-results]")).toBeEmpty();
 });
+
+
+test("creation commands use the loaded author revision and reject a changed day before refresh", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "guard-world", name: "Revision guard", revision: 7 };
+    const people = [{ id: "alice", label: "Alice" }, { id: "beatrice", label: "Beatrice" }];
+    const writes: { command: string; args: unknown }[] = [];
+    Object.assign(window, { isTauri: true, __creationWrites: writes, __TAURI_INTERNALS__: {
+      invoke: async (command: string, args: Record<string, unknown>) => {
+        if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+        if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+        if (command === "workspace_worlds") return [world];
+        if (command === "workspace_saved_queries") return [];
+        if (command === "workspace_snapshot") return { world, day: args.day, view_revision: world.revision, people, relationships: [], events: [] };
+        if (command === "workspace_create_person" || command === "workspace_create_relationship") {
+          writes.push({ command, args });
+          world.revision++;
+          return null;
+        }
+        throw new Error("Unexpected mock command: " + command);
+      },
+    } });
+  });
+  await page.goto("/");
+  await expect(page.locator("#author-status")).toContainText("World loaded");
+  const person = page.locator("#author-create-person");
+  await person.locator('[name="name"]').fill("Cora");
+  await page.evaluate(() => {
+    document.querySelector<HTMLInputElement>("#author-day")!.value = "10";
+    document.querySelector<HTMLFormElement>("#author-create-person")!.requestSubmit();
+  });
+  await expect(page.locator("#author-status")).toContainText("Refresh the selected historical view");
+  const writes = () => page.evaluate(() => (window as unknown as { __creationWrites: { command: string; args: unknown }[] }).__creationWrites);
+  expect(await writes()).toEqual([]);
+  await page.locator("#author-refresh-view").click();
+  await expect(page.locator("#author-world-info")).toContainText("historical day 10");
+  await person.getByRole("button", { name: "Add person" }).click();
+  await expect(page.locator("#author-status")).toContainText("Saved to local world history");
+  expect((await writes())[0]).toEqual({ command: "workspace_create_person", args: { worldId: "guard-world", expectedRevision: 7, name: "Cora" } });
+  await page.locator("#author-create-relationship button[type=submit]").click();
+  await expect(page.locator("#author-status")).toContainText("Saved to local world history");
+  expect((await writes())[1]).toMatchObject({ command: "workspace_create_relationship", args: { request: { world_id: "guard-world", expected_revision: 8, day: 10 } } });
+  const kinds = await page.locator('#author-composite-form select[name="kind"] option').evaluateAll(options => options.map(option => (option as HTMLOptionElement).value));
+  expect(kinds).toEqual(["","person","concept","place","organization","household","family_house","faction","conflict","office","title","asset","population","conflict_issue","conflict_phase","succession_rule","definition","relationship","event_involvement","actor_action","historical_event","source","claim"]);
+});
