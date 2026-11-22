@@ -1698,8 +1698,8 @@ fn versioned_template_keeps_queries_private_and_persists_independent_instances()
 }
 
 #[test]
-fn family_canvas_component_uses_accepted_parentage_at_selected_day_and_revision() -> Result<(), Error>
-{
+fn family_canvas_component_uses_accepted_parentage_at_selected_day_and_revision()
+-> Result<(), Error> {
     use atlas_store::genealogy::RecordParentage;
 
     let mut store = Store::open(":memory:")?;
