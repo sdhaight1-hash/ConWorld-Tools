@@ -20,3 +20,7 @@ For implementation within #4/#5, verify exact query parity, stable refs and supp
 ## Closure
 
 All six research criteria fulfilled; study and index linked, architectural recommendation recorded and #4/#5 handoff tracked. No new feature decision, normative phase change, production code, screenshot or test claim. No native product acceptance gate passed. No changes to Webb-Database, #67 or #68.
+
+## Subsequent feature scope decision
+
+Subsequent explicit owner approval: [#70](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/70) and [approval](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/70#issuecomment-7073776197) accept finite typed recipe composition/replay scope under the [accepted feature design](https://github.com/sdhaight1-hash/ConWorld-Tools/blob/main/Design-Docs/Features/composable-worldbuilding-transforms-and-exploration-workflows.md). Readiness Gate A requires verified baseline and demonstrated author-value gap versus existing contextual/saved queries; stop/defer if insufficient. This is separate feature scope, not a change to #69 findings, original phase exits or #68. Dedicated lore workbench remains deferred. No WT production gate passed.

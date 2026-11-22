@@ -87,6 +87,12 @@ All ten issues start **open** and link to their relevant design contracts and ac
 
 Full acceptance in [09](09-Acceptance-and-Verification.md). Research findings are not production acceptance evidence.
 
+## Accepted feature #70 — Transform composition integration dependencies
+
+Subsequent explicit owner approval: [#70](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/70) and [approval](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/70#issuecomment-7073776197) accept finite typed recipe composition/replay scope under the [accepted feature design](https://github.com/sdhaight1-hash/ConWorld-Tools/blob/main/Design-Docs/Features/composable-worldbuilding-transforms-and-exploration-workflows.md). Readiness Gate A requires verified baseline and demonstrated author-value gap versus existing contextual/saved queries; stop/defer if insufficient. This is separate feature scope, not a change to #69 findings, original phase exits or #68. Dedicated lore workbench remains deferred. No WT production gate passed.
+
+#4/#5 existing contextual actions are readiness prerequisites; #6–#9 verified domain/branch/access services and #10 native/archive tests support feature integration. #68 spatial operators optional after applicable SP gates. WT-01–10 are #70-specific, not original phase exits.
+
 ## Issue content template
 
 Each Roadmap Phase issue MUST contain: objectives, prerequisites, design links, architecture decisions required, engineering deliverables, acceptance tests (referencing AT- and INV-/feature IDs), risks/unknowns, non-goals and a checklist including design review, implementation, tests, actual validation evidence and docs update. Prefer subissues for large implementation tasks after the phase design is accepted. Never create duplicate source-of-truth specifications inside issue descriptions.

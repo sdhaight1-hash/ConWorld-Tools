@@ -44,3 +44,4 @@ A new feature design SHOULD include:
 ## Feature index
 
 - [NestedLocations and Procedural Vector Cartography](nested-locations-and-procedural-vector-cartography.md) — **Accepted Design**, [New Feature #68](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/68), [owner approval](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/68#issuecomment-7073427305). Research #65/#66; dependency-gated implementation, verification pending; draft #67 held for review.
+- [Composable Worldbuilding Transforms and Exploration Workflows](composable-worldbuilding-transforms-and-exploration-workflows.md) — **Accepted Design**, [New Feature #70](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/70), [owner approval](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/70#issuecomment-7073776197). Research #69; mandatory readiness Gate A, implementation and WT-01–10 verification pending.

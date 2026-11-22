@@ -97,3 +97,8 @@ The predecessor packages included a foundational SQLite smoke test. It does **no
 ## 2026-11-21 implementation reconciliation
 
 The [consolidated development record](Consolidation-2026-11-21.md) links the accepted partial implementation ADRs and test evidence. No normative architecture decision is superseded here: shared historical store, explicit author acceptance, stable identities and Rust projection policy remain authoritative. ADR-004, ADR-005, ADR-008 and ADR-010 are still open at full scope (templates, complete reader-safe queries, character/branch visibility, hotspot and caption indexing, performance and refactor semantics). Schema 26 and its author/reader boundaries are a verified implementation baseline, not completion of these ADR contracts.
+
+## 2026-11-22 accepted feature #70 scope reconciliation
+
+Subsequent explicit owner approval: [#70](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/70) and [approval](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/70#issuecomment-7073776197) accept finite typed recipe composition/replay scope under the [accepted feature design](https://github.com/sdhaight1-hash/ConWorld-Tools/blob/main/Design-Docs/Features/composable-worldbuilding-transforms-and-exploration-workflows.md). Readiness Gate A requires verified baseline and demonstrated author-value gap versus existing contextual/saved queries; stop/defer if insufficient. This is separate feature scope, not a change to #69 findings, original phase exits or #68. Dedicated lore workbench remains deferred. No WT production gate passed.
+Existing D-001/D-007/D-009/D-012/D-013 remain authoritative. No independent query engine, canonical graph or new phase.
