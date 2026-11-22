@@ -3022,3 +3022,183 @@ fn canonical_concept_identity_is_searchable_and_historical() -> Result<(), Error
     store.verify_foreign_keys(Scope::Author)?;
     Ok(())
 }
+
+#[test]
+fn classifications_preserve_pins_and_branch_local_withdrawals() -> Result<(), Error> {
+    use atlas_store::{
+        network::IdentityKind,
+        semantic::{ClassificationInput, ConceptProfile, DefinitionPin},
+    };
+    let mut store = Store::open(":memory:")?;
+    let world = seed(&mut store)?;
+    let mut author = view(&world, 13);
+    let concept = store.create_identity(
+        author,
+        IdentityKind::Concept,
+        "Estuary speech",
+        Uuid::new_v4(),
+    )?;
+    author.revision = AuthorRevision(2);
+    let definition = ObjectRef::new(world.id);
+    let record = |label: &str| Record {
+        label: label.into(),
+        valid: ValidInterval::default(),
+        data: ObjectData::Definition {
+            definition: Definition::Tag,
+            description: "Language vocabulary".into(),
+        },
+        source: None,
+    };
+    let edit = |expected, change| Command {
+        world: world.id,
+        branch: world.main,
+        expected,
+        id: Uuid::new_v4(),
+        author: "Fixture".into(),
+        rationale: "Vocabulary revision".into(),
+        scope: Scope::Author,
+        changes: vec![change],
+    };
+    author.revision = store.apply(&edit(
+        author.revision,
+        Change::Create(definition, record("Language")),
+    ))?;
+    let pin = DefinitionPin {
+        version: store.get_object(definition, author)?.unwrap().reference(),
+    };
+    let input = ClassificationInput {
+        subject: concept,
+        profile: ConceptProfile::Language,
+        descriptor: pin,
+        source: id(&world, 9),
+        starts_at: WorldDay(13),
+        ends_before: Some(WorldDay(20)),
+    };
+    assert!(matches!(
+        store.record_classification(
+            author,
+            ClassificationInput {
+                subject: id(&world, 1),
+                ..input
+            },
+            Uuid::new_v4()
+        ),
+        Err(Error::WrongKind)
+    ));
+    assert!(matches!(
+        store.record_classification(
+            author,
+            ClassificationInput {
+                source: id(&world, 2),
+                ..input
+            },
+            Uuid::new_v4()
+        ),
+        Err(Error::WrongKind)
+    ));
+    let before = author;
+    let assignment = store.record_classification(author, input, Uuid::new_v4())?;
+    author.revision = AuthorRevision(4);
+    assert!(
+        store
+            .classifications(before, Some(concept), None)?
+            .is_empty()
+    );
+    assert_eq!(
+        store.classifications(author, Some(concept), None)?[0].id,
+        assignment
+    );
+    assert!(matches!(
+        store.record_classification(author, input, Uuid::new_v4()),
+        Err(Error::InvalidInput("overlapping classification"))
+    ));
+    assert!(matches!(
+        store.classifications(
+            ViewContext {
+                scope: Scope::Public,
+                ..author
+            },
+            None,
+            Some(ConceptProfile::Language)
+        ),
+        Err(Error::CapabilityDenied)
+    ));
+    assert!(
+        store
+            .classifications(
+                ViewContext {
+                    day: WorldDay(20),
+                    ..author
+                },
+                Some(concept),
+                None
+            )?
+            .is_empty()
+    );
+    author.revision = store.apply(&edit(
+        author.revision,
+        Change::Correct(definition, record("Written and spoken language")),
+    ))?;
+    assert_eq!(
+        store.classifications(author, Some(concept), None)?[0].input,
+        input
+    );
+    assert!(matches!(
+        store.record_classification(
+            author,
+            ClassificationInput {
+                profile: ConceptProfile::Culture,
+                ..input
+            },
+            Uuid::new_v4()
+        ),
+        Err(Error::InvalidInput("definition version pin"))
+    ));
+    let fork = store.fork(&ForkCommand {
+        world: world.id,
+        parent: world.main,
+        day: author.day,
+        expected: author.revision,
+        id: Uuid::new_v4(),
+        author: "Fixture".into(),
+        rationale: "Alternative classification history".into(),
+        scope: Scope::Author,
+    })?;
+    let inherited = ViewContext {
+        branch: fork.id,
+        revision: fork.created_revision,
+        ..author
+    };
+    assert_eq!(
+        store.classifications(inherited, None, Some(ConceptProfile::Language))?[0].id,
+        assignment
+    );
+    store.withdraw_classification(inherited, assignment, Uuid::new_v4())?;
+    let after = ViewContext {
+        revision: AuthorRevision(fork.created_revision.0 + 1),
+        ..inherited
+    };
+    assert!(
+        store
+            .classifications(after, Some(concept), None)?
+            .is_empty()
+    );
+    assert_eq!(
+        store.classifications(inherited, Some(concept), None)?[0].id,
+        assignment
+    );
+    assert_eq!(
+        store.classifications(
+            ViewContext {
+                branch: world.main,
+                ..after
+            },
+            Some(concept),
+            None
+        )?[0]
+            .id,
+        assignment
+    );
+    store.verify_foreign_keys(Scope::Author)?;
+    Ok(())
+}
