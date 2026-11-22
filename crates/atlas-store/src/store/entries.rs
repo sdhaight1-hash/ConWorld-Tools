@@ -171,54 +171,95 @@ impl Store {
             if world.main != view.branch {
                 return Err(Error::CapabilityDenied);
             }
-            let mut result = EntryBacklinks {
-                matches: Vec::new(),
-                truncated: false,
-            };
-            if !store.entry_link_target_visible(view, target)? {
+            store.entry_backlinks_inner(view, target, limit)
+        })
+    }
+
+    fn entry_backlinks_inner(
+        &self,
+        view: ViewContext,
+        target: ObjectRef,
+        limit: usize,
+    ) -> Result<EntryBacklinks, Error> {
+    let mut result = EntryBacklinks {
+        matches: Vec::new(),
+        truncated: false,
+    };
+    if !self.entry_link_target_visible(view, target)? {
+        return Ok(result);
+    }
+    let mut stmt = self.conn.prepare(
+        "SELECT DISTINCT l.entry_id FROM entry_link_index l
+         WHERE l.world_id=?1 AND l.target_id=?2 AND l.revision<=?3
+           AND l.revision=(SELECT MAX(v.revision) FROM entry_layout_versions v
+               WHERE v.world_id=l.world_id AND v.entry_id=l.entry_id AND v.revision<=?3)
+         ORDER BY l.entry_id",
+    )?;
+    let ids = stmt.query_map(
+        params![
+            view.world.0.as_bytes(),
+            target.id.0.as_bytes(),
+            view.revision.0
+        ],
+        |row| row.get::<_, [u8; 16]>(0),
+    )?;
+    for id in ids {
+        self.check_query_control()?;
+        let source = ObjectRef {
+            world: view.world,
+            id: ObjectId(Uuid::from_bytes(id?)),
+        };
+        let Some((document, _)) = read_layout_at(&self.conn, view, source)? else {
+            continue;
+        };
+        for (element, link) in document.visible_links(view.scope) {
+            if link.target != target {
+                continue;
+            }
+            if result.matches.len() == limit {
+                result.truncated = true;
                 return Ok(result);
             }
-            let mut stmt = tx.prepare(
-                "SELECT DISTINCT l.entry_id FROM entry_link_index l
-                 WHERE l.world_id=?1 AND l.target_id=?2 AND l.revision<=?3
-                   AND l.revision=(SELECT MAX(v.revision) FROM entry_layout_versions v
-                       WHERE v.world_id=l.world_id AND v.entry_id=l.entry_id AND v.revision<=?3)
-                 ORDER BY l.entry_id",
-            )?;
-            let ids = stmt.query_map(
-                params![
-                    view.world.0.as_bytes(),
-                    target.id.0.as_bytes(),
-                    view.revision.0
-                ],
-                |row| row.get::<_, [u8; 16]>(0),
-            )?;
-            for id in ids {
-                store.check_query_control()?;
-                let source = ObjectRef {
-                    world: view.world,
-                    id: ObjectId(Uuid::from_bytes(id?)),
-                };
-                let Some((document, _)) = read_layout_at(&tx, view, source)? else {
-                    continue;
-                };
-                for (element, link) in document.visible_links(view.scope) {
-                    if link.target != target {
-                        continue;
-                    }
-                    if result.matches.len() == limit {
-                        result.truncated = true;
-                        return Ok(result);
-                    }
-                    result.matches.push(EntryBacklink {
-                        source,
-                        element,
-                        label: link.label.clone(),
-                    });
-                }
+            result.matches.push(EntryBacklink {
+                source,
+                element,
+                label: link.label.clone(),
+            });
+        }
+    }
+    Ok(result)
+    }
+
+    /// Dynamic reader component exposes only already-released explicit references.
+    pub(crate) fn published_references(
+        &self,
+        view: ViewContext,
+        target: ObjectRef,
+    ) -> Result<EntryBacklinks, Error> {
+        if target.world != view.world {
+            return Err(Error::WrongWorld);
+        }
+        let world = load_world(&self.conn, view.world)?;
+        if view.branch != world.main {
+            return Err(Error::CapabilityDenied);
+        }
+        if view.revision != world.revision {
+            if view.scope == Scope::Author {
+                return Ok(EntryBacklinks {
+                    matches: Vec::new(),
+                    truncated: false,
+                });
             }
-            Ok(result)
-        })
+            return Err(Error::InvalidRevision);
+        }
+        self.entry_backlinks_inner(
+            ViewContext {
+                scope: Scope::Public,
+                ..view
+            },
+            target,
+            50,
+        )
     }
 
     /// Find literal, case-insensitive text within a single authorized entry.

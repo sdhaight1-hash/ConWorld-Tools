@@ -21,6 +21,8 @@ function block(content: Block["content"]): Block {
 export function historicalComponent(kind: string, world: string, id: string): Block | undefined {
   const target = { world, id };
   if (kind === "family") return block({ FamilyTable: target });
+  if (kind === "network") return block({ NetworkTable: target });
+  if (kind === "published_refs") return block({ PublishedReferences: target });
   const role = ({ actors: "Actor", witnesses: "Witness", victims: "Victim",
     stakeholders: "Stakeholder" } as Record<string, string>)[kind];
   const filter = kind === "person_events" ? { ParticipantEvents: { participant: target, role: null } }
@@ -39,6 +41,9 @@ export function instantiateTemplate(key: string, world: string, entryId: string)
     : key === "event" ? historicalComponent("actors", world, entryId) : undefined;
   if (query) sections.push(query);
   if (key === "character") sections.push(block({ FamilyTable: { world, id: entryId } }));
+  if (["character", "family", "organization", "event", "conflict"].includes(key)) {
+    sections.push(block({ NetworkTable: { world, id: entryId } }));
+  }
   return block({ Template: { key, version: 1, children: [
     block({ Grid: { columns: 2, children: sections } }),
   ] } });

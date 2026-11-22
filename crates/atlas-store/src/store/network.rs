@@ -155,7 +155,9 @@ impl Store {
             let subject = ref_id(view.world,row.get(1)?);
             let target = ref_id(view.world,row.get(2)?);
             let source = ref_id(view.world,row.get(3)?);
-            let (Ok(a),Ok(b),Ok(_)) = (resolved(&self.conn,view,subject),resolved(&self.conn,view,target),resolved(&self.conn,view,source)) else { continue; };
+            let Some(a) = resolve_object(&self.conn,subject,view.branch,view.revision,view.day)? else { continue; };
+            let Some(b) = resolve_object(&self.conn,target,view.branch,view.revision,view.day)? else { continue; };
+            if resolve_object(&self.conn,source,view.branch,view.revision,view.day)?.is_none() { continue; }
             result.push(NetworkFact {
                 id: Uuid::from_bytes(row.get(0)?),
                 input: NetworkInput { subject,target,source,kind:NetworkKind::parse(&row.get::<_,String>(4)?)?,

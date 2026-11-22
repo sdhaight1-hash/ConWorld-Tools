@@ -23,8 +23,22 @@ type Row = { block: Block; parent?: Row; depth: number; effective: string };
 
 export function editCanvasTree(host: HTMLElement, original: Block, worldId: string,
   entryId: string, revision: number, editable: boolean, changed: () => void) {
-  const root = structuredClone(original);
+  let root = structuredClone(original);
   let selected = root.id;
+  let last = structuredClone(root);
+  const undo: Block[] = [];
+  const redo: Block[] = [];
+  let undoButton: HTMLButtonElement | undefined;
+  let redoButton: HTMLButtonElement | undefined;
+  function recordChange() {
+    undo.push(last);
+    if (undo.length > 32) undo.shift();
+    redo.length = 0;
+    last = structuredClone(root);
+    if (undoButton) undoButton.disabled = false;
+    if (redoButton) redoButton.disabled = true;
+    changed();
+  }
   const definitions = new Map<string, SavedQuery>();
   const loaded = new Set<number>();
   const key = (id: string, rev: number) => id + "@" + rev;
@@ -85,7 +99,7 @@ export function editCanvasTree(host: HTMLElement, original: Block, worldId: stri
 
   function commit(note: string) {
     message.textContent = note;
-    changed();
+    recordChange();
     render();
   }
 
@@ -98,6 +112,23 @@ export function editCanvasTree(host: HTMLElement, original: Block, worldId: stri
     const index = siblings?.indexOf(node) ?? -1;
     tree.replaceChildren();
     controls.replaceChildren();
+    if (editable) {
+      const history = document.createElement("div");
+      undoButton = button("Undo Canvas edit", () => {
+        const prior = undo.pop();
+        if (!prior) return;
+        redo.push(structuredClone(root));
+        root = prior; last = structuredClone(root); changed(); render();
+      }, !undo.length);
+      redoButton = button("Redo Canvas edit", () => {
+        const next = redo.pop();
+        if (!next) return;
+        undo.push(structuredClone(root));
+        root = next; last = structuredClone(root); changed(); render();
+      }, !redo.length);
+      history.append(undoButton, redoButton);
+      controls.append(history);
+    }
     for (const item of all) {
       const line = button(kind(item.block) + " · " +
         (item.block.content.Text?.slice(0, 38) || item.block.content.ObjectLink?.label
@@ -119,7 +150,7 @@ export function editCanvasTree(host: HTMLElement, original: Block, worldId: stri
       text.value = node.content.Text;
       text.maxLength = 16_384;
       text.readOnly = !editable;
-      text.addEventListener("input", () => { node.content.Text = text.value; changed(); });
+      text.addEventListener("input", () => { node.content.Text = text.value; recordChange(); });
       field("Component text", text);
     }
     if (node.content.ObjectLink) {
@@ -128,14 +159,14 @@ export function editCanvasTree(host: HTMLElement, original: Block, worldId: stri
       target.value = link.target.id;
       target.required = true;
       target.readOnly = !editable;
-      target.addEventListener("input", () => { link.target.id = target.value.trim(); changed(); });
+      target.addEventListener("input", () => { link.target.id = target.value.trim(); recordChange(); });
       field("Component link target", target);
       const caption = document.createElement("input");
       caption.value = link.label;
       caption.required = true;
       caption.maxLength = 800;
       caption.readOnly = !editable;
-      caption.addEventListener("input", () => { link.label = caption.value; changed(); });
+      caption.addEventListener("input", () => { link.label = caption.value; recordChange(); });
       field("Component link caption", caption);
     }
     if (node.content.Grid) {
@@ -143,7 +174,7 @@ export function editCanvasTree(host: HTMLElement, original: Block, worldId: stri
       for (const value of [1, 2, 3, 4]) columns.add(new Option(String(value), String(value)));
       columns.value = String(node.content.Grid.columns);
       columns.disabled = !editable;
-      columns.addEventListener("change", () => { node.content.Grid!.columns = Number(columns.value); changed(); });
+      columns.addEventListener("change", () => { node.content.Grid!.columns = Number(columns.value); recordChange(); });
       field("Grid columns", columns);
     }
     if (node.content.Template) {
@@ -151,12 +182,25 @@ export function editCanvasTree(host: HTMLElement, original: Block, worldId: stri
       pin.textContent = "Template: " + node.content.Template.key + " · version " + node.content.Template.version;
       controls.append(pin);
     }
+    const liveFocus = node.content.NetworkTable ?? node.content.PublishedReferences;
+    if (liveFocus) {
+      const target = document.createElement("input");
+      target.value = liveFocus.id;
+      target.required = true;
+      target.readOnly = !editable;
+      target.addEventListener("input", () => { liveFocus.id = target.value.trim(); recordChange(); });
+      field("Reference subject identity", target);
+      const description = document.createElement("p");
+      description.textContent = node.content.NetworkTable ? "Private sourced historical facts." :
+        "Only current released backlinks, never private registry data.";
+      controls.append(description);
+    }
     if (node.content.FamilyTable) {
       const target = document.createElement("input");
       target.value = node.content.FamilyTable.id;
       target.required = true;
       target.readOnly = !editable;
-      target.addEventListener("input", () => { node.content.FamilyTable!.id = target.value.trim(); changed(); });
+      target.addEventListener("input", () => { node.content.FamilyTable!.id = target.value.trim(); recordChange(); });
       field("Family subject identity", target);
       const description = document.createElement("p");
       description.textContent = "Accepted biological, adoptive and legal links at the selected date. Author only.";
@@ -206,7 +250,7 @@ export function editCanvasTree(host: HTMLElement, original: Block, worldId: stri
             : { type: parameter.default.type, value: input.value };
           binding.bindings = binding.bindings.filter(item => item.name !== parameter.name);
           binding.bindings.push({ name: parameter.name, value: bound });
-          changed();
+          recordChange();
         });
         field("Query parameter " + parameter.name, input);
       }
@@ -223,7 +267,7 @@ export function editCanvasTree(host: HTMLElement, original: Block, worldId: stri
       audience.add(new Option("Existing character audience", "character"));
       audience.value = "character";
     } else audience.value = node.audience;
-    audience.disabled = !editable || node === root || !!node.content.SavedQuery || !!node.content.Query || !!node.content.FamilyTable;
+    audience.disabled = !editable || node === root || !!node.content.SavedQuery || !!node.content.Query || !!node.content.FamilyTable || !!node.content.NetworkTable;
     audience.addEventListener("change", () => {
       if (audience.value === "character") return;
       node.audience = audience.value;
@@ -261,7 +305,7 @@ export function editCanvasTree(host: HTMLElement, original: Block, worldId: stri
         commit("Inserted version-pinned template; existing components unchanged.");
       }, all.length > 494 || row.depth > 12));
       const history = document.createElement("select");
-      for (const [value, label] of [["person_events", "Person event history"], ["family", "Accepted family links"], ["actors", "Event actors"],
+      for (const [value, label] of [["person_events", "Person event history"], ["family", "Accepted family links"], ["network", "Sourced historical network"], ["published_refs", "Published references"], ["actors", "Event actors"],
         ["witnesses", "Event witnesses"], ["victims", "Event victims"], ["stakeholders", "Event stakeholders"]]) {
         history.add(new Option(label, value));
       }

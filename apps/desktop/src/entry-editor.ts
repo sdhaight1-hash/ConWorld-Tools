@@ -8,10 +8,12 @@ export type Binding = { world: string; query_id: string; definition_revision: nu
   bindings: { name: string; value: ParameterValue }[] };
 export type Block = { id: string; audience: string; content: { Text?: string; Stack?: Block[]; Panel?: Block[];
   Grid?: { columns: number; children: Block[] }; Template?: { key: string; version: number; children: Block[] };
-  SavedQuery?: Binding; ObjectLink?: ObjectLink; Query?: unknown; FamilyTable?: { world: string; id: string } } };
+  SavedQuery?: Binding; ObjectLink?: ObjectLink; Query?: unknown; FamilyTable?: { world: string; id: string }; NetworkTable?: { world: string; id: string };
+  PublishedReferences?: { world: string; id: string } } };
 type Document = { schema_version: number; entry: { world: string; id: string }; root: Block };
 type Display = { content: { Text?: string; Stack?: Display[]; Panel?: Display[];
   Grid?: { columns: number; children: Display[] }; ObjectLink?: ObjectLink;
+  ReferenceRows?: { links: ObjectLink[]; truncated: boolean };
   QueryRows?: { records: [{ world: string; id: string }, string][]; truncated: boolean } } };
 type EntrySearch = { matches: [string, string][]; truncated: boolean };
 
@@ -176,6 +178,21 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
               button.disabled = !openAuthor || link.target.world !== worldId;
               button.addEventListener("click", () => openAuthor?.(link.target.id));
               parent.append(button);
+            }
+            if (node.content.ReferenceRows) {
+              const group = layoutContainer(parent, "panel");
+              const heading = document.createElement("p");
+              heading.textContent = "Published references only";
+              group.append(heading);
+              for (const link of node.content.ReferenceRows.links) {
+                const button = document.createElement("button");
+                button.type = "button";
+                button.textContent = link.label;
+                button.disabled = !openAuthor || link.target.world !== worldId;
+                button.onclick = () => openAuthor?.(link.target.id);
+                group.append(button);
+              }
+              if (!node.content.ReferenceRows.links.length) group.append("No published references in this view.");
             }
             if (node.content.QueryRows) {
               const table = document.createElement("table");
