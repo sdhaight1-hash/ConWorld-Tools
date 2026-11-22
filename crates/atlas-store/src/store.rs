@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::fs::{self, OpenOptions};
+use std::fs::OpenOptions;
 use std::path::Path;
 use std::time::Duration;
 
@@ -2542,18 +2542,21 @@ impl Store {
     pub fn backup_to(&self, path: impl AsRef<Path>, scope: Scope) -> Result<(), Error> {
         require_author(scope)?;
         let path = std::path::absolute(path)?;
-        let filename = path
+        path.to_str()
+            .ok_or_else(|| Error::InvalidBackupPath(path.clone()))?;
+        let parent = path
+            .parent()
+            .ok_or_else(|| Error::InvalidBackupPath(path.clone()))?;
+        // Match archive restore: publish only a verified sibling copy.
+        // An interrupted VACUUM must never reserve the final pathname.
+        let temp = tempfile::NamedTempFile::new_in(parent)?.into_temp_path();
+        let filename = temp
             .to_str()
-            .ok_or_else(|| Error::InvalidBackupPath(path.to_path_buf()))?;
-        // Claim the destination without overwriting a prior backup.
-        OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)?;
-        if let Err(error) = self.conn.execute("VACUUM INTO ?1", [filename]) {
-            fs::remove_file(&path)?;
-            return Err(error.into());
-        }
+            .ok_or_else(|| Error::InvalidBackupPath(temp.to_path_buf()))?;
+        self.conn.execute("VACUUM INTO ?1", [filename])?;
+        crate::archive::inspect_archive(&temp, scope)?;
+        OpenOptions::new().write(true).open(&temp)?.sync_all()?;
+        temp.persist_noclobber(&path).map_err(|error| error.error)?;
         Ok(())
     }
 }
@@ -3920,6 +3923,25 @@ fn read_version(
 #[cfg(test)]
 mod query_control_tests {
     use super::*;
+
+    #[test]
+    fn failed_backup_does_not_publish_or_leave_staging_file() -> Result<(), Error> {
+        let store = Store::open(":memory:")?;
+        let directory = tempfile::tempdir()?;
+        let destination = directory.path().join("backup.sqlite");
+        // SQLite refuses VACUUM inside an active transaction.
+        let transaction = store.conn.unchecked_transaction()?;
+        assert!(store.backup_to(&destination, Scope::Author).is_err());
+        assert!(!destination.exists());
+        assert_eq!(std::fs::read_dir(directory.path())?.count(), 0);
+        drop(transaction);
+        store.backup_to(&destination, Scope::Author)?;
+        let original = std::fs::read(&destination)?;
+        assert!(store.backup_to(&destination, Scope::Author).is_err());
+        assert_eq!(std::fs::read(&destination)?, original);
+        assert_eq!(std::fs::read_dir(directory.path())?.count(), 1);
+        Ok(())
+    }
 
     #[test]
     fn sqlite_progress_handler_interrupts_and_is_removed() -> Result<(), Error> {

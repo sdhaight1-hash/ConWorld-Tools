@@ -486,9 +486,37 @@ impl Store {
         view: ViewContext,
         focus: ObjectRef,
     ) -> Result<Vec<NetworkFact>, Error> {
-        metadata_world(&self.conn, view, false)?;
-        resolved(&self.conn, view, focus)?;
-        let mut stmt=self.conn.prepare(&format!("{METADATA_CTE} SELECT id,subject_id,target_id,source_id,kind,role,starts_at,ends_before FROM active_network WHERE (subject_id=?5 OR target_id=?5) AND starts_at<=?4 AND (ends_before IS NULL OR ends_before>?4) ORDER BY id LIMIT 501"))?;
+        self.network_facts_for_focus(view, focus, false)
+    }
+
+    fn network_facts_for_focus(
+        &self,
+        view: ViewContext,
+        focus: ObjectRef,
+        redirects_only: bool,
+    ) -> Result<Vec<NetworkFact>, Error> {
+        let tx = self.conn.unchecked_transaction()?;
+        metadata_world(&tx, view, false)?;
+        resolved(&tx, view, focus)?;
+        // Candidate IDs use the existing endpoint indexes. The shared active
+        // CTE still applies every historical and withdrawal predicate.
+        let candidates = if redirects_only {
+            "SELECT id FROM network_facts INDEXED BY network_subject
+             WHERE world_id=?1 AND subject_id=?5 AND kind='identity_redirect'"
+        } else {
+            "SELECT id FROM network_facts INDEXED BY network_subject
+             WHERE world_id=?1 AND subject_id=?5
+             UNION
+             SELECT id FROM network_facts INDEXED BY network_target
+             WHERE world_id=?1 AND target_id=?5"
+        };
+        let mut stmt = tx.prepare(&format!(
+            "{METADATA_CTE}
+             SELECT id,subject_id,target_id,source_id,kind,role,starts_at,ends_before
+             FROM active_network WHERE id IN ({candidates})
+             AND starts_at<=?4 AND (ends_before IS NULL OR ends_before>?4)
+             ORDER BY id LIMIT 501"
+        ))?;
         let mut rows = stmt.query(params![
             view.world.0.as_bytes(),
             view.branch.0.as_bytes(),
@@ -507,16 +535,14 @@ impl Store {
             let subject = ref_id(view.world, row.get(1)?);
             let target = ref_id(view.world, row.get(2)?);
             let source = ref_id(view.world, row.get(3)?);
-            let Some(a) =
-                resolve_object(&self.conn, subject, view.branch, view.revision, view.day)?
+            let Some(a) = resolve_object(&tx, subject, view.branch, view.revision, view.day)?
             else {
                 continue;
             };
-            let Some(b) = resolve_object(&self.conn, target, view.branch, view.revision, view.day)?
-            else {
+            let Some(b) = resolve_object(&tx, target, view.branch, view.revision, view.day)? else {
                 continue;
             };
-            if resolve_object(&self.conn, source, view.branch, view.revision, view.day)?.is_none() {
+            if resolve_object(&tx, source, view.branch, view.revision, view.day)?.is_none() {
                 continue;
             }
             result.push(NetworkFact {
@@ -577,7 +603,9 @@ impl Store {
         let mut work = 0;
         let mut stmt = tx.prepare(&format!(
             "{METADATA_CTE} SELECT subject_id,source_id FROM active_network
-             WHERE kind=?5 AND role=?6 AND target_id=?7
+             WHERE kind=?5 AND role=?6
+             AND id IN (SELECT id FROM network_facts INDEXED BY network_target
+                WHERE world_id=?1 AND target_id=?7 AND kind=?5)
              AND starts_at<=?4 AND (ends_before IS NULL OR ends_before>?4)
              ORDER BY id LIMIT 4001"
         ))?;
@@ -646,30 +674,96 @@ impl Store {
         max_depth: u8,
         max_visited: usize,
     ) -> Result<crate::conflict::Impact, Error> {
-        metadata_world(&self.conn, view, false)?;
-        let mut stmt=self.conn.prepare(&format!("{METADATA_CTE} SELECT subject_id,target_id,source_id FROM active_network WHERE kind='confirmed_cause' AND starts_at<=?4 AND (ends_before IS NULL OR ends_before>?4) ORDER BY id LIMIT 4001"))?;
-        let mut rows = stmt.query(params![
-            view.world.0.as_bytes(),
-            view.branch.0.as_bytes(),
-            view.revision.0,
-            view.day.0
-        ])?;
-        let mut links = Vec::new();
-        while let Some(row) = rows.next()? {
-            self.check_query_control()?;
-            if links.len() == 4000 {
-                return Err(Error::QueryBudgetExceeded);
-            }
-            links.push(crate::conflict::CausalLink {
-                cause: ref_id(view.world, row.get(0)?),
-                consequence: ref_id(view.world, row.get(1)?),
-                source: ref_id(view.world, row.get(2)?),
-                status: crate::conflict::LinkStatus::Confirmed,
-            });
+        let tx = self.conn.unchecked_transaction()?;
+        metadata_world(&tx, view, false)?;
+        if start.world != view.world {
+            return Err(Error::WrongWorld);
         }
-        drop(rows);
-        drop(stmt);
-        self.confirmed_impact(view, start, &links, max_depth, max_visited)
+        if !(1..=16).contains(&max_depth) || !(1..=2000).contains(&max_visited) {
+            return Err(Error::QueryBudgetExceeded);
+        }
+        self.check_query_control()?;
+        let root = resolved(&tx, view, start)?;
+        let ObjectData::HistoricalEvent { occurrence } = root.record.data else {
+            return Err(Error::NotFound);
+        };
+        let Some(day) = occurrence.exact_day() else {
+            return Ok(crate::conflict::Impact {
+                events: Vec::new(),
+                truncated: false,
+            });
+        };
+        let mut days = HashMap::from([(start, day)]);
+        let mut edges = HashMap::<ObjectRef, Vec<ObjectRef>>::new();
+        let mut pending = VecDeque::from([(start, 0_u8)]);
+        let mut work = 0;
+        let mut stmt = tx.prepare(&format!(
+            "{METADATA_CTE} SELECT target_id,source_id FROM active_network
+             WHERE id IN (SELECT id FROM network_facts INDEXED BY network_subject
+                WHERE world_id=?1 AND subject_id=?5 AND kind='confirmed_cause')
+             AND starts_at<=?4 AND (ends_before IS NULL OR ends_before>?4)
+             ORDER BY id LIMIT 4001"
+        ))?;
+        // Read only the reachable historical neighborhood. The separate
+        // write-time conservative whole-history DAG check is unchanged.
+        while let Some((node, depth)) = pending.pop_front() {
+            self.check_query_control()?;
+            if depth == max_depth {
+                continue;
+            }
+            let mut rows = stmt.query(params![
+                view.world.0.as_bytes(),
+                view.branch.0.as_bytes(),
+                view.revision.0,
+                view.day.0,
+                node.id.0.as_bytes(),
+            ])?;
+            while let Some(row) = rows.next()? {
+                self.check_query_control()?;
+                work += 1;
+                if work > 4000 {
+                    return Err(Error::QueryBudgetExceeded);
+                }
+                let target = ref_id(view.world, row.get(0)?);
+                let source = ref_id(view.world, row.get(1)?);
+                let Some(source_version) =
+                    resolve_object(&tx, source, view.branch, view.revision, view.day)?
+                else {
+                    continue;
+                };
+                if !matches!(source_version.record.data, ObjectData::Source { .. }) {
+                    continue;
+                }
+                let Some(version) =
+                    resolve_object(&tx, target, view.branch, view.revision, view.day)?
+                else {
+                    continue;
+                };
+                let ObjectData::HistoricalEvent { occurrence } = version.record.data else {
+                    continue;
+                };
+                let Some(effect_day) = occurrence.exact_day() else {
+                    continue;
+                };
+                if node == target || days[&node] > effect_day {
+                    return Err(Error::InvalidInput("invalid confirmed causal ordering"));
+                }
+                edges.entry(node).or_default().push(target);
+                if let std::collections::hash_map::Entry::Vacant(entry) = days.entry(target) {
+                    entry.insert(effect_day);
+                    pending.push_back((target, depth + 1));
+                }
+            }
+        }
+        if !crate::graph::acyclic(&edges) {
+            return Err(Error::InvalidInput("confirmed causal cycle"));
+        }
+        let (mut reached, truncated) =
+            crate::graph::walk(start, &mut edges, max_depth, max_visited);
+        reached.remove(&start);
+        let mut events: Vec<_> = reached.into_iter().collect();
+        events.sort_unstable_by_key(|object| (days[object], object.id.0));
+        Ok(crate::conflict::Impact { events, truncated })
     }
 
     /// Resolve explicitly reviewed identity redirects without rewriting canonical references.
@@ -681,10 +775,7 @@ impl Store {
         let mut path = vec![start];
         for _ in 0..32 {
             let focus = *path.last().ok_or(Error::NotFound)?;
-            let facts = self.network_facts(view, focus)?;
-            let mut targets = facts.into_iter().filter(|fact| {
-                fact.input.kind == NetworkKind::IdentityRedirect && fact.input.subject == focus
-            });
+            let mut targets = self.network_facts_for_focus(view, focus, true)?.into_iter();
             let Some(fact) = targets.next() else {
                 return Ok(path);
             };
