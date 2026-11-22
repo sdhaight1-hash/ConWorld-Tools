@@ -106,3 +106,9 @@ Existing D-001/D-007/D-009/D-012/D-013 remain authoritative. No independent quer
 ## 2026-11-22 — Architectural Evolution governance (owner accepted)
 
 [Explicit owner approval](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/71#issuecomment-7074128490) establishes Architectural Evolution as a fourth governing ticket type. See [root policy](../README.md#6a-architectural-evolution-tickets--governed-change-to-architectural-foundations) and [evolution index](Architectural-Evolutions/Evolutions.md). Material changes to accepted shared architecture require individual approval, versioned evolution specification and explicit ADR/contract reconciliation before production implementation. Existing routine work stays with its owner; genuinely additional product capabilities require their own New Feature approval. This governance change supersedes the three-type policy only; no D-series decision, original phase exit, schema, invariant, #68/#70 scope or implementation readiness is changed. Research #71's recommendations remain in review; no ontology evolution accepted.
+
+## Accepted ontology evolution #72 — contract reconciliation
+
+[Accepted Architectural Evolution #72](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/72) ([design](Architectural-Evolutions/universal-worldbuilding-ontology-and-governed-semantic-extensibility.md), [ADR-007](ADRs/adr-007-governed-semantic-extensibility.md), [approval](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/72#issuecomment-7074159822)). AE-01–09 production gates remain unpassed; original phase/feature gates unchanged.
+
+ADR-007 refined by shared governed descriptors and evaluated typed reference adapter, D-004/005 reified identity and all existing D-series/INV retained; physical schema/wire/limits open. Separate additional product scope requires New Feature approval. This later individual approval supersedes the prior category-only status, not historical research evidence.

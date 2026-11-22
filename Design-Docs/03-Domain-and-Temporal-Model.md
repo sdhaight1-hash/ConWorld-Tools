@@ -116,3 +116,9 @@ World-scoped composite foreign keys; no orphan tags or edges; valid typed endpoi
 ## 10. Spatial identity and history
 
 [13](13-Spatial-and-Nested-Location-Model.md) is normative for Place, versioned frames/geometry, strict typed containment, location roles and their branch/interval semantics. Place is already a registry kind in this design; actual implementation remains pending. Validate strict cycles over co-effective intersections in author mutation graph; do not mix physical/admin lenses. Geometry is optional, reparenting and ownership independent, moving interior identity stable. Claims and draft maps never mutate canonical geography without explicit acceptance.
+
+## Accepted ontology evolution #72 — contract reconciliation
+
+[Accepted Architectural Evolution #72](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/72) ([design](Architectural-Evolutions/universal-worldbuilding-ontology-and-governed-semantic-extensibility.md), [ADR-007](ADRs/adr-007-governed-semantic-extensibility.md), [approval](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/72#issuecomment-7074159822)). AE-01–09 production gates remain unpassed; original phase/feature gates unchanged.
+
+Complete original Concept; separate stable core identities, descriptor metadata/pins, dated classifications, approved values, reified facts, evidence and presentation. Evaluate authorized discriminated object/fact resolver preserving existing registry/network/parentage IDs. Definitions version in recorded time; assignments/facts preserve valid time/revision/branch/source/scope. No duplicate facts or automatic classification inference. Physical schema open.

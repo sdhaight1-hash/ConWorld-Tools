@@ -117,3 +117,9 @@ Implement CanvasRoot, Stack, Grid, Panel, Heading, RichText, ObjectLink, DataFie
 ## 10. MapView and ConflictMap integration
 
 [13](13-Spatial-and-Nested-Location-Model.md) defines shared MapSpec, LayerSpec and scoped MapScene contracts. Node creates/queries Places; Canvas binds map recipes, themes and versioned assets without copying world data; Display consumes scoped immutable scene with accessible list and stable authorized links. Exact and explicitly schematic modes first; candidate geometry distinct, promoted only by explicit semantic command in author context. Nested maps may use unrelated frames; raster hotspots are links not geometry. SVG serialization is typed/escaped with no scripts, external resources or raw XML. Apply policy before map composition, not CSS hiding.
+
+## Accepted ontology evolution #72 — contract reconciliation
+
+[Accepted Architectural Evolution #72](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/72) ([design](Architectural-Evolutions/universal-worldbuilding-ontology-and-governed-semantic-extensibility.md), [ADR-007](ADRs/adr-007-governed-semantic-extensibility.md), [approval](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/72#issuecomment-7074159822)). AE-01–09 production gates remain unpassed; original phase/feature gates unchanged.
+
+Semantic profiles guide compatible existing Node controls, optionally suggest layouts, never create canon by selection. Canvas and Display use original authorized facts and supported bindings; profile is not template. No standalone schema editor approved.

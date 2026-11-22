@@ -38,6 +38,6 @@ Document status: Draft, Accepted Design, Implementing, Implemented and Verified,
 
 ## Accepted evolution index
 
-No individual evolution accepted yet. Add entries only after recorded owner acceptance, linking the actual issue, accepted spec, approval and current implementation state.
+- [Universal Worldbuilding Ontology and Governed Semantic Extensibility](universal-worldbuilding-ontology-and-governed-semantic-extensibility.md) — **Accepted Design v1.0**, [#72](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/72), [approval](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/72#issuecomment-7074159822), [ADR-007](../ADRs/adr-007-governed-semantic-extensibility.md). Research #71 reviewed; readiness and AE-01–09 pending.
 
-Research #71 is a candidate handoff, not an accepted evolution: [Universal worldbuilding ontology study](../Research-Studies/universal-worldbuilding-ontology.md), [issue #71](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/71). The owner's category decision does not approve the ontology change or close the study.
+Research #71 is reviewed evidence for #72: [Universal worldbuilding ontology study](../Research-Studies/universal-worldbuilding-ontology.md), [issue #71](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/71). Subsequent explicit individual approval recorded above. Research closure is not production completion.

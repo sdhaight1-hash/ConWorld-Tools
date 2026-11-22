@@ -1,0 +1,12 @@
+# ADR-007 — Governed semantic extensibility and shared fact references
+
+**Status:** Accepted architectural direction; physical implementation and readiness open.
+**Authority:** [#72](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/72), [owner approval](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/72#issuecomment-7074159822), [accepted evolution](../Architectural-Evolutions/universal-worldbuilding-ontology-and-governed-semantic-extensibility.md).
+
+Context: [Research #71](../Research-Studies/universal-worldbuilding-ontology.md) and source audit found incomplete original Concept, typed endpoints and independent fact addressability. [Phase 0 ADR-007](phase-0-architecture-baseline.md) establishes controlled metadata on known kinds and explicit Rust/SQL validation for new payloads.
+
+Decision: refine ADR-007, retaining D-004 typed SQLite identity registry and D-005 reified versioned stable facts. Shared world-scoped stable, pinned descriptor and compatible historical assignment contract; Concept as original independent identity, metadata distinct from instances/claims/layout. Evaluate authorized discriminated references over existing stable network/parentage fact families, preserve all IDs and original semantic validators; no duplicate reification rows. Typed value descriptors only for approved semantic data, source and scope validation through shared domain/query/projection authority. No universal EAV, independent ontology engine, arbitrary schema scripting, silent inference or new product capability. #68 Place and #70 workflow semantics and gates unchanged.
+
+Alternatives: complete existing contracts first; small curated profiles preferred, controlled extensions only within authorized scope and measured benefit. Reject per-class core types and generic runtime. Synthetic evidence supports feasibility, not native product proof. AE-01 stop/defer if simpler sufficient.
+
+Consequences: version pins, stable identity/history, explicit unknown, authorization, existing Node/Canvas/Display, query/discovery/archive integration, reviewed additive migrations. No superseding D-001–20, INV-01–16 or original phase exits; concrete wire/schema, budgets and adapter assessment open under #72. See [evolution](../Architectural-Evolutions/universal-worldbuilding-ontology-and-governed-semantic-extensibility.md) for AE-01–09. No implementation verification at acceptance.

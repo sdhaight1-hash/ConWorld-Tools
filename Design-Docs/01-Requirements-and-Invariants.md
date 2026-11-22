@@ -78,3 +78,9 @@
 Do not interpret P2 as permission to omit data-model hooks, IDs, schema-versioning or test seams now.
 
 See [13](13-Spatial-and-Nested-Location-Model.md) and SP acceptance gates in [09](09-Acceptance-and-Verification.md). Basic spatial modeling is no longer deferred with enhanced geography; phase ownership remains in [10](10-Delivery-Roadmap.md).
+
+## Accepted ontology evolution #72 — contract reconciliation
+
+[Accepted Architectural Evolution #72](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/72) ([design](Architectural-Evolutions/universal-worldbuilding-ontology-and-governed-semantic-extensibility.md), [ADR-007](ADRs/adr-007-governed-semantic-extensibility.md), [approval](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/72#issuecomment-7074159822)). AE-01–09 production gates remain unpassed; original phase/feature gates unchanged.
+
+INV-11 elaborated by shared pinned descriptors and compatible dated assignments. Existing INV-01–16, REL/ENT/QRY and specialized validators unchanged; no arbitrary payload runtime, class inference or new core kind per category.

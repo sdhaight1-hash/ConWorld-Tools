@@ -101,3 +101,9 @@ SP-01–06 are foundation/query gates; SP-08/09 start with SVG/schematic, SP-07 
 ## Definition of Done
 
 No phase passes until it (a) references requirement IDs in [01](01-Requirements-and-Invariants.md), (b) includes working user-facing behavior or a demonstrably reusable engine capability, (c) has repeatable unit/integration and relevant UI/security tests, (d) validates temporal, revision, branch and visibility semantics, (e) records migration/backup impact, (f) updates linked ADRs, and (g) provides a short evidence log. "SQL smoke-test passed" does not prove the Rust/Tauri/wgpu application exists.
+
+## Accepted ontology evolution #72 — contract reconciliation
+
+[Accepted Architectural Evolution #72](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/72) ([design](Architectural-Evolutions/universal-worldbuilding-ontology-and-governed-semantic-extensibility.md), [ADR-007](ADRs/adr-007-governed-semantic-extensibility.md), [approval](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/72#issuecomment-7074159822)). AE-01–09 production gates remain unpassed; original phase/feature gates unchanged.
+
+AE-01–09 belong to #72 alone (baseline/comparator, refs, descriptors, approved values, scoped queries, integration, migration, native scale, review). None passed at acceptance. AT/SP/WT and original phase exits independent.

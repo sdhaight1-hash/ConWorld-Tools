@@ -109,3 +109,9 @@ Phase One verifies fresh migrations, upgrade and reopen, foreign-key checks, pin
 ## Spatial schema/API extension
 
 [13](13-Spatial-and-Nested-Location-Model.md) defines logical Place/PlaceEdge/LocatedAt/Frame/GeometryVersion plus versioned MapSpec/LayerSpec and read-only MapScene. Reuse registry, branch/revision, typed facts, provenance, visibility and audit; exact table names and migration number pending re-audit of #62/#63. Add typed place creation, dated edge/placement edits, optional geometry mutation and explicit candidate promotion through atomic expected-revision commands. Extend query rather than bypass it. Preserve existing records, IDs and branch freeze; test upgrade, wrong-kind/cross-world, rollback, restore and derived rebuild parity. Archive recipes, frames, styles/symbols and assets with pins/hashes; raw SVG/mesh/index is derivative, never canonical. Public release distinct from full author backup.
+
+## Accepted ontology evolution #72 — contract reconciliation
+
+[Accepted Architectural Evolution #72](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/72) ([design](Architectural-Evolutions/universal-worldbuilding-ontology-and-governed-semantic-extensibility.md), [ADR-007](ADRs/adr-007-governed-semantic-extensibility.md), [approval](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/72#issuecomment-7074159822)). AE-01–09 production gates remain unpassed; original phase/feature gates unchanged.
+
+Retain SQLite typed authority. Evaluate additive descriptor/assignment and fact-reference contracts, preserve IDs and all old pins/history; unclassified valid, no guessed backfill, dry-run schema 36/current, atomic migration, prior backup, restore and old-version rejection. No schema allocated.

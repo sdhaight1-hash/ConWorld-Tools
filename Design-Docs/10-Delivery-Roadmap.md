@@ -96,3 +96,9 @@ Subsequent explicit owner approval: [#70](https://github.com/sdhaight1-hash/ConW
 ## Issue content template
 
 Each Roadmap Phase issue MUST contain: objectives, prerequisites, design links, architecture decisions required, engineering deliverables, acceptance tests (referencing AT- and INV-/feature IDs), risks/unknowns, non-goals and a checklist including design review, implementation, tests, actual validation evidence and docs update. Prefer subissues for large implementation tasks after the phase design is accepted. Never create duplicate source-of-truth specifications inside issue descriptions.
+
+## Accepted ontology evolution #72 — contract reconciliation
+
+[Accepted Architectural Evolution #72](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/72) ([design](Architectural-Evolutions/universal-worldbuilding-ontology-and-governed-semantic-extensibility.md), [ADR-007](ADRs/adr-007-governed-semantic-extensibility.md), [approval](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/72#issuecomment-7074159822)). AE-01–09 production gates remain unpassed; original phase/feature gates unchanged.
+
+#4/#5 original Concept/definitions/query/authoring; #6/#7 typed facts/roles; #8 history and access from first slice; #9 optional genetics unchanged; #10 archive/native evidence. #68/#70 independently gated. No new phase or reopening; #67 hold unchanged.

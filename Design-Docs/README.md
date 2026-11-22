@@ -52,6 +52,10 @@ The [root ticket policy](../README.md#ai-ticket-creation-policy) defines four go
 
 The ten original issues link to their relevant design contracts and acceptance gates. Phases 0–2 are closed; Phases 3–9 remain open. The planned phase number is independent of the GitHub issue number.
 
+## Accepted architectural evolutions
+
+[Accepted Architectural Evolution #72](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/72) ([design](Architectural-Evolutions/universal-worldbuilding-ontology-and-governed-semantic-extensibility.md), [ADR-007](ADRs/adr-007-governed-semantic-extensibility.md), [approval](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/72#issuecomment-7074159822)). AE-01–09 production gates remain unpassed; original phase/feature gates unchanged.
+
 ## Current repository state
 
 - [ADR-013 spatial/cartography reconciliation](ADRs/cross-phase-spatial-cartography.md): accepted direction from research #65/#66; [accepted New Feature #68 specification](Features/nested-locations-and-procedural-vector-cartography.md); implementation and native verification pending.
