@@ -6,6 +6,9 @@ type Fact = { id: string; input: { kind: string; role: string }; subject_label: 
 type Classification = { id: string; profile: string; descriptor_id: string; descriptor_revision: number;
   descriptor_branch: string; descriptor_state_revision: number; source_id: string; starts_at: number;
   ends_before: number | null; recorded_at: number };
+type FactReference = Ref & { family: "network" | "parentage" | "classification" };
+type SemanticFact = { reference: FactReference; subject: Ref; target: Ref | null; source: Ref | null;
+  descriptor: Ref | null; description: string; rationale: string; recorded_at: number; source_branch: string };
 type Ghost = { id: string; claim: Ref; label: string; kind: string; reviewed: boolean; promoted: Ref | null };
 
 export function openNetworkStudio(parent: HTMLElement, request: Context, editable: boolean,
@@ -28,12 +31,17 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
       <label>Concept identity <input name="subject" required></label>
       <label>Semantic profile <select name="profile"><option value="culture">Culture</option><option value="language">Language</option><option value="material">Material</option><option value="technology">Technology</option></select></label>
       <label>Tag definition identity <input name="descriptor" required></label>
-      <label>Evidence source identity <input name="source" required></label>
+      <label>Classification evidence source <input name="source" required></label>
       <label>Classification starts at day <input name="start" type="number" required></label>
       <label>Classification ends before day <input name="end" type="number"></label>
       <button>Record classification</button></fieldset></form>
     <form data-classification-focus class="editor-form"><label>Classification focus concept <input name="subject" required></label><button>Inspect classifications</button></form>
     <ul data-classifications aria-label="Historical concept classifications"></ul>
+    <form data-semantic-focus class="editor-form"><label>Evidence or identity backlinks <input name="target" required></label><button>Inspect semantic backlinks</button></form>
+    <ul data-semantic-links aria-label="Historical semantic backlinks"></ul>
+    <form data-semantic-fact class="editor-form"><label>Fact family <select name="family"><option value="network">Network</option><option value="parentage">Parentage</option><option value="classification">Classification</option></select></label>
+      <label>Stable fact identity <input name="id" required></label><button>Resolve fact</button></form>
+    <p data-semantic-detail role="status"></p>
     <form data-fact class="editor-form"><fieldset><legend>Record sourced network fact</legend>
       <label>Subject identity <input name="subject" required></label><label>Target identity <input name="target" required></label>
       <label>Evidence source identity <input name="source" required></label>
@@ -73,7 +81,7 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
     if(id)selectedBranches.set(request.world_id,id);else selectedBranches.delete(request.world_id);
     if(id)request={...request,branch_id:id};else {const {branch_id:_,...main}=request;request=main;}
     selectedLabel.textContent=id?"Alternate branch: "+id:"Main history";
-    for(const selector of ["[data-classifications]","[data-facts]","[data-impact-results]","[data-identity-path]","[data-succession-result]","[data-ghosts]","[data-candidate-results]","[data-templates]"])host.querySelector(selector)?.replaceChildren();
+    for(const selector of ["[data-classifications]","[data-semantic-links]","[data-semantic-detail]","[data-facts]","[data-impact-results]","[data-identity-path]","[data-succession-result]","[data-ghosts]","[data-candidate-results]","[data-templates]"])host.querySelector(selector)?.replaceChildren();
     host.querySelector<HTMLButtonElement>("[data-enact]")!.disabled=true;
   };
   host.querySelector<HTMLButtonElement>("[data-load-branches]")!.onclick=async()=>{
@@ -132,6 +140,43 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
         list.append(row);
       }
       status.textContent = rows.length + " recorded classifications.";
+    } catch (error) { if (valid() && ctx === request) status.textContent = String(error); }
+  });
+  function describeFact(fact: SemanticFact) {
+    return fact.description + " · " + fact.reference.family + " / " + fact.reference.id +
+      " · subject " + fact.subject.id + (fact.target ? " · target " + fact.target.id : "") +
+      (fact.source ? " · evidence " + fact.source.id : "") +
+      (fact.descriptor ? " · descriptor " + fact.descriptor.id : "") +
+      " · revision " + fact.recorded_at + " · " + fact.rationale;
+  }
+  async function resolveFact(reference: FactReference) {
+    const ctx = request;
+    try {
+      const fact = await invoke<SemanticFact | null>("workspace_semantic_fact", { request: ctx, reference });
+      if (!valid() || ctx !== request) return;
+      host.querySelector("[data-semantic-detail]")!.textContent = fact ? describeFact(fact) : "Fact is not active in this historical view.";
+    } catch (error) { if (valid() && ctx === request) status.textContent = String(error); }
+  }
+  submit("[data-semantic-fact]", f => void resolveFact({
+    ...ref(value(f,"id")), family: value(f,"family") as FactReference["family"],
+  }));
+  submit("[data-semantic-focus]", async f => {
+    const ctx = request;
+    const targetId = value(f,"target");
+    try {
+      const facts = await invoke<SemanticFact[]>("workspace_semantic_fact_backlinks", { request: ctx, targetId });
+      if (!valid() || ctx !== request || targetId !== value(f,"target")) return;
+      const list = host.querySelector("[data-semantic-links]")!;
+      list.replaceChildren();
+      for (const fact of facts) {
+        const row = document.createElement("li");
+        row.textContent = describeFact(fact) + " ";
+        const inspect = document.createElement("button");
+        inspect.type = "button"; inspect.textContent = "Resolve " + fact.reference.family + " fact";
+        inspect.onclick = () => void resolveFact(fact.reference);
+        row.append(inspect); list.append(row);
+      }
+      status.textContent = facts.length + " active semantic backlinks.";
     } catch (error) { if (valid() && ctx === request) status.textContent = String(error); }
   });
   submit("[data-fact]", f => void write("workspace_record_network_fact", { input: {

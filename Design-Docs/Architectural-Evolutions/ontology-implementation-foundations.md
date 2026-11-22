@@ -55,3 +55,7 @@ AE-02 now includes Classification alongside Network and Parentage as a discrimin
 ## Archive, indexing and Canvas replay
 
 Schema 40 adds source/descriptor backlink indexes. Archive inspection and migrations check classification endpoint kinds, pinned Tag payload and chronological author revisions, beyond FK integrity. The classification lifecycle regression now persists a typed saved query, binds it through existing Canvas author controls, checks an empty public projection, and backs up/restores the same IDs, facts and page output on a separate path. Fixed the CI-reported rustfmt differences in the preceding two slices. Verification pending at the new head; no new scope or duplicate storage.
+
+## Desktop fact navigation and capability reconciliation
+
+Registered the classification and semantic reference commands in the Tauri handler, generated app manifest and main-window capability together (fixing the earlier launch-config CI failure). The existing author network studio now supports evidence/identity backlinks and exact family/UUID resolution, preserving recorded author rationale and source. Branch changes clear results; no public reader projection. Added Playwright frontend command-contract coverage; it is mock-native, not genuine desktop runtime evidence. CI remains required.

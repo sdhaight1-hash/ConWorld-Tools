@@ -2766,6 +2766,87 @@ pub fn workspace_withdraw_classification(
         .map_err(|e| e.to_string())
 }
 
+#[derive(Serialize)]
+pub struct SemanticFactSummary {
+    reference: atlas_store::semantic::FactRef,
+    subject: ObjectRef,
+    target: Option<ObjectRef>,
+    source: Option<ObjectRef>,
+    descriptor: Option<ObjectRef>,
+    description: String,
+    rationale: String,
+    recorded_at: i64,
+    source_branch: String,
+}
+
+impl From<atlas_store::semantic::ResolvedFact> for SemanticFactSummary {
+    fn from(fact: atlas_store::semantic::ResolvedFact) -> Self {
+        use atlas_store::semantic::SemanticFactData;
+        let (subject, target, source, descriptor, description) = match fact.data {
+            SemanticFactData::Network(input) => (
+                input.subject,
+                Some(input.target),
+                Some(input.source),
+                None,
+                format!("{:?}: {}", input.kind, input.role),
+            ),
+            SemanticFactData::Parentage(input) => (
+                input.parent,
+                Some(input.child),
+                None,
+                None,
+                format!("{:?} parentage", input.kind),
+            ),
+            SemanticFactData::Classification(input) => (
+                input.subject,
+                None,
+                Some(input.source),
+                Some(input.descriptor.version.object),
+                format!("{:?} classification", input.profile),
+            ),
+        };
+        Self {
+            reference: fact.reference,
+            subject,
+            target,
+            source,
+            descriptor,
+            description,
+            rationale: fact.rationale,
+            recorded_at: fact.recorded_at.0,
+            source_branch: fact.source_branch.0.to_string(),
+        }
+    }
+}
+
+#[tauri::command]
+pub fn workspace_semantic_fact_backlinks(
+    workspace: State<'_, AuthorWorkspace>,
+    request: NetworkContext,
+    target_id: String,
+) -> Result<Vec<SemanticFactSummary>, String> {
+    let store = workspace.lock()?;
+    let view = request.resolve(&store)?;
+    store
+        .semantic_fact_backlinks(reference(view.world, &target_id)?, view)
+        .map(|facts| facts.into_iter().map(Into::into).collect())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn workspace_semantic_fact(
+    workspace: State<'_, AuthorWorkspace>,
+    request: NetworkContext,
+    reference: atlas_store::semantic::FactRef,
+) -> Result<Option<SemanticFactSummary>, String> {
+    let store = workspace.lock()?;
+    let view = request.resolve(&store)?;
+    store
+        .resolve_semantic_fact(reference, view)
+        .map(|fact| fact.map(Into::into))
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub fn workspace_network_facts(
     workspace: State<'_, AuthorWorkspace>,

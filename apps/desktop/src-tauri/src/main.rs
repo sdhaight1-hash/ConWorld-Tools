@@ -247,6 +247,8 @@ fn main() {
             workspace::workspace_record_classification,
             workspace::workspace_classifications,
             workspace::workspace_withdraw_classification,
+            workspace::workspace_semantic_fact_backlinks,
+            workspace::workspace_semantic_fact,
             workspace::workspace_persisted_impact,
             workspace::workspace_record_network_fact,
             workspace::workspace_withdraw_network_fact,
