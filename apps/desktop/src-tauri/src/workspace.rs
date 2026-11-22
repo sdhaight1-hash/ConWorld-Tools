@@ -3444,7 +3444,7 @@ mod tests {
             &test_control(),
         )?;
         assert_eq!(references.rows.len(), 1);
-        assert_eq!(references.rows[0].kind, "relationship");
+        assert_eq!(references.rows[0].kind, ObjectKindFilter::Relationship);
         assert!(
             workspace
                 .search(

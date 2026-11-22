@@ -109,4 +109,18 @@ Re-ran both [classification](../Research-Studies/ontology-prototype/check.py) an
 - Held [spatial PR #67](https://github.com/sdhaight1-hash/ConWorld-Tools/pull/67), inspected at `3103856`, adds Place to the two identity allowlists in SQL migration 0037 and changes both search paths. On integration, add Place to the exhaustive conversion, reuse the search row serializer and test the Place predicate before accepting the spatial changes. Coordinate a single ordered migration history with #68. Do not issue a parallel 0037 for Concept.
 - Network and accepted parentage facts retain their existing ID and domain validators. A common resolver still needs tests for fact family, world, branch, revision, withdrawal and reader scope before Canvas, discovery or #70 can consume it. This pass adds no new publication or transform capability.
 
-AE-01 remains open for the interactive comparison. AE-02–09 remain open.
+### Native desktop authoring observations
+
+Ran the Tauri Linux desktop on the PR #73 tree with the relationship-kind test correction. Used a fresh local world, the normal event and sourced-account forms, and the historical claim-text search. A WebKit inspector script selected form values and pressed the normal submit buttons. The application handled persistence and queries through its native commands. This measures form submissions and returned records. It does not measure human completion time.
+
+| Task | Day 10 entry | Day 11 follow-up | Outcome |
+| --- | --- | --- | --- |
+| Language | Entered a cited account using “Estuary speech” | Entered a register addendum calling it “Estuary Standard” | Both strings are searchable on their respective dates. The two accounts do not establish that the names refer to the same language. |
+| Area | Entered a site survey reporting twelve hectares | Entered a second survey reporting 120000 square metres | Each statement retained its citation. The form records neither a numeric quantity nor a unit identifier, so numeric equivalence cannot be verified through these records. |
+| Working medium | Entered a workshop account for Drive One mentioning amber | Entered another for Drive Two using the same material | An amber search on day 11 returned two distinct claim IDs and two distinct citations. Returning to day 10 yielded only the first record. Neither claim binds to a reusable material ID. |
+
+One world creation and one event submission established the shared context. Each initial or follow-up account took one submission, with a statement, citation and author-only audience. The script checked the three original results with citations, all three empty searches on day 9, later additions, and historical reads after the later writes. Its final view showed revision 7. The direct identity creation menu offered 13 kinds, including Asset and Population. It offered no Concept or Place option. The screenshot records the actual two-result view. [Native desktop capture](../../Development-Screenshots/2026-11-22_05-34-14Z_phase-03_query_native-ontology-author-tasks_01.png)
+
+**Decision for the next implementation slice.** Keep the sourced-account workflow available when prose is sufficient. For the first structured comparison, use a renameable Concept and a separately recorded source-backed reference. Re-run the language rename and second-drive case against that baseline before adding curated descriptors. Keep Place measurement dependent on the #67/#68 migration decision. Repeated testimony provided no evidence that an author-defined schema editor is necessary.
+
+AE-01 has native evidence for the existing desktop. The comparative authoring costs of original-design Concepts (A), curated descriptors (B) and world-specific descriptors (C) remain unmeasured on equivalent native controls. AE-02–09 remain open.
