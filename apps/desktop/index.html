@@ -162,6 +162,9 @@
                   </select>
                 </label>
       <label>Concept profile <select name="profile"><option value="">Any profile</option><option value="culture">Culture</option><option value="language">Language</option><option value="material">Material</option><option value="technology">Technology</option></select></label>
+                <label>Site area filter <select name="area_test"><option value="">Any area</option><option value="unknown">Explicitly unknown</option><option value="at_least">At least (same unit)</option></select></label>
+                <label>Minimum area <input name="area_amount" type="number" min="0" step="1" /></label>
+                <label>Area unit <select name="area_unit"><option value="hectare">Hectare</option><option value="square_metre">Square metre</option></select></label>
                 <label>Classification descriptor ID <input name="descriptor" placeholder="Optional Tag definition UUID" /></label>
                 <label>Has cited source ID <input name="source" placeholder="Optional source UUID" /></label>
                 <label>Combine selected filters

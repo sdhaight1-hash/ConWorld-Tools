@@ -57,6 +57,8 @@
     "allow-workspace-withdraw-classification",
     "allow-workspace-semantic-fact-backlinks",
     "allow-workspace-semantic-fact",
+    "allow-workspace-record-site-area",
+    "allow-workspace-site-area",
     "allow-workspace-record-network-fact",
     "allow-workspace-withdraw-network-fact",
     "allow-workspace-propose-ghost",

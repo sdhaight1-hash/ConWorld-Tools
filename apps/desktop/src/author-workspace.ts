@@ -35,6 +35,7 @@ type Predicate = { op: "contains" | "exact" | "exact_alias" | "full_text" | "cla
   { op: "object_kind"; kind: string } |
   { op: "classified_as"; profile: string } |
   { op: "classified_by"; descriptor_id: string } |
+  { op: "site_area"; test: { test: "unknown" } | { test: "at_least"; amount: number; unit: "hectare" | "square_metre" } } |
   { op: "has_source"; source_id: string } |
   { op: "and" | "or"; filters: Predicate[] } |
   { op: "not"; filter: Predicate };
@@ -1234,6 +1235,14 @@ export async function showAuthorWorkspace(
     const kind = value(compositeForm, "kind");
     const profile = value(compositeForm, "profile");
     const descriptor = value(compositeForm, "descriptor").trim();
+    const areaTest = value(compositeForm, "area_test");
+    if (areaTest === "unknown") filters.push({ op: "site_area", test: { test: "unknown" } });
+    if (areaTest === "at_least") {
+      const raw = value(compositeForm, "area_amount");
+      const amount = raw ? Number(raw) : -1;
+      filters.push({ op: "site_area", test: { test: "at_least", amount: Number.isSafeInteger(amount) ? amount : -1,
+        unit: value(compositeForm, "area_unit") as "hectare" | "square_metre" } });
+    }
     const source = value(compositeForm, "source").trim();
     if (text) filters.push({ op: "contains", text });
     if (alias) filters.push({ op: "exact_alias", text: alias });

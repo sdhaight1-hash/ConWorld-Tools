@@ -53,6 +53,8 @@ fn main() {
             "workspace_withdraw_classification",
             "workspace_semantic_fact_backlinks",
             "workspace_semantic_fact",
+            "workspace_record_site_area",
+            "workspace_site_area",
             "workspace_record_network_fact",
             "workspace_withdraw_network_fact",
             "workspace_propose_ghost",

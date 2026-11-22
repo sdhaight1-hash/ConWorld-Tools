@@ -2854,6 +2854,93 @@ pub fn workspace_semantic_fact(
         .map_err(|e| e.to_string())
 }
 
+#[derive(Deserialize)]
+pub struct SiteAreaRequest {
+    place_id: String,
+    descriptor_id: String,
+    source_id: String,
+    reading: atlas_store::semantic::AreaReading,
+    starts_at: i64,
+    ends_before: Option<i64>,
+    corrects: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct SiteAreaSummary {
+    id: String,
+    descriptor_id: String,
+    descriptor_revision: i64,
+    source_id: String,
+    reading: atlas_store::semantic::AreaReading,
+    starts_at: i64,
+    ends_before: Option<i64>,
+    recorded_at: i64,
+    corrects: Option<String>,
+}
+
+#[tauri::command]
+pub fn workspace_record_site_area(
+    workspace: State<'_, AuthorWorkspace>,
+    request: NetworkContext,
+    input: SiteAreaRequest,
+) -> Result<String, String> {
+    use atlas_store::semantic::{DefinitionPin, SiteAreaInput};
+    let mut store = workspace.lock()?;
+    let view = request.resolve(&store)?;
+    let descriptor = store
+        .get_object(
+            reference(view.world, &input.descriptor_id)?,
+            ViewContext {
+                day: WorldDay(input.starts_at),
+                ..view
+            },
+        )
+        .map_err(|e| e.to_string())?
+        .ok_or("Definition is unavailable at the requested start day")?;
+    store
+        .record_site_area(
+            view,
+            SiteAreaInput {
+                place: reference(view.world, &input.place_id)?,
+                descriptor: DefinitionPin {
+                    version: descriptor.reference(),
+                },
+                source: reference(view.world, &input.source_id)?,
+                reading: input.reading,
+                starts_at: WorldDay(input.starts_at),
+                ends_before: input.ends_before.map(WorldDay),
+            },
+            input.corrects.as_deref().map(id).transpose()?,
+            Uuid::new_v4(),
+        )
+        .map(|id| id.to_string())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn workspace_site_area(
+    workspace: State<'_, AuthorWorkspace>,
+    request: NetworkContext,
+    place_id: String,
+) -> Result<Option<SiteAreaSummary>, String> {
+    let store = workspace.lock()?;
+    let view = request.resolve(&store)?;
+    Ok(store
+        .site_area(view, reference(view.world, &place_id)?)
+        .map_err(|e| e.to_string())?
+        .map(|fact| SiteAreaSummary {
+            id: fact.id.to_string(),
+            descriptor_id: fact.input.descriptor.version.object.id.0.to_string(),
+            descriptor_revision: fact.input.descriptor.version.recorded_at.0,
+            source_id: fact.input.source.id.0.to_string(),
+            reading: fact.input.reading,
+            starts_at: fact.input.starts_at.0,
+            ends_before: fact.input.ends_before.map(|day| day.0),
+            recorded_at: fact.recorded_at.0,
+            corrects: fact.corrects.map(|id| id.to_string()),
+        }))
+}
+
 #[tauri::command]
 pub fn workspace_network_facts(
     workspace: State<'_, AuthorWorkspace>,

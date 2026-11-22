@@ -6,9 +6,12 @@ type Fact = { id: string; input: { kind: string; role: string }; subject_label: 
 type Classification = { id: string; profile: string; descriptor_id: string; descriptor_revision: number;
   descriptor_branch: string; descriptor_state_revision: number; source_id: string; starts_at: number;
   ends_before: number | null; recorded_at: number };
-type FactReference = Ref & { family: "network" | "parentage" | "classification" };
+type FactReference = Ref & { family: "network" | "parentage" | "classification" | "site_area" };
 type SemanticFact = { reference: FactReference; subject: Ref; target: Ref | null; source: Ref | null;
   descriptor: Ref | null; description: string; rationale: string; recorded_at: number; source_branch: string };
+type AreaReading = { status: "unknown" } | { status: "known"; amount: number; unit: "hectare" | "square_metre" };
+type SiteArea = { id: string; descriptor_id: string; descriptor_revision: number; source_id: string;
+  reading: AreaReading; starts_at: number; ends_before: number | null; recorded_at: number; corrects: string | null };
 type Ghost = { id: string; claim: Ref; label: string; kind: string; reviewed: boolean; promoted: Ref | null };
 
 export function openNetworkStudio(parent: HTMLElement, request: Context, editable: boolean,
@@ -39,9 +42,22 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
     <ul data-classifications aria-label="Historical concept classifications"></ul>
     <form data-semantic-focus class="editor-form"><label>Evidence or identity backlinks <input name="target" required></label><button>Inspect semantic backlinks</button></form>
     <ul data-semantic-links aria-label="Historical semantic backlinks"></ul>
-    <form data-semantic-fact class="editor-form"><label>Fact family <select name="family"><option value="network">Network</option><option value="parentage">Parentage</option><option value="classification">Classification</option></select></label>
+    <form data-semantic-fact class="editor-form"><label>Fact family <select name="family"><option value="network">Network</option><option value="parentage">Parentage</option><option value="classification">Classification</option><option value="site_area">Site area</option></select></label>
       <label>Stable fact identity <input name="id" required></label><button>Resolve fact</button></form>
     <p data-semantic-detail role="status"></p>
+    <form data-site-area class="editor-form"><fieldset><legend>Record sourced site area</legend>
+      <p class="hint">An area reading does not change containment or map geometry. Missing, unknown and known zero differ; units are never converted automatically.</p>
+      <label>Measured Place identity <input name="place" required></label>
+      <label>Area Tag definition identity <input name="descriptor" required></label>
+      <label>Area evidence source <input name="source" required></label>
+      <label>Reading status <select name="status"><option value="known">Known</option><option value="unknown">Explicit unknown</option></select></label>
+      <label>Area amount <input name="amount" type="number" min="0" step="1" required></label>
+      <label>Area unit <select name="unit"><option value="hectare">Hectare</option><option value="square_metre">Square metre</option></select></label>
+      <label>Area starts at day <input name="start" type="number" required></label>
+      <label>Area ends before day <input name="end" type="number"></label>
+      <label>Correct prior area fact (optional) <input name="corrects" placeholder="Stable fact UUID; same interval"></label>
+      <button>Record site area</button></fieldset></form>
+    <form data-area-focus class="editor-form"><label>Site area focus Place <input name="place" required></label><button>Inspect site area</button></form><output data-area-result></output>
     <form data-fact class="editor-form"><fieldset><legend>Record sourced network fact</legend>
       <label>Subject identity <input name="subject" required></label><label>Target identity <input name="target" required></label>
       <label>Evidence source identity <input name="source" required></label>
@@ -73,6 +89,15 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
   const ref = (id: string) => ({ world: request.world_id, id });
   (form("[data-fact]").elements.namedItem("start") as HTMLInputElement).value = String(request.day);
   (form("[data-classification]").elements.namedItem("start") as HTMLInputElement).value = String(request.day);
+  const areaForm = form("[data-site-area]");
+  (areaForm.elements.namedItem("start") as HTMLInputElement).value = String(request.day);
+  const areaStatus = areaForm.elements.namedItem("status") as HTMLSelectElement;
+  const areaAmount = areaForm.elements.namedItem("amount") as HTMLInputElement;
+  const areaUnit = areaForm.elements.namedItem("unit") as HTMLSelectElement;
+  areaStatus.onchange = () => {
+    areaAmount.disabled = areaUnit.disabled = areaStatus.value === "unknown";
+    areaAmount.required = areaStatus.value === "known";
+  };
   host.querySelectorAll("fieldset").forEach(field => field.disabled = !editable);
   const selectedLabel=host.querySelector<HTMLElement>("[data-selected-branch]")!;
   selectedLabel.textContent = request.branch_id ? "Alternate branch: "+request.branch_id : "Main history";
@@ -81,7 +106,7 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
     if(id)selectedBranches.set(request.world_id,id);else selectedBranches.delete(request.world_id);
     if(id)request={...request,branch_id:id};else {const {branch_id:_,...main}=request;request=main;}
     selectedLabel.textContent=id?"Alternate branch: "+id:"Main history";
-    for(const selector of ["[data-classifications]","[data-semantic-links]","[data-semantic-detail]","[data-facts]","[data-impact-results]","[data-identity-path]","[data-succession-result]","[data-ghosts]","[data-candidate-results]","[data-templates]"])host.querySelector(selector)?.replaceChildren();
+    for(const selector of ["[data-area-result]","[data-classifications]","[data-semantic-links]","[data-semantic-detail]","[data-facts]","[data-impact-results]","[data-identity-path]","[data-succession-result]","[data-ghosts]","[data-candidate-results]","[data-templates]"])host.querySelector(selector)?.replaceChildren();
     host.querySelector<HTMLButtonElement>("[data-enact]")!.disabled=true;
   };
   host.querySelector<HTMLButtonElement>("[data-load-branches]")!.onclick=async()=>{
@@ -177,6 +202,43 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
         row.append(inspect); list.append(row);
       }
       status.textContent = facts.length + " active semantic backlinks.";
+    } catch (error) { if (valid() && ctx === request) status.textContent = String(error); }
+  });
+  submit("[data-site-area]", f => {
+    const amount = Number(value(f,"amount"));
+    if (value(f,"status") === "known" && (!value(f,"amount") || !Number.isSafeInteger(amount) || amount < 0)) {
+      status.textContent = "Enter a nonnegative whole area amount.";
+      return;
+    }
+    const reading: AreaReading = value(f,"status") === "unknown" ? { status: "unknown" } :
+      { status: "known", amount, unit: value(f,"unit") as "hectare" | "square_metre" };
+    void write("workspace_record_site_area", { input: {
+      place_id: value(f,"place"), descriptor_id: value(f,"descriptor"), source_id: value(f,"source"),
+      reading, starts_at: Number(value(f,"start")), ends_before: value(f,"end") ? Number(value(f,"end")) : null,
+      corrects: value(f,"corrects").trim() || null,
+    } });
+  });
+  submit("[data-area-focus]", async f => {
+    const ctx = request, placeId = value(f,"place");
+    try {
+      const area = await invoke<SiteArea | null>("workspace_site_area", { request: ctx, placeId });
+      if (!valid() || ctx !== request || placeId !== value(f,"place")) return;
+      const out = host.querySelector("[data-area-result]")!;
+      out.replaceChildren();
+      if (!area) { out.textContent = "No recorded area at this date and revision."; return; }
+      const reading = area.reading.status === "unknown" ? "Explicitly unknown" :
+        area.reading.amount + " " + area.reading.unit.replaceAll("_", " ");
+      out.textContent = reading + " · fact " + area.id + " · evidence " + area.source_id +
+        " · definition revision " + area.descriptor_revision + " · recorded revision " + area.recorded_at + " ";
+      out.append(action("Prepare area correction", () => {
+        const set = (name: string, value: string) => (areaForm.elements.namedItem(name) as HTMLInputElement).value = value;
+        set("place", placeId); set("source", area.source_id); set("descriptor", area.descriptor_id);
+        set("start", String(area.starts_at)); set("end", area.ends_before === null ? "" : String(area.ends_before));
+        set("corrects", area.id); areaStatus.value = area.reading.status;
+        areaAmount.value = area.reading.status === "known" ? String(area.reading.amount) : "";
+        if (area.reading.status === "known") areaUnit.value = area.reading.unit;
+        areaStatus.dispatchEvent(new Event("change"));
+      }));
     } catch (error) { if (valid() && ctx === request) status.textContent = String(error); }
   });
   submit("[data-fact]", f => void write("workspace_record_network_fact", { input: {
