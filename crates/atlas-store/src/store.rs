@@ -2540,8 +2540,7 @@ impl Store {
         self.conn.execute("VACUUM INTO ?1", [filename])?;
         crate::archive::inspect_archive(&temp, scope)?;
         OpenOptions::new().write(true).open(&temp)?.sync_all()?;
-        temp.persist_noclobber(&path)
-            .map_err(|error| error.error)?;
+        temp.persist_noclobber(&path).map_err(|error| error.error)?;
         Ok(())
     }
 }

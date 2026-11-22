@@ -535,13 +535,11 @@ impl Store {
             let subject = ref_id(view.world, row.get(1)?);
             let target = ref_id(view.world, row.get(2)?);
             let source = ref_id(view.world, row.get(3)?);
-            let Some(a) =
-                resolve_object(&tx, subject, view.branch, view.revision, view.day)?
+            let Some(a) = resolve_object(&tx, subject, view.branch, view.revision, view.day)?
             else {
                 continue;
             };
-            let Some(b) = resolve_object(&tx, target, view.branch, view.revision, view.day)?
-            else {
+            let Some(b) = resolve_object(&tx, target, view.branch, view.revision, view.day)? else {
                 continue;
             };
             if resolve_object(&tx, source, view.branch, view.revision, view.day)?.is_none() {

@@ -5082,12 +5082,20 @@ fn focused_network_reads_preserve_dates_sources_and_branch_withdrawals() -> Resu
             ..author
         },
     ] {
-        assert!(store.persisted_impact(context, root, 2, 10)?.events.is_empty());
+        assert!(
+            store
+                .persisted_impact(context, root, 2, 10)?
+                .events
+                .is_empty()
+        );
         assert_eq!(store.canonical_identity(context, redirect)?, vec![redirect]);
         assert!(store.network_facts(context, redirect)?.is_empty());
     }
     let expected = vec![id(&world, 7), id(&world, 8)];
-    assert_eq!(store.persisted_impact(author, root, 2, 10)?.events, expected);
+    assert_eq!(
+        store.persisted_impact(author, root, 2, 10)?.events,
+        expected
+    );
     assert_eq!(
         store.persisted_impact(author, root, 1, 10)?.events,
         vec![id(&world, 7)]
@@ -5137,7 +5145,10 @@ fn focused_network_reads_preserve_dates_sources_and_branch_withdrawals() -> Resu
         child.revision.0 += 1;
     }
     author.revision = child.revision;
-    assert_eq!(store.persisted_impact(author, root, 2, 10)?.events, expected);
+    assert_eq!(
+        store.persisted_impact(author, root, 2, 10)?.events,
+        expected
+    );
     assert_eq!(
         store.persisted_impact(child, root, 2, 10)?.events,
         vec![id(&world, 7)]
