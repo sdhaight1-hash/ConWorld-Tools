@@ -4164,6 +4164,59 @@ fn site_area_preserves_unknown_zero_units_corrections_and_archive() -> Result<()
     assert!(restore_archive(&missing_index, &rejected, Scope::Author).is_err());
     assert!(!rejected.exists());
 
+    // The original name, table and column order are insufficient: a
+    // partial index can make the forced seek impossible. Reject other
+    // incompatible key properties as well, before publishing an archive.
+    for (name, definition) in [
+        ("partial", "world_id,label,object_id) WHERE world_id=2"),
+        ("collation", "world_id,label COLLATE NOCASE,object_id)"),
+        ("descending", "world_id,label DESC,object_id)"),
+    ] {
+        let malformed = dir.path().join(format!("index-{name}.sqlite"));
+        std::fs::copy(&backup, &malformed)?;
+        let connection = rusqlite::Connection::open(&malformed)?;
+        connection.execute_batch(&format!(
+            "DROP INDEX semantic_label_seek;
+             CREATE INDEX semantic_label_seek ON object_versions({definition};"
+        ))?;
+        drop(connection);
+        assert!(matches!(
+            inspect_archive(&malformed, Scope::Author),
+            Err(Error::Integrity(_))
+        ));
+        assert!(matches!(
+            Store::open(&malformed),
+            Err(Error::Integrity(_))
+        ));
+        assert!(restore_archive(&malformed, &rejected, Scope::Author).is_err());
+        assert!(!rejected.exists());
+        if name == "partial" {
+            // A pre-existing malformed index must not evade the migration
+            // through CREATE INDEX IF NOT EXISTS.
+            let connection = rusqlite::Connection::open(&malformed)?;
+            connection.execute_batch(
+                "DROP INDEX classification_subject_profile;
+                 PRAGMA user_version=43;",
+            )?;
+            drop(connection);
+            assert!(matches!(
+                Store::open(&malformed),
+                Err(Error::Integrity(_))
+            ));
+            let connection = rusqlite::Connection::open(&malformed)?;
+            let schema: i64 =
+                connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+            assert_eq!(schema, 43);
+            let exists: bool = connection.query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_schema
+                 WHERE name='classification_subject_profile')",
+                [],
+                |row| row.get(0),
+            )?;
+            assert!(!exists);
+        }
+    }
+
     // A valid FK graph cannot prove a correction actually withdrew its old
     // assertion at the same revision. Reject this damaged history.
     let broken = dir.path().join("broken-correction.sqlite");
@@ -4704,6 +4757,35 @@ fn classification_descriptor_pages_deduplicate_and_pin_cursor_context() -> Resul
         QueryFilter::ClassifiedAs(ConceptProfile::Culture),
     ]));
     assert_eq!(store.execute_query(&absent, author)?.rows[0].object, first);
+    let missing = QueryFilter::ClassifiedBy(id(&world, 9999));
+    let language = QueryFilter::ClassifiedAs(ConceptProfile::Language);
+    for terms in [
+        vec![language.clone(), missing.clone()],
+        vec![missing.clone(), language.clone()],
+        vec![
+            language.clone(),
+            QueryFilter::Not(Box::new(QueryFilter::Not(Box::new(missing.clone())))),
+        ],
+    ] {
+        let empty = query(QueryFilter::And(terms));
+        for context in [old, author] {
+            let result = store.execute_query(&empty, context)?;
+            assert!(result.rows.is_empty());
+            assert!(!result.truncated);
+            let page = store.execute_query_page(&empty, context, None)?;
+            assert!(page.rows.is_empty());
+            assert!(page.next_cursor.is_none());
+        }
+    }
+    // Negating a missing descriptor is true, not a new anchor.
+    let with_negation = query(QueryFilter::And(vec![
+        language.clone(),
+        QueryFilter::Not(Box::new(missing.clone())),
+    ]));
+    assert_eq!(
+        store.execute_query(&with_negation, author)?.rows,
+        store.execute_query(&query(language.clone()), author)?.rows
+    );
     let invalid_alternative = query(QueryFilter::Or(vec![
         QueryFilter::ClassifiedAs(ConceptProfile::Language),
         QueryFilter::And(vec![

@@ -3036,21 +3036,33 @@ pub(crate) fn verify_semantic_schema_lineage(conn: &Connection, version: i64) ->
             ),
         ] {
             let exists: bool = conn.query_row(
-                "SELECT EXISTS(SELECT 1 FROM sqlite_schema
-                 WHERE type='index' AND name=?1 AND tbl_name=?2)",
-                params![name, table],
+                "SELECT EXISTS(SELECT 1 FROM pragma_index_list(?1)
+                 WHERE name=?2 AND origin='c' AND partial=0 AND [unique]=0)",
+                params![table, name],
                 |row| row.get(0),
             )?;
-            let mut statement =
-                conn.prepare("SELECT name FROM pragma_index_info(?1) ORDER BY seqno")?;
+            let mut statement = conn.prepare(
+                "SELECT name,coll,[desc] FROM pragma_index_xinfo(?1)
+                 WHERE [key]=1 ORDER BY seqno",
+            )?;
             let actual = statement
-                .query_map([name], |row| row.get::<_, Option<String>>(0))?
+                .query_map([name], |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, bool>(2)?,
+                    ))
+                })?
                 .collect::<Result<Vec<_>, _>>()?;
             if !exists
-                || !actual
-                    .iter()
-                    .map(|column| column.as_deref())
-                    .eq(columns.iter().copied().map(Some))
+                || actual.len() != columns.len()
+                || !actual.iter().zip(columns).all(
+                    |((column, collation, descending), expected)| {
+                        column.as_deref() == Some(*expected)
+                            && collation.as_deref() == Some("BINARY")
+                            && !descending
+                    },
+                )
             {
                 return Err(Error::Integrity(format!(
                     "missing or incompatible semantic index: {name}"

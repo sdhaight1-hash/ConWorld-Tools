@@ -368,8 +368,6 @@ impl Store {
         metadata_world(&tx, view, false)?;
         let mut nodes = 0;
         validate_predicate(filter, view.world, 0, &mut nodes)?;
-        let anchors = classification_seek_anchors(filter)
-            .ok_or(Error::InvalidInput("classification page filter"))?;
         // Validate every descriptor, including negated or non-selected
         // alternatives, before a result can be returned.
         let mut pending = vec![filter];
@@ -388,6 +386,13 @@ impl Store {
                 _ => {}
             }
         }
+        // Fold absent descriptor leaves only after all descriptor validation.
+        // False conjunctions and dead alternatives need no candidate scan.
+        let anchors = classification_seek_anchors(filter, &invisible)
+            .ok_or(Error::InvalidInput("classification page filter"))?;
+        if anchors.is_empty() {
+            return Ok((Vec::new(), false));
+        }
         let label = after.map_or("", |(label, _)| label);
         let id = after.map_or([0; 16], |(_, object)| *object.id.0.as_bytes());
         let mut parameters = vec![
@@ -405,9 +410,6 @@ impl Store {
                     ("profile", Value::Text(profile.key().into()))
                 }
                 QueryFilter::ClassifiedBy(descriptor) => {
-                    if invisible.contains(descriptor) {
-                        continue;
-                    }
                     (
                         "descriptor_id",
                         Value::Blob(descriptor.id.0.as_bytes().to_vec()),

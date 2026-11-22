@@ -291,6 +291,52 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ids.len(),
         started.elapsed().as_millis()
     );
+    // A dense false arm must not consume the 2,000-candidate budget. The
+    // remaining sparse OR arm must produce the same identities in both orders.
+    let missing = QueryFilter::ClassifiedBy(ObjectRef::new(world.id));
+    let dense = QueryFilter::ClassifiedAs(ConceptProfile::Language);
+    let sparse = QueryFilter::ClassifiedAs(ConceptProfile::Culture);
+    let expected = store.execute_query(
+        &QuerySpec {
+            filter: sparse.clone(),
+            ..spec.clone()
+        },
+        view,
+    )?;
+    for children in [
+        vec![dense.clone(), missing.clone()],
+        vec![missing.clone(), dense.clone()],
+    ] {
+        let filter = QueryFilter::And(children);
+        let empty = QuerySpec {
+            filter: filter.clone(),
+            ..spec.clone()
+        };
+        let control = QueryControl::new(Duration::from_secs(30))?;
+        let result = store.execute_query_controlled(&empty, view, &control)?;
+        assert!(result.rows.is_empty());
+        assert!(!result.truncated);
+        let page = store.execute_query_page_controlled(&empty, view, None, &control)?;
+        assert!(page.rows.is_empty());
+        assert!(page.next_cursor.is_none());
+        for arms in [
+            vec![filter.clone(), sparse.clone()],
+            vec![sparse.clone(), filter.clone()],
+        ] {
+            let union = QuerySpec {
+                filter: QueryFilter::Or(arms),
+                ..spec.clone()
+            };
+            let control = QueryControl::new(Duration::from_secs(30))?;
+            let actual = store.execute_query_controlled(&union, view, &control)?;
+            let page = store.execute_query_page_controlled(&union, view, None, &control)?;
+            assert_eq!(actual.rows, expected.rows);
+            assert_eq!(actual.truncated, expected.truncated);
+            assert_eq!(page.rows, expected.rows);
+            assert!(page.next_cursor.is_none());
+        }
+    }
+    println!("absent_descriptor_operand_permutations=verified");
     let control = QueryControl::new(Duration::from_secs(30))?;
     control.cancel();
     assert!(matches!(

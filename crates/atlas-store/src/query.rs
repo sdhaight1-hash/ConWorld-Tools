@@ -581,7 +581,7 @@ fn validate_query_request(spec: &QuerySpec, view: ViewContext) -> Result<(), Err
 impl Store {
     pub fn execute_query(&self, spec: &QuerySpec, view: ViewContext) -> Result<QueryResult, Error> {
         validate_query_request(spec, view)?;
-        if classification_seek_anchors(&spec.filter).is_some() {
+        if classification_seek_anchors(&spec.filter, &HashSet::new()).is_some() {
             let (rows, truncated) =
                 self.classification_page(view, &spec.filter, None, spec.limit)?;
             return Ok(QueryResult {
@@ -635,7 +635,7 @@ impl Store {
         {
             return Err(Error::InvalidInput("query cursor context"));
         }
-        if classification_seek_anchors(&spec.filter).is_some() {
+        if classification_seek_anchors(&spec.filter, &HashSet::new()).is_some() {
             let boundary = after.map(|cursor| (cursor.label.as_str(), cursor.last));
             let (rows, has_more) =
                 self.classification_page(view, &spec.filter, boundary, spec.limit)?;
@@ -1048,63 +1048,92 @@ impl<'a> PredicatePlan<'a> {
     }
 }
 
-/// Select a conservative positive classification candidate union. Every
-/// matching object must satisfy at least one chosen leaf. AND can use any
-/// bounded arm; OR needs a bounded arm in every alternative. NOT never
-/// supplies a universe. Unsupported leaves retain the existing planner.
-pub(crate) fn classification_seek_anchors(filter: &QueryFilter) -> Option<Vec<&QueryFilter>> {
+/// Select a conservative positive classification candidate union. An empty
+/// union proves no matches. None means unsupported or an unbounded universe.
+/// Only pass invisible descriptors after validating all leaves in the view.
+pub(crate) fn classification_seek_anchors<'a>(
+    filter: &'a QueryFilter,
+    invisible: &HashSet<ObjectRef>,
+) -> Option<Vec<&'a QueryFilter>> {
+    enum Bound<'a> {
+        Constant(bool),
+        Unbounded,
+        Anchored(Vec<&'a QueryFilter>),
+    }
     fn walk<'a>(
         filter: &'a QueryFilter,
+        invisible: &HashSet<ObjectRef>,
         depth: usize,
         nodes: &mut usize,
-    ) -> Option<Vec<&'a QueryFilter>> {
+    ) -> Option<Bound<'a>> {
+        use Bound::*;
+
         *nodes += 1;
         if depth > MAX_PREDICATE_DEPTH || *nodes > MAX_PREDICATE_NODES {
             return None;
         }
         match filter {
-            QueryFilter::ClassifiedAs(_) | QueryFilter::ClassifiedBy(_) => Some(vec![filter]),
+            QueryFilter::ClassifiedBy(descriptor) if invisible.contains(descriptor) => {
+                Some(Constant(false))
+            }
+            QueryFilter::ClassifiedAs(_) | QueryFilter::ClassifiedBy(_) => {
+                Some(Anchored(vec![filter]))
+            }
             QueryFilter::Kind(_) | QueryFilter::LabelContains(_) | QueryFilter::ExactLabel(_) => {
-                Some(Vec::new())
+                Some(Unbounded)
             }
             QueryFilter::Not(inner) => {
-                walk(inner, depth + 1, nodes)?;
-                Some(Vec::new())
+                Some(match walk(inner, invisible, depth + 1, nodes)? {
+                    Constant(value) => Constant(!value),
+                    _ => Unbounded,
+                })
             }
             QueryFilter::And(children) | QueryFilter::Or(children) => {
                 if !(2..=MAX_BOOLEAN_CHILDREN).contains(&children.len()) {
                     return None;
                 }
                 let conjunction = matches!(filter, QueryFilter::And(_));
-                let mut anchors = Vec::new();
-                let mut unbounded = false;
+                let mut bound = Constant(conjunction);
+                // Visit every child, even when a previous one is constant.
                 for child in children {
-                    let candidate = walk(child, depth + 1, nodes)?;
-                    if candidate.is_empty() {
-                        unbounded = true;
-                    } else if conjunction {
-                        if anchors.is_empty() || candidate.len() < anchors.len() {
-                            anchors = candidate;
+                    let next = walk(child, invisible, depth + 1, nodes)?;
+                    bound = if conjunction {
+                        match (bound, next) {
+                            (Constant(false), _) | (_, Constant(false)) => Constant(false),
+                            (Constant(true), other) | (other, Constant(true)) => other,
+                            (Anchored(a), Anchored(b)) => {
+                                Anchored(if b.len() < a.len() { b } else { a })
+                            }
+                            (Anchored(a), Unbounded) | (Unbounded, Anchored(a)) => Anchored(a),
+                            (Unbounded, Unbounded) => Unbounded,
                         }
                     } else {
-                        for leaf in candidate {
-                            if !anchors.contains(&leaf) {
-                                anchors.push(leaf);
+                        match (bound, next) {
+                            (Constant(true), _) | (_, Constant(true)) => Constant(true),
+                            (Constant(false), other) | (other, Constant(false)) => other,
+                            (Unbounded, _) | (_, Unbounded) => Unbounded,
+                            (Anchored(mut a), Anchored(b)) => {
+                                for leaf in b {
+                                    if !a.contains(&leaf) {
+                                        a.push(leaf);
+                                    }
+                                }
+                                Anchored(a)
                             }
                         }
-                    }
+                    };
                 }
-                if !conjunction && unbounded {
-                    anchors.clear();
-                }
-                Some(anchors)
+                Some(bound)
             }
             _ => None,
         }
     }
     let mut nodes = 0;
-    let anchors = walk(filter, 0, &mut nodes)?;
-    (!anchors.is_empty()).then_some(anchors)
+    match walk(filter, invisible, 0, &mut nodes)? {
+        Bound::Constant(false) => Some(Vec::new()),
+        Bound::Anchored(leaves) => Some(leaves),
+        Bound::Constant(true) | Bound::Unbounded => None,
+    }
 }
 
 /// Reuse the same local predicate evaluator and exact classification identities
