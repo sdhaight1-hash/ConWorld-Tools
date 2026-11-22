@@ -62,6 +62,11 @@ pub enum QueryFilter {
 #[serde(rename_all = "snake_case")]
 pub enum ObjectKindFilter {
     Person,
+    Organization,
+    Household,
+    FamilyHouse,
+    Faction,
+    Conflict,
     Definition,
     Relationship,
     EventInvolvement,
@@ -832,6 +837,11 @@ fn predicate_matches(filter: &QueryFilter, version: &Version, plan: &PredicatePl
         QueryFilter::Kind(kind) => matches!(
             (&version.record.data, kind),
             (ObjectData::Person, ObjectKindFilter::Person)
+                | (ObjectData::Organization, ObjectKindFilter::Organization)
+                | (ObjectData::Household, ObjectKindFilter::Household)
+                | (ObjectData::FamilyHouse, ObjectKindFilter::FamilyHouse)
+                | (ObjectData::Faction, ObjectKindFilter::Faction)
+                | (ObjectData::Conflict, ObjectKindFilter::Conflict)
                 | (ObjectData::Definition { .. }, ObjectKindFilter::Definition)
                 | (
                     ObjectData::Relationship { .. },

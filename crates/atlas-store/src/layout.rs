@@ -48,6 +48,9 @@ pub enum ElementContent {
     Query(QuerySpec),
     SavedQuery(SavedQueryBinding),
     FamilyTable(ObjectRef),
+    NetworkTable(ObjectRef),
+    ImpactTable(ObjectRef),
+    PublishedReferences(ObjectRef),
     ObjectLink(ObjectLink),
 }
 
@@ -134,6 +137,10 @@ pub enum DisplayContent {
     },
     Text(String),
     ObjectLink(ObjectLink),
+    ReferenceRows {
+        links: Vec<ObjectLink>,
+        truncated: bool,
+    },
     QueryRows {
         records: Vec<(ObjectRef, String)>,
         truncated: bool,
@@ -209,7 +216,10 @@ impl LayoutDocument {
                         return Err(Error::InvalidInput("layout link label"));
                     }
                 }
-                ElementContent::FamilyTable(person) => {
+                ElementContent::FamilyTable(person)
+                | ElementContent::NetworkTable(person)
+                | ElementContent::ImpactTable(person)
+                | ElementContent::PublishedReferences(person) => {
                     if person.world != self.entry.world {
                         return Err(Error::WrongWorld);
                     }
@@ -240,7 +250,9 @@ impl LayoutDocument {
             match &element.content {
                 ElementContent::Query(_)
                 | ElementContent::SavedQuery(_)
-                | ElementContent::FamilyTable(_) => {
+                | ElementContent::FamilyTable(_)
+                | ElementContent::NetworkTable(_)
+                | ElementContent::ImpactTable(_) => {
                     return Err(Error::CapabilityDenied);
                 }
                 ElementContent::Stack(children)
@@ -249,7 +261,9 @@ impl LayoutDocument {
                 | ElementContent::Grid { children, .. } => {
                     pending.extend(children.iter().map(|child| (child, audience)))
                 }
-                ElementContent::Text(_) | ElementContent::ObjectLink(_) => {}
+                ElementContent::Text(_)
+                | ElementContent::ObjectLink(_)
+                | ElementContent::PublishedReferences(_) => {}
             }
         }
         Ok(())
@@ -281,10 +295,12 @@ impl LayoutDocument {
                     text.push('\n');
                 }
                 // Destination-dependent captions are excluded from static text search.
-                ElementContent::ObjectLink(_) => {}
+                ElementContent::ObjectLink(_) | ElementContent::PublishedReferences(_) => {}
                 ElementContent::Query(_)
                 | ElementContent::SavedQuery(_)
-                | ElementContent::FamilyTable(_) => {
+                | ElementContent::FamilyTable(_)
+                | ElementContent::NetworkTable(_)
+                | ElementContent::ImpactTable(_) => {
                     return Err(Error::CapabilityDenied);
                 }
             }
@@ -451,9 +467,29 @@ fn project(
             }
             DisplayContent::ObjectLink(link.clone())
         }
+        ElementContent::PublishedReferences(target) => {
+            if budget.queries == MAX_QUERIES {
+                return Err(Error::QueryBudgetExceeded);
+            }
+            budget.queries += 1;
+            let references = store.published_references(view, *target)?;
+            DisplayContent::ReferenceRows {
+                links: references
+                    .matches
+                    .into_iter()
+                    .map(|item| ObjectLink {
+                        target: item.source,
+                        label: item.label,
+                    })
+                    .collect(),
+                truncated: references.truncated,
+            }
+        }
         ElementContent::Query(_)
         | ElementContent::SavedQuery(_)
-        | ElementContent::FamilyTable(_) => {
+        | ElementContent::FamilyTable(_)
+        | ElementContent::NetworkTable(_)
+        | ElementContent::ImpactTable(_) => {
             if view.scope != Scope::Author {
                 return Err(Error::CapabilityDenied);
             }
@@ -461,6 +497,49 @@ fn project(
                 return Err(Error::QueryBudgetExceeded);
             }
             budget.queries += 1;
+            if let ElementContent::ImpactTable(start) = &element.content {
+                let impact = store.persisted_impact(view, *start, 8, 200)?;
+                let truncated = impact.truncated || impact.events.len() > 50;
+                let mut records = Vec::new();
+                for object in impact.events.into_iter().take(50) {
+                    if let Some(version) = store.get_object(object, view)? {
+                        records.push((object, version.record.label));
+                    }
+                }
+                return Ok(Some(DisplayElement {
+                    id: element.id,
+                    content: DisplayContent::QueryRows { records, truncated },
+                }));
+            }
+            if let ElementContent::NetworkTable(focus) = &element.content {
+                let facts = store.network_facts(view, *focus)?;
+                let truncated = facts.len() > 50;
+                let records = facts
+                    .into_iter()
+                    .take(50)
+                    .map(|fact| {
+                        let other = if fact.input.subject == *focus {
+                            fact.input.target
+                        } else {
+                            fact.input.subject
+                        };
+                        (
+                            other,
+                            format!(
+                                "{} → {} · {} · {}",
+                                fact.subject_label,
+                                fact.target_label,
+                                fact.input.kind.name(),
+                                fact.input.role
+                            ),
+                        )
+                    })
+                    .collect();
+                return Ok(Some(DisplayElement {
+                    id: element.id,
+                    content: DisplayContent::QueryRows { records, truncated },
+                }));
+            }
             if let ElementContent::FamilyTable(person) = &element.content {
                 let links = store.family_links(view, *person)?;
                 let truncated = links.len() > 50;

@@ -3,7 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 export type ObjectRef = { world: string; id: string };
 export type ObjectLink = { target: ObjectRef; label: string };
 export type PublicDisplay = { content: { Text?: string; Stack?: PublicDisplay[]; Panel?: PublicDisplay[];
-  Grid?: { columns: number; children: PublicDisplay[] }; ObjectLink?: ObjectLink } };
+  Grid?: { columns: number; children: PublicDisplay[] }; ObjectLink?: ObjectLink;
+  ReferenceRows?: { links: ObjectLink[]; truncated: boolean } } };
 
 // Both reader and author preview render only the projected children, in layout order.
 export function layoutContainer(parent: HTMLElement, kind: "panel" | "grid", columns = 1) {
@@ -57,6 +58,14 @@ export function publicReader(host: HTMLElement, worldId: string, day: number,
           parent.append(p);
         }
         if (node.content.ObjectLink) linkButton(node.content.ObjectLink.label, node.content.ObjectLink.target, parent);
+        if (node.content.ReferenceRows) {
+          const group = layoutContainer(parent, "panel");
+          const title = document.createElement("p");
+          title.textContent = "Published references" + (node.content.ReferenceRows.truncated ? " · limited results" : "");
+          group.append(title);
+          for (const link of node.content.ReferenceRows.links) linkButton("Referenced by: " + link.label, link.target, group);
+          if (!node.content.ReferenceRows.links.length) group.append("No published references.");
+        }
         node.content.Stack?.forEach(child => render(child, parent));
         if (node.content.Panel) {
           const container = layoutContainer(parent, "panel");

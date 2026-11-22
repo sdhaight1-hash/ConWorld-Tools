@@ -1058,6 +1058,11 @@ impl AuthorWorkspace {
                     };
                     let kind = match version.record.data {
                         ObjectData::Person => "person",
+                        ObjectData::Organization => "organization",
+                        ObjectData::Household => "household",
+                        ObjectData::FamilyHouse => "family_house",
+                        ObjectData::Faction => "faction",
+                        ObjectData::Conflict => "conflict",
                         ObjectData::Definition { .. } => "definition",
                         ObjectData::Relationship { .. } => "relationship",
                         ObjectData::EventInvolvement { .. } => "event_involvement",
@@ -2390,6 +2395,154 @@ pub async fn workspace_search_public_pages(
             .map_err(|e| e.to_string())
     })
     .await
+}
+
+#[derive(Deserialize)]
+pub struct NetworkContext {
+    world_id: String,
+    day: i64,
+    revision: i64,
+}
+
+impl NetworkContext {
+    fn resolve(&self, store: &Store) -> Result<ViewContext, String> {
+        let world = store
+            .world(WorldId(id(&self.world_id)?), Scope::Author)
+            .map_err(|e| e.to_string())?;
+        Ok(ViewContext {
+            revision: AuthorRevision(self.revision),
+            ..view(&world, self.day)
+        })
+    }
+}
+
+#[tauri::command]
+pub fn workspace_create_identity(
+    workspace: State<'_, AuthorWorkspace>,
+    request: NetworkContext,
+    kind: atlas_store::network::IdentityKind,
+    label: String,
+) -> Result<ObjectRef, String> {
+    let mut store = workspace.lock()?;
+    let view = request.resolve(&store)?;
+    store
+        .create_identity(view, kind, &label, Uuid::new_v4())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn workspace_network_facts(
+    workspace: State<'_, AuthorWorkspace>,
+    request: NetworkContext,
+    focus: String,
+) -> Result<Vec<atlas_store::network::NetworkFact>, String> {
+    let store = workspace.lock()?;
+    let view = request.resolve(&store)?;
+    store
+        .network_facts(view, reference(view.world, &focus)?)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn workspace_persisted_impact(
+    workspace: State<'_, AuthorWorkspace>,
+    request: NetworkContext,
+    focus: String,
+) -> Result<Vec<(ObjectRef, String)>, String> {
+    let store = workspace.lock()?;
+    let context = request.resolve(&store)?;
+    let impact = store
+        .persisted_impact(context, reference(context.world, &focus)?, 8, 200)
+        .map_err(|e| e.to_string())?;
+    if impact.truncated {
+        return Err("Impact exceeds the traversal budget; narrow the historical view.".into());
+    }
+    let mut result = Vec::new();
+    for object in impact.events {
+        if let Some(version) = store
+            .get_object(object, context)
+            .map_err(|e| e.to_string())?
+        {
+            result.push((object, version.record.label));
+        }
+    }
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn workspace_record_network_fact(
+    workspace: State<'_, AuthorWorkspace>,
+    request: NetworkContext,
+    input: atlas_store::network::NetworkInput,
+) -> Result<(), String> {
+    let mut store = workspace.lock()?;
+    let view = request.resolve(&store)?;
+    store
+        .record_network_fact(view, &input, Uuid::new_v4())
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn workspace_withdraw_network_fact(
+    workspace: State<'_, AuthorWorkspace>,
+    request: NetworkContext,
+    fact_id: String,
+) -> Result<(), String> {
+    let mut store = workspace.lock()?;
+    let view = request.resolve(&store)?;
+    store
+        .withdraw_network_fact(view, id(&fact_id)?, Uuid::new_v4())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn workspace_propose_ghost(
+    workspace: State<'_, AuthorWorkspace>,
+    request: NetworkContext,
+    claim_id: String,
+    start_byte: usize,
+    end_byte: usize,
+    kind: atlas_store::network::IdentityKind,
+) -> Result<(), String> {
+    let mut store = workspace.lock()?;
+    let view = request.resolve(&store)?;
+    store
+        .propose_ghost(
+            view,
+            reference(view.world, &claim_id)?,
+            (start_byte, end_byte),
+            kind,
+            Uuid::new_v4(),
+        )
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn workspace_ghost_proposals(
+    workspace: State<'_, AuthorWorkspace>,
+    request: NetworkContext,
+) -> Result<Vec<atlas_store::network::GhostProposal>, String> {
+    let store = workspace.lock()?;
+    store
+        .ghost_proposals(request.resolve(&store)?)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn workspace_review_ghost(
+    workspace: State<'_, AuthorWorkspace>,
+    request: NetworkContext,
+    proposal_id: String,
+    promote: bool,
+) -> Result<(), String> {
+    let mut store = workspace.lock()?;
+    let view = request.resolve(&store)?;
+    store
+        .review_ghost(view, id(&proposal_id)?, promote, Uuid::new_v4())
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

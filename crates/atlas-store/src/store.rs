@@ -20,9 +20,10 @@ use crate::*;
 pub(crate) const APPLICATION_ID: i64 = 0x4357_4c44; // CWLD
 mod entries;
 mod family;
+mod network;
 
 // Version 29 adds version-pinned template layout variants without changing tables.
-pub(crate) const SCHEMA_VERSION: i64 = 29;
+pub(crate) const SCHEMA_VERSION: i64 = 30;
 
 // Candidate queries bind world (?1), focus/phrase (?2), author revision (?3),
 // limit (?4) and branch (?5). Follow only immutable inherited revisions.
@@ -189,6 +190,9 @@ impl Store {
         if version < 27 {
             tx.execute_batch(include_str!("../migrations/0027.sql"))?;
             entries::rebuild_public_page_index(&tx)?;
+        }
+        if version < 30 {
+            tx.execute_batch(include_str!("../migrations/0030.sql"))?;
         }
         if version < SCHEMA_VERSION {
             verify_foreign_keys(&tx)?;
@@ -3120,6 +3124,11 @@ fn write_version(
     }
     let (kind, occurrence, citation) = match &record.data {
         ObjectData::Person => ("person", &EventDate::Unknown, None),
+        ObjectData::Organization => ("organization", &EventDate::Unknown, None),
+        ObjectData::Household => ("household", &EventDate::Unknown, None),
+        ObjectData::FamilyHouse => ("family_house", &EventDate::Unknown, None),
+        ObjectData::Faction => ("faction", &EventDate::Unknown, None),
+        ObjectData::Conflict => ("conflict", &EventDate::Unknown, None),
         ObjectData::Definition {
             definition,
             description,
@@ -3489,6 +3498,11 @@ fn read_version(
 ) -> rusqlite::Result<Version> {
     let data = match row.get::<_, String>(1)?.as_str() {
         "person" => ObjectData::Person,
+        "organization" => ObjectData::Organization,
+        "household" => ObjectData::Household,
+        "family_house" => ObjectData::FamilyHouse,
+        "faction" => ObjectData::Faction,
+        "conflict" => ObjectData::Conflict,
         "relationship" => {
             let (subject, target, kind, trust): ([u8; 16], [u8; 16], String, Option<u8>) = conn.query_row(
                 "SELECT subject_id, target_id, relation_kind, trust FROM relationship_versions
