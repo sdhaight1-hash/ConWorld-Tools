@@ -31,3 +31,7 @@ AE-03 adds validation of exact existing Definition versions within a historical 
 ## Canonical Concept vertical slice
 
 Adds Concept to the canonical object registry, identity creation, ghost proposal vocabulary, historical read/write, typed search and desktop authoring choices. Migration 37 is provisional on this branch; spatial PR #67 must be reconciled before either migration is released together (renumber the spatial migration and preserve Concept in both registry constraints). No existing IDs are rewritten. Tests cover historical visibility, kind search, scope and FK integrity. CI and actual desktop screenshots remain pending. This does not complete governed classification persistence.
+
+## Curated classification persistence
+
+Schema 38 adds author-only temporal classification assignments and branch-local withdrawals. The first four curated profiles are Culture, Language, Material and Technology, all compatible with Concept only. Assignments retain an exact Tag Definition version and source, reject overlapping same-profile assignments, and preserve the original author revision and branch. Reads are bounded, historical and scoped; corrected labels do not replace the recorded pin. No inferred membership, general field runtime or published projection. The held spatial migration must be renumbered after these migrations and retain Concept. CI pending; no UI capture applicable to this store slice.

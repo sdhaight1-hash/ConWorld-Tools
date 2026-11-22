@@ -100,6 +100,54 @@ impl Store {
     }
 }
 
+/// Initial curated profiles. A profile is classification metadata, not a new object kind.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ConceptProfile {
+    Culture,
+    Language,
+    Material,
+    Technology,
+}
+
+impl ConceptProfile {
+    pub(crate) fn key(self) -> &'static str {
+        match self {
+            Self::Culture => "culture",
+            Self::Language => "language",
+            Self::Material => "material",
+            Self::Technology => "technology",
+        }
+    }
+
+    pub(crate) fn parse(key: &str) -> Result<Self, Error> {
+        match key {
+            "culture" => Ok(Self::Culture),
+            "language" => Ok(Self::Language),
+            "material" => Ok(Self::Material),
+            "technology" => Ok(Self::Technology),
+            _ => Err(Error::InvalidInput("concept profile")),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ClassificationInput {
+    pub subject: ObjectRef,
+    pub profile: ConceptProfile,
+    pub descriptor: DefinitionPin,
+    pub source: ObjectRef,
+    pub starts_at: crate::WorldDay,
+    pub ends_before: Option<crate::WorldDay>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Classification {
+    pub id: Uuid,
+    pub input: ClassificationInput,
+    pub recorded_at: crate::AuthorRevision,
+    pub source_branch: crate::BranchId,
+}
+
 /// A governed descriptor pins the exact historical definition, not its label.
 /// This is an author-side reference check, not a persisted classification.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

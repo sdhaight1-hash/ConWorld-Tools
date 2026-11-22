@@ -18,6 +18,7 @@ use crate::query::{
 use crate::*;
 
 pub(crate) const APPLICATION_ID: i64 = 0x4357_4c44; // CWLD
+mod classification;
 mod entries;
 mod family;
 pub(crate) mod media;
@@ -26,7 +27,7 @@ mod semantic;
 mod templates;
 
 // Version 29 adds version-pinned template layout variants without changing tables.
-pub(crate) const SCHEMA_VERSION: i64 = 37;
+pub(crate) const SCHEMA_VERSION: i64 = 38;
 
 // Candidate queries bind world (?1), focus/phrase (?2), author revision (?3),
 // limit (?4) and branch (?5). Follow only immutable inherited revisions.
@@ -221,6 +222,9 @@ impl Store {
         }
         if version < 37 {
             tx.execute_batch(include_str!("../migrations/0037.sql"))?;
+        }
+        if version < 38 {
+            tx.execute_batch(include_str!("../migrations/0038.sql"))?;
         }
         if version < SCHEMA_VERSION {
             verify_foreign_keys(&tx)?;
