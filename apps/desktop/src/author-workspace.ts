@@ -442,7 +442,7 @@ export async function showAuthorWorkspace(
       ...view.people,
       ...view.events.map(event => ({ id: event.id, label: event.label + " · event" })),
       ...view.relationships.map(bond => ({ id: bond.id, label: bondLabel(bond) + " · relationship" })),
-      ...view.definitions.map(definition => ({ id: definition.id, label: definition.label + " · definition" })),
+      ...(view.definitions ?? []).map(definition => ({ id: definition.id, label: definition.label + " · definition" })),
     ];
     if (extra && !targets.some(target => target.id === extra.id)) targets.push(extra);
     return targets;
@@ -467,9 +467,9 @@ export async function showAuthorWorkspace(
       });
     }
     if (current && (event || bond || people.some(person => person.id === id))) {
-      const targets = entryTargets(current);
       const label = event ? "Open event page" : bond ? "Open relationship page" : "Open character page";
       button(label, () => {
+        const targets = entryTargets(current);
         const open = (target: string) => {
           if (snapshot !== current) return;
           panel.replaceChildren();

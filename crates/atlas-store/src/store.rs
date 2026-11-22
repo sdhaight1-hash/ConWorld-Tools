@@ -21,7 +21,7 @@ pub(crate) const APPLICATION_ID: i64 = 0x4357_4c44; // CWLD
 mod entries;
 mod family;
 
-pub(crate) const SCHEMA_VERSION: i64 = 26;
+pub(crate) const SCHEMA_VERSION: i64 = 27;
 
 // Candidate queries bind world (?1), focus/phrase (?2), author revision (?3),
 // limit (?4) and branch (?5). Follow only immutable inherited revisions.
@@ -178,13 +178,16 @@ impl Store {
         }
         if version < 24 {
             tx.execute_batch(include_str!("../migrations/0024.sql"))?;
-            entries::rebuild_public_page_index(&tx)?;
         }
         // Version 25 adds the SavedQuery layout variant without changing tables.
         // Older readers must not open databases containing this serialization.
         if version < 26 {
             tx.execute_batch(include_str!("../migrations/0026.sql"))?;
             entries::rebuild_entry_link_index(&tx)?;
+        }
+        if version < 27 {
+            tx.execute_batch(include_str!("../migrations/0027.sql"))?;
+            entries::rebuild_public_page_index(&tx)?;
         }
         if version < SCHEMA_VERSION {
             verify_foreign_keys(&tx)?;
