@@ -568,8 +568,7 @@ impl Store {
                 let child = ref_id(view.world, row.get(0)?);
                 let source = ref_id(view.world, row.get(1)?);
                 if seen.contains(&child)
-                    || resolve_object(&tx, source, view.branch, view.revision, view.day)?
-                        .is_none()
+                    || resolve_object(&tx, source, view.branch, view.revision, view.day)?.is_none()
                 {
                     continue;
                 }
