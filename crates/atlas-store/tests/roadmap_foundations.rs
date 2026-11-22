@@ -3238,6 +3238,12 @@ fn classifications_preserve_pins_and_branch_local_withdrawals() -> Result<(), Er
     let profile_query = query(QueryFilter::ClassifiedAs(ConceptProfile::Language));
     let descriptor_query = query(QueryFilter::ClassifiedBy(definition));
     assert!(store.execute_query(&profile_query, before)?.rows.is_empty());
+    assert!(
+        store
+            .execute_query_page(&profile_query, before, None)?
+            .rows
+            .is_empty()
+    );
     let assignment = store.record_classification(author, input, Uuid::new_v4())?;
     author.revision = AuthorRevision(4);
     assert_eq!(
@@ -3358,6 +3364,30 @@ fn classifications_preserve_pins_and_branch_local_withdrawals() -> Result<(), Er
         ..inherited
     };
     assert!(store.execute_query(&profile_query, after)?.rows.is_empty());
+    assert_eq!(
+        store
+            .execute_query_page(&profile_query, inherited, None)?
+            .rows[0]
+            .object,
+        concept
+    );
+    assert!(
+        store
+            .execute_query_page(&profile_query, after, None)?
+            .rows
+            .is_empty()
+    );
+    assert!(matches!(
+        store.execute_query_page(
+            &profile_query,
+            ViewContext {
+                scope: Scope::Public,
+                ..inherited
+            },
+            None
+        ),
+        Err(Error::CapabilityDenied)
+    ));
     assert!(
         store
             .execute_query(&descriptor_query, after)?

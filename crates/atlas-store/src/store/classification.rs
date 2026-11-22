@@ -360,6 +360,76 @@ impl Store {
         Ok(result)
     }
 
+    /// Seek conservative label candidates, then reauthorize in one historical
+    /// snapshot. The label index supplies ordering, never canonical truth.
+    pub(crate) fn classification_page(
+        &self,
+        view: ViewContext,
+        profile: ConceptProfile,
+        after: Option<(&str, ObjectRef)>,
+        limit: usize,
+    ) -> Result<(Vec<Version>, bool), Error> {
+        require_author(view.scope)?;
+        self.check_query_control()?;
+        let tx = self.conn.unchecked_transaction()?;
+        metadata_world(&tx, view, false)?;
+        let label = after.map_or("", |(label, _)| label);
+        let id = after.map_or([0; 16], |(_, object)| *object.id.0.as_bytes());
+        let mut statement = tx.prepare(&format!(
+            "{METADATA_CTE} {ACTIVE}
+             SELECT DISTINCT v.label,v.object_id
+             FROM object_versions v INDEXED BY semantic_label_seek
+             WHERE v.world_id=?1 AND (v.label,v.object_id)>(?5,?6)
+             AND EXISTS (SELECT 1 FROM eligible l
+                 WHERE l.branch_id=v.branch_id AND v.revision<=l.rev)
+             AND EXISTS (SELECT 1 FROM active_classification p
+                 WHERE p.subject_id=v.object_id AND p.profile=?7
+                 AND p.starts_at<=?4 AND (p.ends_before IS NULL OR p.ends_before>?4))
+             ORDER BY v.label,v.object_id LIMIT 2001"
+        ))?;
+        let mut rows = statement.query(params![
+            view.world.0.as_bytes(),
+            view.branch.0.as_bytes(),
+            view.revision.0,
+            view.day.0,
+            label,
+            &id[..],
+            profile.key()
+        ])?;
+        let mut result = Vec::new();
+        let mut scanned = 0;
+        while let Some(row) = rows.next()? {
+            self.check_query_control()?;
+            scanned += 1;
+            if scanned > 2000 {
+                return Err(Error::QueryBudgetExceeded);
+            }
+            let candidate: String = row.get(0)?;
+            let object = ObjectRef {
+                world: view.world,
+                id: ObjectId(Uuid::from_bytes(row.get(1)?)),
+            };
+            let Some(version) =
+                resolve_object(&tx, object, view.branch, view.revision, view.day)?
+            else {
+                continue;
+            };
+            if version.record.data != ObjectData::Concept
+                || version.record.label != candidate
+                || !has_profile(&tx, view, object, profile)?
+            {
+                continue;
+            }
+            result.push(version);
+            if result.len() > limit {
+                result.pop();
+                return Ok((result, true));
+            }
+        }
+        self.check_query_control()?;
+        Ok((result, false))
+    }
+
     /// Exact subject lookup or bounded profile discovery. No reader projection.
     pub fn classifications(
         &self,

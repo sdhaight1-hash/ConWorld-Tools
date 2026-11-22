@@ -162,8 +162,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             links.elapsed().as_micros()
         );
     }
-    // Verify actual pagination on the bounded workload; dense large queries
-    // must reject instead of silently disguising budget exhaustion as absence.
+    // One-shot dense queries can reject; the standalone profile page path
+    // should seek instead of materializing the entire matching world.
     let spec = spec(ConceptProfile::Language);
     if count == 1000 {
         let first = store.execute_query_page(&spec, view, None)?;
@@ -177,11 +177,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         println!("dense_pages=2 distinct={}", ids.len());
     } else {
-        assert!(matches!(
-            store.execute_query_page(&spec, view, None),
-            Err(Error::QueryBudgetExceeded)
-        ));
-        println!("dense_pages=budget_rejected");
+        let started = Instant::now();
+        let control = QueryControl::new(Duration::from_secs(30))?;
+        let first = store.execute_query_page_controlled(&spec, view, None, &control)?;
+        assert_eq!(first.rows.len(), 500);
+        assert!(first.next_cursor.is_some());
+        let control = QueryControl::new(Duration::from_secs(30))?;
+        let second =
+            store.execute_query_page_controlled(&spec, view, first.next_cursor.as_ref(), &control)?;
+        assert_eq!(second.rows.len(), 500);
+        assert!(second.next_cursor.is_some());
+        let mut ids = std::collections::HashSet::new();
+        for row in first.rows.iter().chain(&second.rows) {
+            assert!(ids.insert(row.object));
+        }
+        println!(
+            "dense_first_two_pages=2 distinct={} elapsed_ms={}",
+            ids.len(),
+            started.elapsed().as_millis()
+        );
     }
     let control = QueryControl::new(Duration::from_secs(30))?;
     control.cancel();

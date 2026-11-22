@@ -29,7 +29,7 @@ pub(crate) mod site_area;
 mod templates;
 
 // Version 29 adds version-pinned template layout variants without changing tables.
-pub(crate) const SCHEMA_VERSION: i64 = 43;
+pub(crate) const SCHEMA_VERSION: i64 = 44;
 
 // Candidate queries bind world (?1), focus/phrase (?2), author revision (?3),
 // limit (?4) and branch (?5). Follow only immutable inherited revisions.
@@ -243,6 +243,9 @@ impl Store {
         }
         if version < 43 {
             tx.execute_batch(include_str!("../migrations/0043.sql"))?;
+        }
+        if version < 44 {
+            tx.execute_batch(include_str!("../migrations/0044.sql"))?;
         }
         if version < SCHEMA_VERSION {
             verify_foreign_keys(&tx)?;

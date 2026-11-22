@@ -609,8 +609,8 @@ impl Store {
 
     /// Page only complete, bounded author queries. Reevaluate the immutable
     /// recorded view on each call; do not cache raw rows or trust offsets.
-    /// The current planner still materializes at most 10,000 candidate rows,
-    /// so this is stable result pagination, not unbounded SQL streaming.
+    /// Standalone classification profiles seek an indexed label/UUID window.
+    /// Other predicates retain the existing bounded materialization planner.
     pub fn execute_query_page(
         &self,
         spec: &QuerySpec,
@@ -625,6 +625,25 @@ impl Store {
             && (cursor.view != view || cursor.spec != *spec)
         {
             return Err(Error::InvalidInput("query cursor context"));
+        }
+        if let QueryFilter::ClassifiedAs(profile) = &spec.filter {
+            let boundary = after.map(|cursor| (cursor.label.as_str(), cursor.last));
+            let (rows, has_more) = self.classification_page(view, *profile, boundary, spec.limit)?;
+            let next_cursor = if has_more {
+                rows.last().map(|last| QueryCursor {
+                    spec: spec.clone(),
+                    view,
+                    last: last.object,
+                    label: last.record.label.clone(),
+                })
+            } else {
+                None
+            };
+            return Ok(QueryPage {
+                rows,
+                revision: view.revision,
+                next_cursor,
+            });
         }
         const PAGE_CANDIDATE_BUDGET: usize = 10_000;
         let result = self.execute_bounded_query(
