@@ -1,8 +1,8 @@
 # Research #76 — proposed ticket disposition and design review
 
-**Status:** Proposal review only — neither proposed ticket created nor change accepted. **Date:** 2026-11-22 UTC.
+**Status:** Reviewed and accepted direction — #77 and #78 opened; readiness and production verification pending. **Date:** 2026-11-22 UTC.
 **Reviewer:** Lola. **Research:** [#76](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/76), [pinned expanded study](https://github.com/sdhaight1-hash/ConWorld-Tools/blob/8cfb18643ff1871d6b4fbc465bf4ab0396814c3e/Design-Docs/Research-Studies/comparative-worldbuilding-workspaces-and-encyclopedia-ux.md).
-**Baseline:** main 5777f0f schema 36; ontology candidate 30b6710 schema 44, [draft #75](https://github.com/sdhaight1-hash/ConWorld-Tools/pull/75). Review branch 8cfb186. Both confirmed unchanged at review. Recursive source inventory 267 paths, open and closed issue list, four draft PRs, README ticket policy, screenshot guide, feature/evolution indexes, product charter and normative 01/02/06/07/08/12 inspected. Existing #68/#70/#72 scope and gates remain in force. Four audits and 62 reference groups, 48 isolated model assertions and synthetic SQLite study form the research basis; no native comparative authoring tests, no owner acceptance. No production changes, screenshots or further tests made in this disposition.
+**Baseline:** main 5777f0f schema 36; ontology candidate 30b6710 schema 44, [draft #75](https://github.com/sdhaight1-hash/ConWorld-Tools/pull/75). Review branch 8cfb186. Both confirmed unchanged at review. Recursive source inventory 267 paths, open and closed issue list, four draft PRs, README ticket policy, screenshot guide, feature/evolution indexes, product charter and normative 01/02/06/07/08/12 inspected. Existing #68/#70/#72 scope and gates remain in force. Four audits and 62 reference groups, 48 isolated model assertions and synthetic SQLite study form the research basis; no native comparative authoring tests; approval subsequently recorded below. No production changes, screenshots or further tests made in this disposition.
 
 ## Classification rule
 
@@ -87,3 +87,7 @@ Reference: [study RQ-04/08 and §§8–10](https://github.com/sdhaight1-hash/Con
 4. Complete existing #6–#10, #68/#70/#72 gates; later revisit deferred feature candidates only on concrete user need.
 
 No production edits, no new schemas, no additional acceptance closure. These are two proposed ticket drafts and explicit ownership, not additional roadmap phases.
+
+## Owner disposition — 2026-11-22
+
+[Explicit approval](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/76#issuecomment-7079741458) accepts both A/B and the existing-roadmap integration direction, retaining readiness/stop conditions. [#77](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/77) and [#78](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/78) are open accepted-scope tickets. Consult [release evolution](../Architectural-Evolutions/independent-editorial-draft-and-publication-lifecycle.md) and [dashboard feature](../Features/configurable-world-management-workspaces-and-dashboards.md) for versioned design. Earlier proposal text above retained as chronological review evidence. Deferred linked content, selective interchange and reading collections are endorsed for future consideration with their evidence requirements; not production-ready specifications. #76 remains open for outstanding comparative native evidence; no #75 merge, code, schema, phase closure or new runtime evidence. 
