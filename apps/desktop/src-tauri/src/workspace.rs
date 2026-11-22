@@ -11,8 +11,8 @@ use atlas_store::{
     VersionRef, ViewContext, World, WorldDay, WorldId,
     discovery::{MentionDisposition, ReviewMention, SavePersonAlias},
     query::{
-        Direction, ParameterBinding, PredicateInput, QUERY_SCHEMA_VERSION, QueryControl,
-        QueryCursor, QueryFilter, QueryParameter, QuerySpec, SaveNamedLabelQuery,
+        Direction, ObjectKindFilter, ParameterBinding, PredicateInput, QUERY_SCHEMA_VERSION,
+        QueryControl, QueryCursor, QueryFilter, QueryParameter, QuerySpec, SaveNamedLabelQuery,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -179,7 +179,7 @@ pub struct MentionDiscoverySummary {
 pub struct SearchRow {
     id: String,
     label: String,
-    kind: &'static str,
+    kind: ObjectKindFilter,
     statement: Option<String>,
     source_citation: Option<String>,
 }
@@ -485,9 +485,84 @@ fn commit(store: &mut Store, world: &World, changes: Vec<Change>) -> Result<(), 
 }
 
 impl AuthorWorkspace {
+    /// Explicit smoke-only fixture; never writes to a user's normal database.
+    pub fn ontology_smoke_fixture() -> Result<Self, atlas_store::Error> {
+        let workspace = Self::open(":memory:")?;
+        {
+            let mut store = workspace.store.lock().expect("new workspace lock");
+            let world = store.create_world("Ontology verification", Scope::Author)?;
+            let records = [
+                (
+                    1,
+                    "Field register",
+                    ObjectData::Source {
+                        citation: "Survey folio 3".into(),
+                    },
+                ),
+                (
+                    2,
+                    "Cultural vocabulary",
+                    ObjectData::Definition {
+                        definition: Definition::Tag,
+                        description: "Cultural vocabulary".into(),
+                    },
+                ),
+                (
+                    3,
+                    "Aetheric drive",
+                    ObjectData::Definition {
+                        definition: Definition::Tag,
+                        description: "World-specific technology category".into(),
+                    },
+                ),
+                (
+                    4,
+                    "Recorded site area",
+                    ObjectData::Definition {
+                        definition: Definition::Tag,
+                        description: "Source-backed survey".into(),
+                    },
+                ),
+                (10, "Estuary culture", ObjectData::Concept),
+                (11, "Estuary speech", ObjectData::Concept),
+                (12, "Amber", ObjectData::Concept),
+                (13, "Drive One", ObjectData::Concept),
+                (14, "Drive Two", ObjectData::Concept),
+                (15, "Workshop", ObjectData::Place),
+            ];
+            store.apply(&Command {
+                world: world.id,
+                branch: world.main,
+                expected: world.revision,
+                id: Uuid::new_v4(),
+                author: "Native test".into(),
+                rationale: "Seed isolated authoring task fixtures".into(),
+                scope: Scope::Author,
+                changes: records
+                    .into_iter()
+                    .map(|(id, label, data)| {
+                        Change::Create(
+                            ObjectRef {
+                                world: world.id,
+                                id: ObjectId(Uuid::from_u128(id)),
+                            },
+                            Record {
+                                label: label.into(),
+                                data,
+                                source: None,
+                                valid: ValidInterval::default(),
+                            },
+                        )
+                    })
+                    .collect(),
+            })?;
+        }
+        Ok(workspace)
+    }
+
     pub fn open(path: impl AsRef<Path>) -> Result<Self, atlas_store::Error> {
         Ok(Self {
-            store: Mutex::new(Store::open(path)?),
+            store: Mutex::new(Store::open_with_migration_backup(path)?),
             continuation: Mutex::new(None),
             query_jobs: Mutex::new(QueryJobs::default()),
         })
@@ -1056,28 +1131,7 @@ impl AuthorWorkspace {
                     } else {
                         None
                     };
-                    let kind = match version.record.data {
-                        ObjectData::Person => "person",
-                        ObjectData::Organization => "organization",
-                        ObjectData::Household => "household",
-                        ObjectData::FamilyHouse => "family_house",
-                        ObjectData::Faction => "faction",
-                        ObjectData::Conflict => "conflict",
-                        ObjectData::Office => "office",
-                        ObjectData::Title => "title",
-                        ObjectData::Asset => "asset",
-                        ObjectData::Population => "population",
-                        ObjectData::ConflictIssue => "conflict_issue",
-                        ObjectData::ConflictPhase => "conflict_phase",
-                        ObjectData::SuccessionRule => "succession_rule",
-                        ObjectData::Definition { .. } => "definition",
-                        ObjectData::Relationship { .. } => "relationship",
-                        ObjectData::EventInvolvement { .. } => "event_involvement",
-                        ObjectData::ActorAction { .. } => "actor_action",
-                        ObjectData::HistoricalEvent { .. } => "historical_event",
-                        ObjectData::Source { .. } => "source",
-                        ObjectData::Claim { .. } => "claim",
-                    };
+                    let kind = ObjectKindFilter::from(&version.record.data);
                     Ok(SearchRow {
                         id: version.object.id.0.to_string(),
                         label: version.record.label,
@@ -2439,6 +2493,112 @@ impl NetworkContext {
     }
 }
 
+#[derive(Serialize)]
+pub struct SemanticCandidate {
+    id: String,
+    label: String,
+}
+
+#[derive(Serialize)]
+pub struct SemanticCandidates {
+    rows: Vec<SemanticCandidate>,
+    truncated: bool,
+}
+
+fn semantic_selection_filter(kind: &str, phrase: String) -> Result<QueryFilter, String> {
+    use atlas_store::semantic::ConceptProfile;
+
+    let profile = match kind {
+        "culture" => Some(ConceptProfile::Culture),
+        "language" => Some(ConceptProfile::Language),
+        "material" => Some(ConceptProfile::Material),
+        "technology" => Some(ConceptProfile::Technology),
+        _ => None,
+    };
+    if let Some(profile) = profile {
+        return Ok(QueryFilter::And(vec![
+            QueryFilter::ClassifiedAs(profile),
+            QueryFilter::LabelContains(phrase),
+        ]));
+    }
+    let filter = match kind {
+        "concept" => ObjectKindFilter::Concept,
+        "place" => ObjectKindFilter::Place,
+        "source" => ObjectKindFilter::Source,
+        "tag" => ObjectKindFilter::Definition,
+        "claim" => ObjectKindFilter::Claim,
+        _ => return Err("Unsupported semantic selection kind".into()),
+    };
+    Ok(QueryFilter::And(vec![
+        QueryFilter::Kind(filter),
+        QueryFilter::FullTextPhrase(phrase),
+    ]))
+}
+
+/// A bounded, branch-aware selection search over the existing query authority.
+/// The write service still validates all reference kinds and sources.
+#[tauri::command]
+pub async fn workspace_semantic_candidates(
+    app: AppHandle,
+    request_id: String,
+    request: NetworkContext,
+    kind: String,
+    phrase: String,
+) -> Result<SemanticCandidates, String> {
+    run_query_job(app, request_id, move |workspace, control| {
+        let store = workspace.lock()?;
+        let view = request.resolve(&store)?;
+        let filter = semantic_selection_filter(&kind, phrase)?;
+        let result = store
+            .execute_query_controlled(
+                &QuerySpec {
+                    schema_version: QUERY_SCHEMA_VERSION,
+                    filter,
+                    limit: 100,
+                },
+                view,
+                control,
+            )
+            .map_err(|error| error.to_string())?;
+        let mut rows = Vec::new();
+        for version in result.rows {
+            control.check().map_err(|error| error.to_string())?;
+            if kind == "tag"
+                && !matches!(
+                    version.record.data,
+                    ObjectData::Definition {
+                        definition: Definition::Tag,
+                        ..
+                    }
+                )
+            {
+                continue;
+            }
+            if kind == "claim" {
+                let Some(source) = version.record.source else {
+                    continue;
+                };
+                if !store
+                    .get_object(source, view)
+                    .map_err(|error| error.to_string())?
+                    .is_some_and(|source| matches!(source.record.data, ObjectData::Source { .. }))
+                {
+                    continue;
+                }
+            }
+            rows.push(SemanticCandidate {
+                id: version.object.id.0.to_string(),
+                label: version.record.label,
+            });
+        }
+        Ok(SemanticCandidates {
+            rows,
+            truncated: result.truncated,
+        })
+    })
+    .await
+}
+
 #[tauri::command]
 pub fn workspace_metadata_branches(
     workspace: State<'_, AuthorWorkspace>,
@@ -2681,6 +2841,342 @@ pub fn workspace_create_identity(
         .map_err(|e| e.to_string())
 }
 
+#[derive(Serialize)]
+pub struct ClassificationSummary {
+    id: String,
+    profile: atlas_store::semantic::ConceptProfile,
+    descriptor_id: String,
+    descriptor_branch: String,
+    descriptor_revision: i64,
+    descriptor_state_revision: i64,
+    source_id: String,
+    starts_at: i64,
+    ends_before: Option<i64>,
+    recorded_at: i64,
+}
+
+#[derive(Deserialize)]
+pub struct ClassificationRequest {
+    subject_id: String,
+    descriptor_id: String,
+    source_id: String,
+    profile: atlas_store::semantic::ConceptProfile,
+    starts_at: i64,
+    ends_before: Option<i64>,
+}
+
+#[tauri::command]
+pub fn workspace_record_classification(
+    workspace: State<'_, AuthorWorkspace>,
+    request: NetworkContext,
+    input: ClassificationRequest,
+) -> Result<String, String> {
+    use atlas_store::semantic::{ClassificationInput, DefinitionPin};
+    let mut store = workspace.lock()?;
+    let view = request.resolve(&store)?;
+    let descriptor = store
+        .get_object(
+            reference(view.world, &input.descriptor_id)?,
+            ViewContext {
+                day: WorldDay(input.starts_at),
+                ..view
+            },
+        )
+        .map_err(|e| e.to_string())?
+        .ok_or("Definition is unavailable at the requested start day")?;
+    store
+        .record_classification(
+            view,
+            ClassificationInput {
+                subject: reference(view.world, &input.subject_id)?,
+                profile: input.profile,
+                descriptor: DefinitionPin {
+                    version: descriptor.reference(),
+                },
+                source: reference(view.world, &input.source_id)?,
+                starts_at: WorldDay(input.starts_at),
+                ends_before: input.ends_before.map(WorldDay),
+            },
+            Uuid::new_v4(),
+        )
+        .map(|id| id.to_string())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn workspace_classifications(
+    workspace: State<'_, AuthorWorkspace>,
+    request: NetworkContext,
+    subject_id: String,
+) -> Result<Vec<ClassificationSummary>, String> {
+    let store = workspace.lock()?;
+    let view = request.resolve(&store)?;
+    Ok(store
+        .classifications(view, Some(reference(view.world, &subject_id)?), None)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|assignment| {
+            let input = assignment.input;
+            let pin = input.descriptor.version;
+            ClassificationSummary {
+                id: assignment.id.to_string(),
+                profile: input.profile,
+                descriptor_id: pin.object.id.0.to_string(),
+                descriptor_branch: pin.branch.0.to_string(),
+                descriptor_revision: pin.recorded_at.0,
+                descriptor_state_revision: pin.state_revision.0,
+                source_id: input.source.id.0.to_string(),
+                starts_at: input.starts_at.0,
+                ends_before: input.ends_before.map(|day| day.0),
+                recorded_at: assignment.recorded_at.0,
+            }
+        })
+        .collect())
+}
+
+#[tauri::command]
+pub fn workspace_withdraw_classification(
+    workspace: State<'_, AuthorWorkspace>,
+    request: NetworkContext,
+    fact_id: String,
+) -> Result<(), String> {
+    let mut store = workspace.lock()?;
+    let view = request.resolve(&store)?;
+    store
+        .withdraw_classification(view, id(&fact_id)?, Uuid::new_v4())
+        .map_err(|e| e.to_string())
+}
+
+#[derive(Serialize)]
+pub struct SemanticFactSummary {
+    reference: atlas_store::semantic::FactRef,
+    subject: ObjectRef,
+    target: Option<ObjectRef>,
+    source: Option<ObjectRef>,
+    descriptor: Option<ObjectRef>,
+    description: String,
+    rationale: String,
+    recorded_at: i64,
+    source_branch: String,
+}
+
+impl From<atlas_store::semantic::ResolvedFact> for SemanticFactSummary {
+    fn from(fact: atlas_store::semantic::ResolvedFact) -> Self {
+        use atlas_store::semantic::SemanticFactData;
+        let (subject, target, source, descriptor, description) = match fact.data {
+            SemanticFactData::Network(input) => (
+                input.subject,
+                Some(input.target),
+                Some(input.source),
+                None,
+                format!("{:?}: {}", input.kind, input.role),
+            ),
+            SemanticFactData::Parentage(input) => (
+                input.parent,
+                Some(input.child),
+                None,
+                None,
+                format!("{:?} parentage", input.kind),
+            ),
+            SemanticFactData::Classification(input) => (
+                input.subject,
+                None,
+                Some(input.source),
+                Some(input.descriptor.version.object),
+                format!("{:?} classification", input.profile),
+            ),
+            SemanticFactData::SiteArea(input) => (
+                input.place,
+                None,
+                Some(input.source),
+                Some(input.descriptor.version.object),
+                format!("Site area: {:?}", input.reading),
+            ),
+        };
+        Self {
+            reference: fact.reference,
+            subject,
+            target,
+            source,
+            descriptor,
+            description,
+            rationale: fact.rationale,
+            recorded_at: fact.recorded_at.0,
+            source_branch: fact.source_branch.0.to_string(),
+        }
+    }
+}
+
+#[tauri::command]
+pub fn workspace_semantic_fact_backlinks(
+    workspace: State<'_, AuthorWorkspace>,
+    request: NetworkContext,
+    target_id: String,
+) -> Result<Vec<SemanticFactSummary>, String> {
+    let store = workspace.lock()?;
+    let view = request.resolve(&store)?;
+    store
+        .semantic_fact_backlinks(reference(view.world, &target_id)?, view)
+        .map(|facts| facts.into_iter().map(Into::into).collect())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn workspace_semantic_fact(
+    workspace: State<'_, AuthorWorkspace>,
+    request: NetworkContext,
+    reference: atlas_store::semantic::FactRef,
+) -> Result<Option<SemanticFactSummary>, String> {
+    let store = workspace.lock()?;
+    let view = request.resolve(&store)?;
+    store
+        .resolve_semantic_fact(reference, view)
+        .map(|fact| fact.map(Into::into))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn workspace_annotate_semantic_fact(
+    workspace: State<'_, AuthorWorkspace>,
+    request: NetworkContext,
+    fact: atlas_store::semantic::FactRef,
+    claim_id: String,
+) -> Result<String, String> {
+    let mut store = workspace.lock()?;
+    let view = request.resolve(&store)?;
+    store
+        .annotate_semantic_fact(
+            view,
+            fact,
+            reference(view.world, &claim_id)?,
+            Uuid::new_v4(),
+        )
+        .map(|id| id.to_string())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn workspace_semantic_fact_annotations(
+    workspace: State<'_, AuthorWorkspace>,
+    request: NetworkContext,
+    fact: atlas_store::semantic::FactRef,
+) -> Result<Vec<atlas_store::semantic::FactAnnotation>, String> {
+    let store = workspace.lock()?;
+    store
+        .semantic_fact_annotations(request.resolve(&store)?, fact)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn workspace_retire_semantic_descriptor(
+    workspace: State<'_, AuthorWorkspace>,
+    request: NetworkContext,
+    descriptor_id: String,
+) -> Result<(), String> {
+    let mut store = workspace.lock()?;
+    let view = request.resolve(&store)?;
+    let descriptor = store
+        .get_object(reference(view.world, &descriptor_id)?, view)
+        .map_err(|e| e.to_string())?
+        .ok_or("Descriptor is unavailable")?;
+    store
+        .retire_semantic_descriptor(
+            view,
+            atlas_store::semantic::DefinitionPin {
+                version: descriptor.reference(),
+            },
+            Uuid::new_v4(),
+        )
+        .map_err(|e| e.to_string())
+}
+
+#[derive(Deserialize)]
+pub struct SiteAreaRequest {
+    place_id: String,
+    descriptor_id: String,
+    source_id: String,
+    reading: atlas_store::semantic::AreaReading,
+    starts_at: i64,
+    ends_before: Option<i64>,
+    corrects: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct SiteAreaSummary {
+    id: String,
+    descriptor_id: String,
+    descriptor_revision: i64,
+    source_id: String,
+    reading: atlas_store::semantic::AreaReading,
+    starts_at: i64,
+    ends_before: Option<i64>,
+    recorded_at: i64,
+    corrects: Option<String>,
+}
+
+#[tauri::command]
+pub fn workspace_record_site_area(
+    workspace: State<'_, AuthorWorkspace>,
+    request: NetworkContext,
+    input: SiteAreaRequest,
+) -> Result<String, String> {
+    use atlas_store::semantic::{DefinitionPin, SiteAreaInput};
+    let mut store = workspace.lock()?;
+    let view = request.resolve(&store)?;
+    let descriptor = store
+        .get_object(
+            reference(view.world, &input.descriptor_id)?,
+            ViewContext {
+                day: WorldDay(input.starts_at),
+                ..view
+            },
+        )
+        .map_err(|e| e.to_string())?
+        .ok_or("Definition is unavailable at the requested start day")?;
+    store
+        .record_site_area(
+            view,
+            SiteAreaInput {
+                place: reference(view.world, &input.place_id)?,
+                descriptor: DefinitionPin {
+                    version: descriptor.reference(),
+                },
+                source: reference(view.world, &input.source_id)?,
+                reading: input.reading,
+                starts_at: WorldDay(input.starts_at),
+                ends_before: input.ends_before.map(WorldDay),
+            },
+            input.corrects.as_deref().map(id).transpose()?,
+            Uuid::new_v4(),
+        )
+        .map(|id| id.to_string())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn workspace_site_area(
+    workspace: State<'_, AuthorWorkspace>,
+    request: NetworkContext,
+    place_id: String,
+) -> Result<Option<SiteAreaSummary>, String> {
+    let store = workspace.lock()?;
+    let view = request.resolve(&store)?;
+    Ok(store
+        .site_area(view, reference(view.world, &place_id)?)
+        .map_err(|e| e.to_string())?
+        .map(|fact| SiteAreaSummary {
+            id: fact.id.to_string(),
+            descriptor_id: fact.input.descriptor.version.object.id.0.to_string(),
+            descriptor_revision: fact.input.descriptor.version.recorded_at.0,
+            source_id: fact.input.source.id.0.to_string(),
+            reading: fact.input.reading,
+            starts_at: fact.input.starts_at.0,
+            ends_before: fact.input.ends_before.map(|day| day.0),
+            recorded_at: fact.recorded_at.0,
+            corrects: fact.corrects.map(|id| id.to_string()),
+        }))
+}
+
 #[tauri::command]
 pub fn workspace_network_facts(
     workspace: State<'_, AuthorWorkspace>,
@@ -2863,6 +3359,33 @@ mod tests {
 
     fn test_control() -> QueryControl {
         QueryControl::new(Duration::from_secs(10)).expect("test query timeout")
+    }
+
+    #[test]
+    fn semantic_selection_uses_profile_predicates_without_changing_core_kind_search() {
+        use atlas_store::semantic::ConceptProfile;
+        for (kind, profile) in [
+            ("culture", ConceptProfile::Culture),
+            ("language", ConceptProfile::Language),
+            ("material", ConceptProfile::Material),
+            ("technology", ConceptProfile::Technology),
+        ] {
+            assert_eq!(
+                semantic_selection_filter(kind, "Estuary".into()).unwrap(),
+                QueryFilter::And(vec![
+                    QueryFilter::ClassifiedAs(profile),
+                    QueryFilter::LabelContains("Estuary".into()),
+                ])
+            );
+        }
+        assert_eq!(
+            semantic_selection_filter("concept", "Estuary".into()).unwrap(),
+            QueryFilter::And(vec![
+                QueryFilter::Kind(ObjectKindFilter::Concept),
+                QueryFilter::FullTextPhrase("Estuary".into()),
+            ])
+        );
+        assert!(semantic_selection_filter("unsupported", "Estuary".into()).is_err());
     }
 
     #[test]
@@ -3376,7 +3899,13 @@ mod tests {
         assert_eq!(matches.revision, 3);
         assert_eq!(matches.rows.len(), 2);
         assert_ne!(matches.rows[0].id, matches.rows[1].id);
-        assert!(matches.rows.iter().all(|row| row.kind == "person"));
+        assert_eq!(serde_json::to_value(&matches.rows[0])?["kind"], "person");
+        assert!(
+            matches
+                .rows
+                .iter()
+                .all(|row| row.kind == ObjectKindFilter::Person)
+        );
         assert_eq!(
             workspace
                 .search(
@@ -3459,7 +3988,7 @@ mod tests {
             &test_control(),
         )?;
         assert_eq!(references.rows.len(), 1);
-        assert_eq!(references.rows[0].kind, "relationship");
+        assert_eq!(references.rows[0].kind, ObjectKindFilter::Relationship);
         assert!(
             workspace
                 .search(

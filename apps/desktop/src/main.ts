@@ -2,10 +2,11 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import northbridge from "./northbridge.json";
 import "./style.css";
 import { showAuthorWorkspace } from "./author-workspace";
+import { verifyOntologySmoke } from "./ontology-smoke";
 import { benchmarkHeight, benchmarkNodeCount, benchmarkTriangles, benchmarkWidth, createGpuGraph, makeBenchmark, type GpuGraph } from "./graph-benchmark";
 
 export type Scene = typeof northbridge;
-type PlatformScene = { target: string; smoke: boolean; renderer_smoke?: boolean; scene: Scene };
+type PlatformScene = { target: string; smoke: boolean; renderer_smoke?: boolean; ontology_smoke?: boolean; scene: Scene };
 type BondSnapshot = { subject: string; target: string; kind: string; trust: number | null; tags: string[] };
 type EventSnapshot = { event: string; actor: string; witness: string; action: string; intent: string; outcome: string; source: string };
 type HistorySnapshot = { day: number; relationships: BondSnapshot[]; cause: EventSnapshot | null };
@@ -42,8 +43,16 @@ async function start() {
   const scene = benchmark ? makeBenchmark() : response.scene;
   const graph = showScene(scene, benchmark);
   const historyVerified = !response.renderer_smoke && await showHistory(response.smoke);
-  if (!response.smoke && !benchmark && isTauri() && graph) {
+  if ((!response.smoke || response.ontology_smoke) && !benchmark && isTauri() && graph) {
     await showAuthorWorkspace(response.scene, graph.setScene, graph.select);
+  }
+  if (response.ontology_smoke) {
+    const ontology = graph ? await verifyOntologySmoke() : { passed: false, tasks: [], error: "Missing graph" };
+    await invoke("complete_platform_smoke", { observation: {
+      scene_verified: false, canvas2d_verified: false, history_verified: false,
+      webgpu: "api_unavailable", ontology_verified: ontology.passed, ontology,
+    } });
+    return;
   }
   const probe = await probeWebGpu();
   const webgpu = probe.status;

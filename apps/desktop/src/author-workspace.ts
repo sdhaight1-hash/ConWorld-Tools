@@ -33,11 +33,15 @@ type SearchResult = { revision: number; truncated: boolean; next_cursor?: string
 }[] };
 type Predicate = { op: "contains" | "exact" | "exact_alias" | "full_text" | "claim_full_text"; text: string } |
   { op: "object_kind"; kind: string } |
+  { op: "classified_as"; profile: string } |
+  { op: "classified_by"; descriptor_id: string } |
+  { op: "site_area"; test: { test: "unknown" } | { test: "at_least"; amount: number; unit: "hectare" | "square_metre" } } |
   { op: "has_source"; source_id: string } |
   { op: "and" | "or"; filters: Predicate[] } |
   { op: "not"; filter: Predicate };
-export type ParameterValue = { type: "text" | "object_kind"; value: string } |
-  { type: "source"; world_id: string; source_id: string };
+export type ParameterValue = { type: "text" | "object_kind" | "concept_profile"; value: string } |
+  { type: "source"; world_id: string; source_id: string } |
+  { type: "descriptor"; world_id: string; descriptor_id: string };
 type QueryParameter = { name: string; default: ParameterValue };
 export type SavedQuery = { id: string; name: string; mode: "contains" | "exact" | "alias" | "fulltext" | "claimtext" | "composite";
   term: string; predicate?: Predicate | null; limit: number; recorded_at: number; parameters?: QueryParameter[] };
@@ -1107,14 +1111,19 @@ export async function showAuthorWorkspace(
       let control: HTMLInputElement | HTMLSelectElement;
       if (parameter.default.type === "object_kind") {
         control = document.createElement("select");
-        for (const kind of ["person", "organization", "household", "family_house", "faction", "conflict", "office", "title", "asset", "population", "conflict_issue", "conflict_phase", "succession_rule", "definition", "relationship", "event_involvement", "actor_action", "historical_event", "source", "claim"]) {
+        for (const kind of ["person", "concept", "place", "organization", "household", "family_house", "faction", "conflict", "office", "title", "asset", "population", "conflict_issue", "conflict_phase", "succession_rule", "definition", "relationship", "event_involvement", "actor_action", "historical_event", "source", "claim"]) {
           control.add(new Option(kind.replaceAll("_", " "), kind));
+        }
+      } else if (parameter.default.type === "concept_profile") {
+        control = document.createElement("select");
+        for (const profile of ["culture", "language", "material", "technology"]) {
+          control.add(new Option(profile, profile));
         }
       } else {
         control = document.createElement("input");
-        control.maxLength = parameter.default.type === "source" ? 36 : 800;
+        control.maxLength = parameter.default.type === "source" || parameter.default.type === "descriptor" ? 36 : 800;
       }
-      control.value = parameter.default.type === "source" ? parameter.default.source_id : parameter.default.value;
+      control.value = parameter.default.type === "source" ? parameter.default.source_id : parameter.default.type === "descriptor" ? parameter.default.descriptor_id : parameter.default.value;
       parameterInputs.set(parameter.name, control);
       label.append(control);
       parameterFields.append(label);
@@ -1142,6 +1151,7 @@ export async function showAuthorWorkspace(
         const value = parameterInputs.get(parameter.name)?.value ?? "";
         return { name: parameter.name, value: parameter.default.type === "source"
           ? { type: "source", world_id: snapshot!.world.id, source_id: value }
+          : parameter.default.type === "descriptor" ? { type: "descriptor", world_id: snapshot!.world.id, descriptor_id: value }
           : { type: parameter.default.type, value } };
       });
       const request = {
@@ -1223,12 +1233,24 @@ export async function showAuthorWorkspace(
     const labelPhrase = value(compositeForm, "label_phrase").trim();
     const claimPhrase = value(compositeForm, "claim_phrase").trim();
     const kind = value(compositeForm, "kind");
+    const profile = value(compositeForm, "profile");
+    const descriptor = value(compositeForm, "descriptor").trim();
+    const areaTest = value(compositeForm, "area_test");
+    if (areaTest === "unknown") filters.push({ op: "site_area", test: { test: "unknown" } });
+    if (areaTest === "at_least") {
+      const raw = value(compositeForm, "area_amount");
+      const amount = raw ? Number(raw) : -1;
+      filters.push({ op: "site_area", test: { test: "at_least", amount: Number.isSafeInteger(amount) ? amount : -1,
+        unit: value(compositeForm, "area_unit") as "hectare" | "square_metre" } });
+    }
     const source = value(compositeForm, "source").trim();
     if (text) filters.push({ op: "contains", text });
     if (alias) filters.push({ op: "exact_alias", text: alias });
     if (labelPhrase) filters.push({ op: "full_text", text: labelPhrase });
     if (claimPhrase) filters.push({ op: "claim_full_text", text: claimPhrase });
     if (kind) filters.push({ op: "object_kind", kind });
+    if (profile) filters.push({ op: "classified_as", profile });
+    if (descriptor) filters.push({ op: "classified_by", descriptor_id: descriptor });
     if (source) filters.push({ op: "has_source", source_id: source });
     if (!filters.length) return null;
     let predicate: Predicate = filters.length === 1 ? filters[0] : {

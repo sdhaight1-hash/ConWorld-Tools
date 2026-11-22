@@ -44,6 +44,75 @@ fn resolved(conn: &Connection, view: ViewContext, object: ObjectRef) -> Result<V
     resolve_object(conn, object, view.branch, view.revision, view.day)?.ok_or(Error::NotFound)
 }
 
+/// Strict hierarchy cycles are invalid only over a nonempty shared interval.
+/// Use the branch-aware metadata snapshot; validate the author graph, not a reader projection.
+fn check_spatial_cycle(
+    conn: &Connection,
+    view: ViewContext,
+    input: &NetworkInput,
+) -> Result<(), Error> {
+    let mut pending = vec![(input.target, input.starts_at, input.ends_before)];
+    let mut visited = HashSet::new();
+    let mut work = 0;
+    let mut stmt = conn.prepare(&format!(
+        "{METADATA_CTE} SELECT target_id, starts_at, ends_before FROM active_network
+         WHERE kind=?5 AND role=?6 AND subject_id=?7
+         AND (?9 IS NULL OR starts_at<?9) AND (ends_before IS NULL OR ends_before>?8)
+         LIMIT 4001"
+    ))?;
+    while let Some((node, lo, hi)) = pending.pop() {
+        if node == input.subject {
+            return Err(Error::InvalidInput("spatial containment cycle"));
+        }
+        if !visited.insert((node, lo, hi)) {
+            continue;
+        }
+        work += 1;
+        if work > 4000 {
+            return Err(Error::QueryBudgetExceeded);
+        }
+        let mut rows = stmt.query(params![
+            view.world.0.as_bytes(),
+            view.branch.0.as_bytes(),
+            view.revision.0,
+            input.starts_at,
+            input.kind.name(),
+            input.role,
+            node.id.0.as_bytes(),
+            lo,
+            hi,
+        ])?;
+        while let Some(row) = rows.next()? {
+            work += 1;
+            if work > 4000 {
+                return Err(Error::QueryBudgetExceeded);
+            }
+            let start: i64 = row.get(1)?;
+            let end: Option<i64> = row.get(2)?;
+            let lo = lo.max(start);
+            let hi = match (hi, end) {
+                (Some(a), Some(b)) => Some(a.min(b)),
+                (a, b) => a.or(b),
+            };
+            if hi.is_none_or(|end| lo < end) {
+                pending.push((ref_id(view.world, row.get(0)?), lo, hi));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn strict_spatial(kind: NetworkKind) -> bool {
+    matches!(
+        kind,
+        NetworkKind::ProperPartWithin | NetworkKind::AdminPartOf
+    )
+}
+
+fn valid_spatial_lens(lens: &str) -> bool {
+    !lens.is_empty() && lens.len() <= 80 && lens.trim() == lens
+}
+
 impl Store {
     pub fn create_identity(
         &mut self,
@@ -107,6 +176,71 @@ impl Store {
             return Err(Error::WrongKind);
         }
         match input.kind {
+            NetworkKind::ProperPartWithin | NetworkKind::AdminPartOf
+                if matches!(subject.record.data, ObjectData::Place)
+                    && matches!(target.record.data, ObjectData::Place) =>
+            {
+                if !valid_spatial_lens(&input.role) {
+                    return Err(Error::InvalidInput("spatial hierarchy"));
+                }
+                check_spatial_cycle(&tx, view, input)?;
+            }
+            NetworkKind::LocatedAt if matches!(target.record.data, ObjectData::Place) => {
+                let compatible = match input.role.as_str() {
+                    "birth" | "death" | "presence" => {
+                        matches!(subject.record.data, ObjectData::Person)
+                    }
+                    "residence" => matches!(
+                        subject.record.data,
+                        ObjectData::Person | ObjectData::Household
+                    ),
+                    "event_site" => {
+                        matches!(subject.record.data, ObjectData::HistoricalEvent { .. })
+                    }
+                    "headquarters" => institution(&subject.record.data),
+                    "asset_placement" => matches!(subject.record.data, ObjectData::Asset),
+                    "population_origin" => matches!(subject.record.data, ObjectData::Population),
+                    _ => false,
+                };
+                if !compatible {
+                    return Err(Error::WrongKind);
+                }
+            }
+            NetworkKind::CultureLanguage | NetworkKind::WorkingMaterial
+                if subject.record.data == ObjectData::Concept
+                    && target.record.data == ObjectData::Concept =>
+            {
+                use crate::semantic::ConceptProfile;
+                let (subject_profile, target_profile, role) = match input.kind {
+                    NetworkKind::CultureLanguage => (
+                        ConceptProfile::Culture,
+                        ConceptProfile::Language,
+                        "documented_language",
+                    ),
+                    NetworkKind::WorkingMaterial => (
+                        ConceptProfile::Technology,
+                        ConceptProfile::Material,
+                        "working_medium",
+                    ),
+                    _ => unreachable!(),
+                };
+                if input.role != role {
+                    return Err(Error::InvalidInput("semantic relation role"));
+                }
+                if !super::classification::has_profile(
+                    &tx,
+                    effective,
+                    input.subject,
+                    subject_profile,
+                )? || !super::classification::has_profile(
+                    &tx,
+                    effective,
+                    input.target,
+                    target_profile,
+                )? {
+                    return Err(Error::WrongKind);
+                }
+            }
             NetworkKind::HeirDesignation
                 if matches!(subject.record.data, ObjectData::Person)
                     && matches!(target.record.data, ObjectData::Title) => {}
@@ -127,6 +261,8 @@ impl Store {
                             | ObjectData::ConflictIssue
                             | ObjectData::ConflictPhase
                             | ObjectData::SuccessionRule
+                            | ObjectData::Concept
+                            | ObjectData::Place
                     ) => {}
             NetworkKind::Alliance
                 if matches!(subject.record.data, ObjectData::Faction)
@@ -225,9 +361,10 @@ impl Store {
         let duplicate: bool = tx.query_row(
             &format!("{METADATA_CTE} SELECT EXISTS(SELECT 1 FROM active_network WHERE kind=?5
              AND ((subject_id=?6 AND target_id=?7) OR (?5 IN ('marriage','alliance') AND subject_id=?7 AND target_id=?6))
-             AND (?8 IS NULL OR starts_at<?8) AND (ends_before IS NULL OR ends_before>?4))"),
+             AND (?8 IS NULL OR starts_at<?8) AND (ends_before IS NULL OR ends_before>?4)
+             AND (?5 NOT IN ('proper_part_within','admin_part_of','located_at') OR role=?9))"),
             params![view.world.0.as_bytes(),view.branch.0.as_bytes(),view.revision.0,input.starts_at,
-                kind,input.subject.id.0.as_bytes(),input.target.id.0.as_bytes(),input.ends_before], |row| row.get(0))?;
+                kind,input.subject.id.0.as_bytes(),input.target.id.0.as_bytes(),input.ends_before,input.role], |row| row.get(0))?;
         if duplicate {
             return Err(Error::InvalidInput("overlapping network fact"));
         }
@@ -398,6 +535,107 @@ impl Store {
             });
         }
         Ok(result)
+    }
+
+    /// Bounded, author-only descendant snapshot. The lens is an exact
+    /// authored identifier, never mixed with another containment vocabulary.
+    pub(crate) fn within_place(
+        &self,
+        view: ViewContext,
+        filter: &QueryFilter,
+        limit: usize,
+    ) -> Result<crate::query::QueryResult, Error> {
+        let QueryFilter::WithinPlace {
+            root,
+            kind,
+            lens,
+            include_self,
+            max_depth,
+        } = filter
+        else {
+            return Err(Error::InvalidInput("spatial query"));
+        };
+        let (root, kind, include_self, max_depth) = (*root, *kind, *include_self, *max_depth);
+        let tx = self.conn.unchecked_transaction()?;
+        metadata_world(&tx, view, false)?;
+        if !strict_spatial(kind) || !valid_spatial_lens(lens) {
+            return Err(Error::InvalidInput("spatial hierarchy"));
+        }
+        if !(1..=32).contains(&max_depth) {
+            return Err(Error::InvalidInput("spatial traversal depth"));
+        }
+        let root_version = resolved(&tx, view, root)?;
+        if !matches!(root_version.record.data, ObjectData::Place) {
+            return Err(Error::WrongKind);
+        }
+        let mut pending = VecDeque::from([(root, 0_u8)]);
+        let mut seen = HashSet::from([root]);
+        let mut result = Vec::new();
+        if include_self {
+            result.push(root_version);
+        }
+        let mut work = 0;
+        let mut stmt = tx.prepare(&format!(
+            "{METADATA_CTE} SELECT subject_id,source_id FROM active_network
+             WHERE kind=?5 AND role=?6 AND target_id=?7
+             AND starts_at<=?4 AND (ends_before IS NULL OR ends_before>?4)
+             ORDER BY id LIMIT 4001"
+        ))?;
+        while let Some((node, depth)) = pending.pop_front() {
+            self.check_query_control()?;
+            if depth == max_depth {
+                continue;
+            }
+            let mut rows = stmt.query(params![
+                view.world.0.as_bytes(),
+                view.branch.0.as_bytes(),
+                view.revision.0,
+                view.day.0,
+                kind.name(),
+                lens,
+                node.id.0.as_bytes(),
+            ])?;
+            while let Some(row) = rows.next()? {
+                self.check_query_control()?;
+                work += 1;
+                if work > 4000 {
+                    return Err(Error::QueryBudgetExceeded);
+                }
+                let child = ref_id(view.world, row.get(0)?);
+                let source = ref_id(view.world, row.get(1)?);
+                if seen.contains(&child)
+                    || resolve_object(&tx, source, view.branch, view.revision, view.day)?.is_none()
+                {
+                    continue;
+                }
+                let Some(version) =
+                    resolve_object(&tx, child, view.branch, view.revision, view.day)?
+                else {
+                    continue;
+                };
+                if !matches!(version.record.data, ObjectData::Place) {
+                    continue;
+                }
+                seen.insert(child);
+                pending.push_back((child, depth + 1));
+                result.push(version);
+            }
+        }
+        result.sort_by(|a, b| {
+            a.record
+                .label
+                .cmp(&b.record.label)
+                .then(a.object.id.0.cmp(&b.object.id.0))
+        });
+        drop(stmt);
+        tx.commit()?;
+        let truncated = result.len() > limit;
+        result.truncate(limit);
+        Ok(crate::query::QueryResult {
+            rows: result,
+            truncated,
+            revision: view.revision,
+        })
     }
 
     /// Traverse only persisted, active, confirmed event links; allegations never enter the DAG.
@@ -585,6 +823,8 @@ impl Store {
                             | ObjectData::ConflictIssue
                             | ObjectData::ConflictPhase
                             | ObjectData::SuccessionRule
+                            | ObjectData::Concept
+                            | ObjectData::Place
                     )
                 })
                 .map(|item| item.object)

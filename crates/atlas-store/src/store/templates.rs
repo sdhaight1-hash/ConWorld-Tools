@@ -190,6 +190,7 @@ fn fresh_elements(element: &mut LayoutElement, source: ObjectRef, destination: O
             QueryFilter::ParticipantEvents { participant, .. } => rebind(participant),
             QueryFilter::EventRole { event, .. } => rebind(event),
             QueryFilter::RelationshipPath { start, .. } => rebind(start),
+            QueryFilter::WithinPlace { root, .. } => rebind(root),
             QueryFilter::Backlinks(target) => rebind(target),
             _ => {}
         },

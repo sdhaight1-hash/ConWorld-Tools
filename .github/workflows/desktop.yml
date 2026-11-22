@@ -4,6 +4,10 @@ on:
   push:
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -67,6 +71,15 @@ jobs:
         run: |
           ./apps/desktop/scripts/windows-platform-smoke.ps1 -Binary ./target/debug/atlas-desktop.exe
           ./apps/desktop/scripts/windows-platform-smoke.ps1 -Binary ./target/debug/atlas-desktop.exe -RendererBenchmark
+          ./apps/desktop/scripts/windows-platform-smoke.ps1 -Binary ./target/debug/atlas-desktop.exe -Ontology -CaptureDirectory ./Development-Screenshots
+      - name: Upload native ontology capture
+        if: runner.os == 'Windows' && success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: phase-03-native-ontology
+          path: Development-Screenshots/*_phase-03_semantic_native-ontology-evidence_01.png
+          if-no-files-found: error
+          retention-days: 30
       - name: Browser fallback smoke tests
         if: runner.os == 'Linux'
         working-directory: apps/desktop
@@ -87,6 +100,14 @@ jobs:
         with:
           name: phase-03-browser-saved-parameters
           path: Development-Screenshots/*_phase-03_query_saved-parameter-override_01.png
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload semantic endpoint picker browser capture
+        if: runner.os == 'Linux' && success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: phase-03-browser-semantic-profile-picker
+          path: Development-Screenshots/*_phase-03_semantic_mock-native-profile-picker_01.png
           if-no-files-found: error
           retention-days: 30
       - name: Upload Phase 3 focused discovery browser capture
@@ -177,5 +198,13 @@ jobs:
         with:
           name: phase-04-browser-image-hotspots
           path: Development-Screenshots/*_phase-04_canvas_mock-native-image-hotspots_01.png
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload semantic authoring browser captures
+        if: runner.os == 'Linux' && success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: phase-03-semantic-annotation
+          path: Development-Screenshots/*_phase-03_semantic_mock-native-annotation-*.png
           if-no-files-found: error
           retention-days: 30

@@ -86,3 +86,41 @@ Risks: unnecessary extensibility (A/B comparison and stop), duplicate data (cano
 ## 7. Canonical reconciliation record
 
 01 INV-11 unchanged, elaborated shared descriptors; 03 §§1/6/8 identity/ref metadata distinction; 06 §§1/4 profile vs layout; 07 typed query pins/source/scope; 08 storage/reference/migration additive constraints; 09 AE gates separate; 10 dependencies unchanged; 12 ADR-007 refinement and D-004/005 preservation. [ADR-007](../ADRs/adr-007-governed-semantic-extensibility.md) records exact direction and unresolved physical details. The research disposition is acceptance of bounded architectural evolution, not new product scope or implemented behavior.
+
+## AE-01 implementation evidence
+
+Baseline at `5777f0f`. [Desktop checks on Linux and Windows](https://github.com/sdhaight1-hash/ConWorld-Tools/actions/runs/44985041494) passed. The caption reauthorization test also passed alone in 0.10 s. An 11-second delay between reopening the database and searching reproduced `QueryDeadlineExceeded` on the next search. With a separate 10-second control for each request the same delayed run passed in 11.11 s. The delay was removed after the experiment. This isolates one failure mechanism without attributing every historical CI timeout to it.
+
+### Three author tasks
+
+Run `cargo run --locked -p atlas-store --example ontology_author_tasks` against the native store. The example writes one source, one survey event and three independently addressable author claims. All three source- and kind-filtered phrase queries returned the original claim on day 10 and no rows on day 9. These are command-level results. A user's interaction count and completion time in the desktop remain unmeasured.
+
+| Author task | Current native result | What the original design (A) must support | Additional behavior exercised in the research fixture |
+| --- | --- | --- | --- |
+| Record a culture's documented language | Retrieves the testimony by language phrase. The language mentioned in the statement has no independently selectable ID. | Link two Concept identities with a dated, sourced fact. A name change must preserve the target. | Curated profile (B) rejects a material as the language target and suppresses private target evidence. |
+| Record a measured area at a material-working site | Retrieves the survey text with the unit exactly as written. A numeric area comparison cannot use this text. | Preserve the Place identity, the source and the original measurement. Keep spatial containment with #68. | B distinguishes explicit unknown from a quantity, rejects the wrong unit and preserves earlier unit interpretation. |
+| Describe a new drive technology and its working medium | Retrieves the term “amber” in its source context. This suffices for a notebook entry. | A named Concept and explicit material relation suffice for navigation. | A setting-specific descriptor (C) gives multiple drives a reusable material selector in the model. Authoring effort saved by reusing it still needs observation. |
+
+Re-ran both [classification](../Research-Studies/ontology-prototype/check.py) and [value](../Research-Studies/ontology-value-prototype/check.py) fixtures. The value fixture passed 20 equality checks with nine invalid cases rejected. Neither fixture is a native implementation of A, B or C. Follow-up should compare completing and correcting the same tasks in the desktop, including a material rename, a unit revision and a second drive. Defer a general field editor. Start with the missing Concept identity and original fact semantics when the migration owner is settled.
+
+### Integration ownership
+
+- Search uses one exhaustive Rust conversion from an existing object payload to its query kind for historical predicates and desktop search results. Existing saved predicates, serialized kind strings and publication rules keep their contracts. A new core payload requires an explicit classification at compile time.
+- Held [spatial PR #67](https://github.com/sdhaight1-hash/ConWorld-Tools/pull/67), inspected at `3103856`, adds Place to the two identity allowlists in SQL migration 0037 and changes both search paths. On integration, add Place to the exhaustive conversion, reuse the search row serializer and test the Place predicate before accepting the spatial changes. Coordinate a single ordered migration history with #68. Do not issue a parallel 0037 for Concept.
+- Network and accepted parentage facts retain their existing ID and domain validators. A common resolver still needs tests for fact family, world, branch, revision, withdrawal and reader scope before Canvas, discovery or #70 can consume it. This pass adds no new publication or transform capability.
+
+### Native desktop authoring observations
+
+Ran the Tauri Linux desktop on the PR #73 tree with the relationship-kind test correction. Used a fresh local world, the normal event and sourced-account forms, and the historical claim-text search. A WebKit inspector script selected form values and pressed the normal submit buttons. The application handled persistence and queries through its native commands. This measures form submissions and returned records. It does not measure human completion time.
+
+| Task | Day 10 entry | Day 11 follow-up | Outcome |
+| --- | --- | --- | --- |
+| Language | Entered a cited account using “Estuary speech” | Entered a register addendum calling it “Estuary Standard” | Both strings are searchable on their respective dates. The two accounts do not establish that the names refer to the same language. |
+| Area | Entered a site survey reporting twelve hectares | Entered a second survey reporting 120000 square metres | Each statement retained its citation. The form records neither a numeric quantity nor a unit identifier, so numeric equivalence cannot be verified through these records. |
+| Working medium | Entered a workshop account for Drive One mentioning amber | Entered another for Drive Two using the same material | An amber search on day 11 returned two distinct claim IDs and two distinct citations. Returning to day 10 yielded only the first record. Neither claim binds to a reusable material ID. |
+
+One world creation and one event submission established the shared context. Each initial or follow-up account took one submission, with a statement, citation and author-only audience. The script checked the three original results with citations, all three empty searches on day 9, later additions, and historical reads after the later writes. Its final view showed revision 7. The direct identity creation menu offered 13 kinds, including Asset and Population. It offered no Concept or Place option. The screenshot records the actual two-result view. [Native desktop capture](../../Development-Screenshots/2026-11-22_05-34-14Z_phase-03_query_native-ontology-author-tasks_01.png)
+
+**Decision for the next implementation slice.** Keep the sourced-account workflow available when prose is sufficient. For the first structured comparison, use a renameable Concept and a separately recorded source-backed reference. Re-run the language rename and second-drive case against that baseline before adding curated descriptors. Keep Place measurement dependent on the #67/#68 migration decision. Repeated testimony provided no evidence that an author-defined schema editor is necessary.
+
+AE-01 has native evidence for the existing desktop. The comparative authoring costs of original-design Concepts (A), curated descriptors (B) and world-specific descriptors (C) remain unmeasured on equivalent native controls. AE-02–09 remain open.

@@ -368,14 +368,17 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
         let control: HTMLInputElement | HTMLSelectElement;
         if (parameter.default.type === "object_kind") {
           control = document.createElement("select");
-          for (const kind of ["person", "organization", "household", "family_house", "faction", "conflict", "office", "title", "asset", "population", "conflict_issue", "conflict_phase", "succession_rule", "definition", "relationship", "event_involvement", "actor_action",
+          for (const kind of ["person", "concept", "place", "organization", "household", "family_house", "faction", "conflict", "office", "title", "asset", "population", "conflict_issue", "conflict_phase", "succession_rule", "definition", "relationship", "event_involvement", "actor_action",
             "historical_event", "source", "claim"]) control.add(new Option(kind.replaceAll("_", " "), kind));
+        } else if (parameter.default.type === "concept_profile") {
+          control = document.createElement("select");
+          for (const profile of ["culture", "language", "material", "technology"]) control.add(new Option(profile, profile));
         } else {
           control = document.createElement("input");
-          control.maxLength = parameter.default.type === "source" ? 36 : 800;
+          control.maxLength = parameter.default.type === "source" || parameter.default.type === "descriptor" ? 36 : 800;
         }
         control.required = true;
-        control.value = selected.type === "source" ? selected.source_id : selected.value;
+        control.value = selected.type === "source" ? selected.source_id : selected.type === "descriptor" ? selected.descriptor_id : selected.value;
         label.append(control);
         parameterHost.append(label);
         parameterInputs.set(parameter.name, control);
@@ -395,6 +398,7 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
           const value = parameterInputs.get(parameter.name)!.value;
           const bound: ParameterValue = parameter.default.type === "source"
             ? { type: "source", world_id: worldId, source_id: value }
+            : parameter.default.type === "descriptor" ? { type: "descriptor", world_id: worldId, descriptor_id: value }
             : { type: parameter.default.type, value };
           return { name: parameter.name, value: bound };
         });
