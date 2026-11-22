@@ -354,6 +354,7 @@ export function editCanvasTree(host: HTMLElement, original: Block, worldId: stri
       if (customTemplates.length) {
         const choice = document.createElement("select");
         for (const item of customTemplates) choice.add(new Option(item.name + " · revision " + item.revision, item.id));
+        choice.setAttribute("aria-label", "Custom template");
         field("Custom template", choice);
         controls.append(button("Insert custom template", async () => {
           const item = customTemplates.find(item => item.id === choice.value);
