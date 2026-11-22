@@ -1,3 +1,4 @@
+import { canLeaveEntryDrafts } from "./entry-drafts";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import northbridge from "./northbridge.json";
 import "./style.css";
@@ -333,7 +334,7 @@ function showScene(scene: Scene, benchmark: boolean) {
 
   function select(id: string) {
     const node = nodes.get(id);
-    if (!node) return;
+    if (!node || !canLeaveEntryDrafts()) return;
     buttons.get(active)?.setAttribute("aria-pressed", "false");
     active = id;
     buttons.get(id)?.setAttribute("aria-pressed", "true");
@@ -368,6 +369,7 @@ function showScene(scene: Scene, benchmark: boolean) {
   }
 
   function setScene(next: Scene, inspect?: typeof inspectRecord) {
+    if (!canLeaveEntryDrafts()) return;
     const sameWorld = savedWorld && inspect !== undefined;
     const focused = document.activeElement instanceof HTMLButtonElement
       ? document.activeElement.dataset.node

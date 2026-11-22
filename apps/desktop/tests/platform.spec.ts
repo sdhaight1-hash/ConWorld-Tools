@@ -2478,3 +2478,188 @@ test("semantic inspection invalidates pending replies and stale actions when foc
   await expect(studio.locator("[data-status]")).toContainText("Select Culture documented language");
   await expect(studio.locator("[data-picker-results]")).toBeEmpty();
 });
+
+
+test("creation commands use the loaded author revision and reject a changed day before refresh", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "guard-world", name: "Revision guard", revision: 7 };
+    const people = [{ id: "alice", label: "Alice" }, { id: "beatrice", label: "Beatrice" }];
+    const writes: { command: string; args: unknown }[] = [];
+    Object.assign(window, { isTauri: true, __creationWrites: writes, __TAURI_INTERNALS__: {
+      invoke: async (command: string, args: Record<string, unknown>) => {
+        if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+        if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+        if (command === "workspace_worlds") return [world];
+        if (command === "workspace_saved_queries") return [];
+        if (command === "workspace_snapshot") return { world, day: args.day, view_revision: world.revision, people, relationships: [], events: [] };
+        if (command === "workspace_create_person" || command === "workspace_create_relationship") {
+          writes.push({ command, args });
+          world.revision++;
+          return null;
+        }
+        throw new Error("Unexpected mock command: " + command);
+      },
+    } });
+  });
+  await page.goto("/");
+  await expect(page.locator("#author-status")).toContainText("World loaded");
+  const person = page.locator("#author-create-person");
+  await person.locator('[name="name"]').fill("Cora");
+  await page.evaluate(() => {
+    document.querySelector<HTMLInputElement>("#author-day")!.value = "10";
+    document.querySelector<HTMLFormElement>("#author-create-person")!.requestSubmit();
+  });
+  await expect(page.locator("#author-status")).toContainText("Refresh the selected historical view");
+  const writes = () => page.evaluate(() => (window as unknown as { __creationWrites: { command: string; args: unknown }[] }).__creationWrites);
+  expect(await writes()).toEqual([]);
+  await page.locator("#author-refresh-view").click();
+  await expect(page.locator("#author-world-info")).toContainText("historical day 10");
+  await person.getByRole("button", { name: "Add person" }).click();
+  await expect(page.locator("#author-status")).toContainText("Saved to local world history");
+  expect((await writes())[0]).toEqual({ command: "workspace_create_person", args: { worldId: "guard-world", expectedRevision: 7, name: "Cora" } });
+  await page.locator("#author-create-relationship button[type=submit]").click();
+  await expect(page.locator("#author-status")).toContainText("Saved to local world history");
+  expect((await writes())[1]).toMatchObject({ command: "workspace_create_relationship", args: { request: { world_id: "guard-world", expected_revision: 8, day: 10 } } });
+  const kinds = await page.locator('#author-composite-form select[name="kind"] option').evaluateAll(options => options.map(option => (option as HTMLOptionElement).value));
+  expect(kinds).toEqual(["","person","concept","place","organization","household","family_house","faction","conflict","office","title","asset","population","conflict_issue","conflict_phase","succession_rule","definition","relationship","event_involvement","actor_action","historical_event","source","claim"]);
+});
+
+
+test("entry draft blocks view changes, retains a failed save and can be explicitly discarded", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "draft-world", name: "Draft safety", revision: 4 };
+    const people = [{ id: "alice", label: "Alice" }, { id: "beatrice", label: "Beatrice" }];
+    let saves = 0;
+    let release: (() => void) | undefined;
+    let saved: unknown = null;
+    Object.assign(window, { isTauri: true, __resolveDraftSave: () => release?.(), __TAURI_INTERNALS__: {
+      invoke: async (command: string, args: { day?: number; revision?: number; document?: unknown; published?: boolean }) => {
+        if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+        if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+        if (command === "workspace_worlds") return [world];
+        if (command === "workspace_saved_queries") return [];
+        if (command === "workspace_snapshot") return { world, day: args.day ?? 0, view_revision: args.revision ?? world.revision, people, relationships: [], events: [] };
+        if (command === "workspace_entry_layout") return saved;
+        if (command === "workspace_save_layout") {
+          saves++;
+          if (saves === 1) throw new Error("Simulated stale revision");
+          await new Promise<void>(resolve => { release = resolve; });
+          saved = [args.document, args.published]; world.revision++;
+          return null;
+        }
+        throw new Error("Unexpected mock command: " + command);
+      },
+    } });
+  });
+  await page.goto("/");
+  await expect(page.locator("#author-status")).toContainText("World loaded");
+  const graph = page.getByRole("region", { name: "Saved world graph" });
+  const inspector = graph.getByRole("complementary", { name: "Node inspector" });
+  await graph.locator("#nodes button[data-node=alice]").click();
+  await inspector.getByRole("button", { name: "Open character page" }).click();
+  const text = inspector.getByRole("textbox", { name: "Page text", exact: true });
+  await text.fill("Retain this draft");
+  await graph.locator("#nodes button[data-node=beatrice]").click();
+  await expect(text).toHaveValue("Retain this draft");
+  await expect(inspector.locator("[data-draft-status]")).toContainText("Save or discard");
+  const day = page.locator("#author-day");
+  await day.fill("42");
+  await day.blur();
+  await expect(day).toHaveValue("0");
+  await expect(text).toHaveValue("Retain this draft");
+  await inspector.getByRole("button", { name: "Save page" }).click();
+  await expect(inspector.locator("[data-draft-status]")).toContainText("Save failed");
+  await expect(text).toHaveValue("Retain this draft");
+  if (process.env.ATLAS_CAPTURE_PHASE3 === "1") {
+    const timestamp = new Date().toISOString().slice(0, 19).replace("T", "_").replaceAll(":", "-") + "Z";
+    await inspector.screenshot({ path: "../../Development-Screenshots/" + timestamp + "_phase-04_canvas_mock-native-draft-guard_01.png", animations: "disabled" });
+  }
+  await inspector.getByRole("button", { name: "Discard unsaved page changes" }).click();
+  await expect(text).toHaveValue("");
+  await text.fill("Save this instead");
+  await inspector.getByRole("button", { name: "Save page" }).click();
+  await expect(inspector.locator("[data-draft-status]")).toHaveText("Saving page…");
+  await graph.locator("#nodes button[data-node=beatrice]").click();
+  await expect(inspector.locator("[data-draft-status]")).toContainText("Wait for the result");
+  await page.evaluate(() => (window as unknown as { __resolveDraftSave: () => void }).__resolveDraftSave());
+  await expect(page.locator("#author-world-info")).toContainText("Author revision 5 / 5");
+  await inspector.getByRole("button", { name: "Open character page" }).click();
+  await expect(text).toHaveValue("Save this instead");
+  await graph.locator("#nodes button[data-node=beatrice]").click();
+  await expect(inspector.getByRole("button", { name: "Open character page" })).toBeVisible();
+});
+
+
+test("Canvas reference picker uses the pinned ontology search, preserves captions and ignores late results", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "reference-world", name: "Reference selection", revision: 4 };
+    const people = [{ id: "alice", label: "Alice" }];
+    const calls: { command: string; args: unknown }[] = [];
+    let finishOld: (() => void) | undefined;
+    Object.assign(window, { isTauri: true, __referenceCalls: calls, __finishOldReference: () => finishOld?.(), __TAURI_INTERNALS__: {
+      invoke: async (command: string, args: { day?: number; phrase?: string }) => {
+        if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+        if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+        if (command === "workspace_worlds") return [world];
+        if (command === "workspace_saved_queries") return [];
+        if (command === "workspace_snapshot") return { world, day: args.day ?? 0, view_revision: world.revision, people, relationships: [], events: [] };
+        if (command === "workspace_entry_layout") return null;
+        if (command === "workspace_cancel_query") { calls.push({ command, args }); return null; }
+        if (command === "workspace_semantic_candidates") {
+          calls.push({ command, args });
+          if (args.phrase === "Old") {
+            await new Promise<void>(resolve => { finishOld = resolve; });
+            return { rows: [{ id: "old", label: "Obsolete", kind: "concept" }], truncated: false };
+          }
+          return { rows: [{ id: "concept-one", label: "Amber", kind: "concept" },
+            { id: "place-two", label: "Amber", kind: "place" }], truncated: false };
+        }
+        if (command === "workspace_save_layout") {
+          calls.push({ command, args }); world.revision++; return null;
+        }
+        throw new Error("Unexpected mock command: " + command);
+      },
+    } });
+  });
+  await page.goto("/");
+  const graph = page.getByRole("region", { name: "Saved world graph" });
+  const inspector = graph.getByRole("complementary", { name: "Node inspector" });
+  await inspector.getByRole("button", { name: "Open character page" }).click();
+  await inspector.getByRole("textbox", { name: "Page text", exact: true }).fill("Amber research");
+  await inspector.getByRole("button", { name: "Add entry link" }).click();
+  await inspector.getByLabel("Link caption").fill("A carefully authored caption");
+  await inspector.getByText("Find link target", { exact: true }).click();
+  const picker = inspector.locator("[data-reference-picker]");
+  await picker.getByRole("searchbox", { name: "Search link target" }).fill("Old");
+  await picker.getByRole("button", { name: "Search references" }).click();
+  await expect(picker.getByText("Searching the selected author view…")).toBeVisible();
+  await picker.getByRole("searchbox", { name: "Search link target" }).fill("Amber");
+  await picker.getByRole("button", { name: "Search references" }).click();
+  await expect(picker.getByRole("button", { name: "Amber · concept · concept-one" })).toBeVisible();
+  await page.evaluate(() => (window as unknown as { __finishOldReference: () => void }).__finishOldReference());
+  await expect(picker.getByRole("button", { name: "Amber · place · place-two" })).toBeVisible();
+  await expect(picker.getByText("Obsolete", { exact: false })).toHaveCount(0);
+  if (process.env.ATLAS_CAPTURE_PHASE3 === "1") {
+    const timestamp = new Date().toISOString().slice(0, 19).replace("T", "_").replaceAll(":", "-") + "Z";
+    await inspector.screenshot({ path: "../../Development-Screenshots/" + timestamp + "_phase-04_canvas_mock-native-reference-picker_01.png", animations: "disabled" });
+  }
+  await picker.getByRole("button", { name: "Amber · concept · concept-one" }).click();
+  await expect(inspector.getByLabel("Link target identity")).toHaveValue("concept-one");
+  await expect(inspector.getByLabel("Link caption")).toHaveValue("A carefully authored caption");
+  await expect(inspector.getByLabel("Link target identity")).toBeFocused();
+  const calls = () => page.evaluate(() => (window as unknown as { __referenceCalls: { command: string; args: unknown }[] }).__referenceCalls);
+  const before = await calls();
+  expect(before.filter(call => call.command === "workspace_save_layout")).toHaveLength(0);
+  expect(before.filter(call => call.command === "workspace_semantic_candidates")).toMatchObject([
+    { args: { request: { world_id: "reference-world", day: 0, revision: 4 }, kind: "entry", phrase: "Old" } },
+    { args: { request: { world_id: "reference-world", day: 0, revision: 4 }, kind: "entry", phrase: "Amber" } },
+  ]);
+  expect(before.filter(call => call.command === "workspace_cancel_query")).toHaveLength(1);
+  await inspector.getByRole("button", { name: "Save page" }).click();
+  await expect(page.locator("#author-world-info")).toContainText("Author revision 5 / 5");
+  expect((await calls()).filter(call => call.command === "workspace_save_layout")).toMatchObject([
+    { args: { document: { root: { content: { Stack: [
+      expect.anything(), expect.anything(), { content: { ObjectLink: { target: { world: "reference-world", id: "concept-one" }, label: "A carefully authored caption" } } },
+    ] } } } } },
+  ]);
+});

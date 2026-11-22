@@ -1,3 +1,4 @@
+import { canLeaveEntryDrafts } from "./entry-drafts";
 import {invoke} from "@tauri-apps/api/core";
 
 export function openMediaStudio(parent:HTMLElement,request:{world_id:string;revision:number;day:number},editable:boolean,refresh:()=>Promise<void>,valid:()=>boolean){
@@ -10,7 +11,7 @@ export function openMediaStudio(parent:HTMLElement,request:{world_id:string;revi
   const form=host.querySelector("form")!,input=form.elements.namedItem("image") as HTMLInputElement,status=host.querySelector<HTMLElement>("[role=status]")!;
   const submit=form.querySelector("button")!;submit.disabled=!editable;input.disabled=!editable;
   form.onsubmit=async event=>{
-    event.preventDefault();if(!valid()||!editable||submit.disabled)return;const file=input.files?.[0];if(!file)return;
+    event.preventDefault();if(!valid()||!editable||submit.disabled||!canLeaveEntryDrafts())return;const file=input.files?.[0];if(!file)return;
     if(file.size>2*1024*1024){status.textContent="Image exceeds 2 MiB.";return;}
     submit.disabled=true;
     try{const bytes=Array.from(new Uint8Array(await file.arrayBuffer()));if(!valid())return;await invoke("workspace_import_png",{request,name:file.name,bytes});if(valid())await refresh();}
