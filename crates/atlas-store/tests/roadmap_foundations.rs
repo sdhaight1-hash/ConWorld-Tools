@@ -3480,3 +3480,133 @@ fn schema_37_spatial_lineage_is_rejected_without_mutating_archive() -> Result<()
     assert_eq!(schema, 37);
     Ok(())
 }
+
+#[test]
+fn ontology_migration_from_reconstructed_schema_36_preserves_fact_history() -> Result<(), Error> {
+    use atlas_store::{
+        archive::restore_archive,
+        genealogy::RecordParentage,
+        network::{IdentityKind, NetworkInput, NetworkKind},
+        semantic::{FactFamily, FactRef},
+    };
+    let dir = tempfile::tempdir()?;
+    let path = dir.path().join("schema36.sqlite");
+    let mut store = Store::open(&path)?;
+    let world = seed(&mut store)?;
+    let mut author = view(&world, 13);
+    let house = store.create_identity(
+        author,
+        IdentityKind::FamilyHouse,
+        "House Vale",
+        Uuid::new_v4(),
+    )?;
+    author.revision = AuthorRevision(2);
+    let network = store.record_network_fact(
+        author,
+        &NetworkInput {
+            subject: id(&world, 2),
+            target: house,
+            source: id(&world, 9),
+            kind: NetworkKind::Membership,
+            role: "member".into(),
+            starts_at: 13,
+            ends_before: None,
+        },
+        Uuid::new_v4(),
+    )?;
+    author.revision = AuthorRevision(3);
+    let parentage = store.record_parentage(
+        author,
+        RecordParentage {
+            parent: id(&world, 1),
+            child: id(&world, 2),
+            kind: ParentageKind::Biological,
+            starts_at: WorldDay(0),
+            ends_before: None,
+            command_id: Uuid::new_v4(),
+            rationale: "Register",
+        },
+    )?;
+    author.revision = AuthorRevision(4);
+    let references = [
+        FactRef {
+            world: world.id,
+            family: FactFamily::Network,
+            id: network,
+        },
+        FactRef {
+            world: world.id,
+            family: FactFamily::Parentage,
+            id: parentage,
+        },
+    ];
+    let expected = references
+        .iter()
+        .map(|reference| store.resolve_semantic_fact(*reference, author))
+        .collect::<Result<Vec<_>, _>>()?;
+    let expected_person = store.get_object(id(&world, 2), author)?;
+    drop(store);
+
+    // Restore schema-36 DDL using the original registry and network migrations,
+    // keeping the existing canonical rows. No ontology facts are fabricated.
+    let connection = rusqlite::Connection::open(&path)?;
+    connection.execute_batch(
+        "PRAGMA foreign_keys=OFF;
+         BEGIN IMMEDIATE;
+         DROP TABLE IF EXISTS site_area_withdrawals;
+         DROP TABLE IF EXISTS site_area_facts;
+         DROP TABLE classification_withdrawals;
+         DROP TABLE concept_classifications;",
+    )?;
+    let registry = include_str!("../migrations/0032.sql");
+    let (objects, _) = registry
+        .split_once("CREATE TABLE network_facts_v32")
+        .expect("original object registry");
+    let (_, ghosts) = registry
+        .split_once("CREATE TABLE ghost_proposals_v32")
+        .expect("original ghost registry");
+    connection.execute_batch(objects)?;
+    connection.execute_batch(&format!("CREATE TABLE ghost_proposals_v32{ghosts}"))?;
+    connection.execute_batch(include_str!("../migrations/0035.sql"))?;
+    connection.execute_batch("PRAGMA user_version=36; COMMIT;")?;
+    drop(connection);
+    assert_eq!(inspect_archive(&path, Scope::Author)?.schema, 36);
+
+    // A broken source archive must fail migration atomically.
+    let broken = dir.path().join("broken.sqlite");
+    std::fs::copy(&path, &broken)?;
+    let connection = rusqlite::Connection::open(&broken)?;
+    connection.execute_batch(
+        "PRAGMA foreign_keys=OFF;
+         INSERT INTO objects(world_id,id,kind) VALUES(randomblob(16),randomblob(16),'person');",
+    )?;
+    drop(connection);
+    assert!(Store::open(&broken).is_err());
+    let connection = rusqlite::Connection::open(&broken)?;
+    let revision: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    assert_eq!(revision, 36);
+    let new_table: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name='concept_classifications')",
+        [],
+        |row| row.get(0),
+    )?;
+    assert!(!new_table);
+    drop(connection);
+
+    let restored = dir.path().join("restored.sqlite");
+    let manifest = restore_archive(&path, &restored, Scope::Author)?;
+    assert!(manifest.schema >= 40);
+    let reopened = Store::open(&restored)?;
+    assert_eq!(reopened.get_object(id(&world, 2), author)?, expected_person);
+    for (reference, fact) in references.iter().zip(expected) {
+        assert_eq!(reopened.resolve_semantic_fact(*reference, author)?, fact);
+    }
+    assert!(
+        reopened
+            .classifications(author, Some(house), None)?
+            .is_empty()
+    );
+    reopened.verify_foreign_keys(Scope::Author)?;
+    assert_eq!(inspect_archive(&path, Scope::Author)?.schema, 36);
+    Ok(())
+}
