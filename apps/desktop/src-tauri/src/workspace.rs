@@ -2483,7 +2483,9 @@ pub fn workspace_ghost_candidates(
 ) -> Result<Vec<atlas_store::network::GhostCandidate>, String> {
     let store = workspace.lock()?;
     let view = request.resolve(&store)?;
-    store.ghost_candidates(view, reference(view.world, &claim_id)?).map_err(|e|e.to_string())
+    store
+        .ghost_candidates(view, reference(view.world, &claim_id)?)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -2495,8 +2497,14 @@ pub fn workspace_resolve_ghost(
 ) -> Result<(), String> {
     let mut store = workspace.lock()?;
     let view = request.resolve(&store)?;
-    store.resolve_ghost_to_existing(view, id(&proposal_id)?, reference(view.world,&target_id)?, Uuid::new_v4())
-        .map_err(|e|e.to_string())
+    store
+        .resolve_ghost_to_existing(
+            view,
+            id(&proposal_id)?,
+            reference(view.world, &target_id)?,
+            Uuid::new_v4(),
+        )
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -2506,9 +2514,16 @@ pub fn workspace_founder_matches(
     other_id: String,
     seed: u32,
 ) -> Result<Vec<atlas_store::inheritance::FounderMatch>, String> {
-    let store=workspace.lock()?;
-    let (context, person)=request.resolve(&store)?;
-    store.founder_matches(context,person,reference(context.world,&other_id)?,u64::from(seed)).map_err(|e|e.to_string())
+    let store = workspace.lock()?;
+    let (context, person) = request.resolve(&store)?;
+    store
+        .founder_matches(
+            context,
+            person,
+            reference(context.world, &other_id)?,
+            u64::from(seed),
+        )
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -2519,7 +2534,9 @@ pub fn workspace_founder_genome(
 ) -> Result<atlas_store::inheritance::FounderGenome, String> {
     let store = workspace.lock()?;
     let (context, person) = request.resolve(&store)?;
-    store.founder_genome(context, person, u64::from(seed)).map_err(|e|e.to_string())
+    store
+        .founder_genome(context, person, u64::from(seed))
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

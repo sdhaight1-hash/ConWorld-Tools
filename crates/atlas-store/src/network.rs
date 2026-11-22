@@ -201,18 +201,29 @@ pub(crate) fn capitalized_spans(text: &str) -> Vec<(usize, usize)> {
     let mut i = 0;
     while i < words.len() && result.len() < 50 {
         let (from, end) = words[i];
-        if !text[from..end].chars().next().is_some_and(char::is_uppercase) {
+        if !text[from..end]
+            .chars()
+            .next()
+            .is_some_and(char::is_uppercase)
+        {
             i += 1;
             continue;
         }
         let mut j = i + 1;
-        while j < words.len() && j - i < 4 &&
-            text[words[j-1].1..words[j].0].chars().all(char::is_whitespace) &&
-            text[words[j].0..words[j].1].chars().next().is_some_and(char::is_uppercase) {
+        while j < words.len()
+            && j - i < 4
+            && text[words[j - 1].1..words[j].0]
+                .chars()
+                .all(char::is_whitespace)
+            && text[words[j].0..words[j].1]
+                .chars()
+                .next()
+                .is_some_and(char::is_uppercase)
+        {
             j += 1;
         }
-        if j - i >= 2 && words[j-1].1 - from <= 200 {
-            result.push((from, words[j-1].1));
+        if j - i >= 2 && words[j - 1].1 - from <= 200 {
+            result.push((from, words[j - 1].1));
         }
         i = j;
     }

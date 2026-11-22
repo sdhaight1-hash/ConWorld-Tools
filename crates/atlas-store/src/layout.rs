@@ -373,8 +373,12 @@ impl LayoutDocument {
                 | ElementContent::Template { children, .. }
                 | ElementContent::CustomTemplate { children, .. }
                 | ElementContent::Grid { children, .. } => pending.extend(children.iter().rev()),
-                ElementContent::PublishedReferences(target) => result.push((element.id, *target, "references")),
-                ElementContent::PublishedStatements(target) => result.push((element.id, *target, "statements")),
+                ElementContent::PublishedReferences(target) => {
+                    result.push((element.id, *target, "references"))
+                }
+                ElementContent::PublishedStatements(target) => {
+                    result.push((element.id, *target, "statements"))
+                }
                 _ => {}
             }
         }
@@ -542,7 +546,10 @@ fn project(
             let mut statements = store.published_statements(view, *target)?;
             let truncated = statements.len() > 50;
             statements.truncate(50);
-            DisplayContent::StatementRows { statements, truncated }
+            DisplayContent::StatementRows {
+                statements,
+                truncated,
+            }
         }
         ElementContent::PublishedReferences(target) => {
             if budget.queries == MAX_QUERIES {

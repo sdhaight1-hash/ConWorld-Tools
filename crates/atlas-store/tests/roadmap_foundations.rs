@@ -2107,7 +2107,8 @@ fn custom_template_pins_and_rebinds_without_copying_canonical_objects() -> Resul
 }
 
 #[test]
-fn fork_metadata_and_founder_ancestry_survive_parent_corrections_and_archive() -> Result<(), Error> {
+fn fork_metadata_and_founder_ancestry_survive_parent_corrections_and_archive() -> Result<(), Error>
+{
     use atlas_store::{
         archive::restore_archive,
         genealogy::RecordParentage,
@@ -2120,22 +2121,44 @@ fn fork_metadata_and_founder_ancestry_survive_parent_corrections_and_archive() -
     let mut author = view(&world, 13);
     let person = id(&world, 2);
     for (parent, child) in [(1, 2), (12, 2), (13, 1), (14, 1)] {
-        store.record_parentage(author, RecordParentage {
-            parent: id(&world, parent), child: id(&world, child),
-            kind: ParentageKind::Biological, starts_at: WorldDay(0), ends_before: None,
-            rationale: "Accepted historical register", command_id: Uuid::new_v4(),
-        })?;
+        store.record_parentage(
+            author,
+            RecordParentage {
+                parent: id(&world, parent),
+                child: id(&world, child),
+                kind: ParentageKind::Biological,
+                starts_at: WorldDay(0),
+                ends_before: None,
+                rationale: "Accepted historical register",
+                command_id: Uuid::new_v4(),
+            },
+        )?;
         author.revision = AuthorRevision(author.revision.0 + 1);
     }
-    let group = store.create_identity(author, IdentityKind::FamilyHouse, "House Vale", Uuid::new_v4())?;
+    let group = store.create_identity(
+        author,
+        IdentityKind::FamilyHouse,
+        "House Vale",
+        Uuid::new_v4(),
+    )?;
     author.revision = AuthorRevision(author.revision.0 + 1);
     let member = NetworkInput {
-        subject: person, target: group, source: id(&world, 9),
-        kind: NetworkKind::Membership, role: "member".into(), starts_at: 13, ends_before: None,
+        subject: person,
+        target: group,
+        source: id(&world, 9),
+        kind: NetworkKind::Membership,
+        role: "member".into(),
+        starts_at: 13,
+        ends_before: None,
     };
     let fact = store.record_network_fact(author, &member, Uuid::new_v4())?;
     author.revision = AuthorRevision(author.revision.0 + 1);
-    let future = NetworkInput { starts_at: 20, role: "later member".into(), subject: id(&world, 1), ..member.clone() };
+    let future = NetworkInput {
+        starts_at: 20,
+        role: "later member".into(),
+        subject: id(&world, 1),
+        ..member.clone()
+    };
     store.record_network_fact(author, &future, Uuid::new_v4())?;
     author.revision = AuthorRevision(author.revision.0 + 1);
     let genome = store.founder_genome(author, person, 72)?;
@@ -2144,25 +2167,58 @@ fn fork_metadata_and_founder_ancestry_survive_parent_corrections_and_archive() -
     for segments in &genome.homologues {
         assert_eq!(segments[0].start, 0);
         assert_eq!(segments.last().unwrap().end, MODEL_LENGTH);
-        assert!(segments.windows(2).all(|window| window[0].end == window[1].start));
+        assert!(
+            segments
+                .windows(2)
+                .all(|window| window[0].end == window[1].start)
+        );
     }
-    assert!(genome.homologues.iter().flatten().any(|s| s.allele.founder == id(&world, 13) || s.allele.founder == id(&world, 14)));
+    assert!(
+        genome
+            .homologues
+            .iter()
+            .flatten()
+            .any(|s| s.allele.founder == id(&world, 13) || s.allele.founder == id(&world, 14))
+    );
     let fork = store.fork(&ForkCommand {
-        world: world.id, parent: world.main, day: author.day, expected: author.revision,
-        id: Uuid::new_v4(), author: "Fixture".into(), rationale: "Alternative history".into(), scope: Scope::Author,
+        world: world.id,
+        parent: world.main,
+        day: author.day,
+        expected: author.revision,
+        id: Uuid::new_v4(),
+        author: "Fixture".into(),
+        rationale: "Alternative history".into(),
+        scope: Scope::Author,
     })?;
     author.revision = fork.created_revision;
-    let parent = store.family_links(author, person)?.into_iter().find(|link| link.parent == id(&world, 1)).unwrap();
-    store.withdraw_parentage(author, person, parent.id, Uuid::new_v4(), "Register corrected")?;
+    let parent = store
+        .family_links(author, person)?
+        .into_iter()
+        .find(|link| link.parent == id(&world, 1))
+        .unwrap();
+    store.withdraw_parentage(
+        author,
+        person,
+        parent.id,
+        Uuid::new_v4(),
+        "Register corrected",
+    )?;
     author.revision = AuthorRevision(author.revision.0 + 1);
     store.withdraw_network_fact(author, fact, Uuid::new_v4())?;
     author.revision = AuthorRevision(author.revision.0 + 1);
-    let branch = ViewContext { branch: fork.id, day: WorldDay(21), ..author };
+    let branch = ViewContext {
+        branch: fork.id,
+        day: WorldDay(21),
+        ..author
+    };
     assert_eq!(store.network_facts(branch, group)?.len(), 1);
     assert_eq!(store.network_facts(branch, group)?[0].id, fact);
     assert_ne!(store.founder_genome(author, person, 72)?, genome);
     assert_eq!(store.founder_genome(branch, person, 72)?, genome);
-    assert!(matches!(store.record_network_fact(branch, &member, Uuid::new_v4()), Err(Error::CapabilityDenied)));
+    assert!(matches!(
+        store.record_network_fact(branch, &member, Uuid::new_v4()),
+        Err(Error::CapabilityDenied)
+    ));
     let backup = dir.path().join("snapshot.sqlite");
     let restored = dir.path().join("restored.sqlite");
     store.backup_to(&backup, Scope::Author)?;
@@ -2175,7 +2231,8 @@ fn fork_metadata_and_founder_ancestry_survive_parent_corrections_and_archive() -
 }
 
 #[test]
-fn ghost_suggestions_resolve_existing_identity_and_public_dynamic_search_revokes() -> Result<(), Error> {
+fn ghost_suggestions_resolve_existing_identity_and_public_dynamic_search_revokes()
+-> Result<(), Error> {
     use atlas_store::{network::IdentityKind, query::QueryControl};
     use std::time::Duration;
 
@@ -2186,50 +2243,134 @@ fn ghost_suggestions_resolve_existing_identity_and_public_dynamic_search_revokes
     let claim = ObjectRef::new(world.id);
     let secret = ObjectRef::new(world.id);
     let record = |statement: &str, audience| Record {
-        label: "Recorded account".into(), valid: ValidInterval::default(),
-        data: ObjectData::Claim { subject: event, predicate: "account".into(), statement: statement.into(), audience },
+        label: "Recorded account".into(),
+        valid: ValidInterval::default(),
+        data: ObjectData::Claim {
+            subject: event,
+            predicate: "account".into(),
+            statement: statement.into(),
+            audience,
+        },
         source: Some(id(&world, 9)),
     };
     author.revision = store.apply(&Command {
-        world: world.id, branch: world.main, expected: author.revision, id: Uuid::new_v4(),
-        author: "Fixture".into(), rationale: "Record accounts".into(), scope: Scope::Author,
+        world: world.id,
+        branch: world.main,
+        expected: author.revision,
+        id: Uuid::new_v4(),
+        author: "Fixture".into(),
+        rationale: "Record accounts".into(),
+        scope: Scope::Author,
         changes: vec![
-            Change::Create(claim, record("Alice Vale encountered New Society.", ClaimAudience::Public)),
-            Change::Create(secret, record("Private testimony about Secret Circle.", ClaimAudience::Author)),
+            Change::Create(
+                claim,
+                record("Alice Vale encountered New Society.", ClaimAudience::Public),
+            ),
+            Change::Create(
+                secret,
+                record(
+                    "Private testimony about Secret Circle.",
+                    ClaimAudience::Author,
+                ),
+            ),
         ],
     })?;
     let candidates = store.ghost_candidates(author, claim)?;
-    let alice = candidates.iter().find(|item| item.label == "Alice Vale").unwrap();
+    let alice = candidates
+        .iter()
+        .find(|item| item.label == "Alice Vale")
+        .unwrap();
     assert_eq!(alice.existing.len(), 2);
-    assert!(candidates.iter().any(|item| item.label == "New Society" && item.existing.is_empty()));
-    let proposal = store.propose_ghost(author, claim, (alice.start_byte, alice.end_byte), IdentityKind::Person, Uuid::new_v4())?;
+    assert!(
+        candidates
+            .iter()
+            .any(|item| item.label == "New Society" && item.existing.is_empty())
+    );
+    let proposal = store.propose_ghost(
+        author,
+        claim,
+        (alice.start_byte, alice.end_byte),
+        IdentityKind::Person,
+        Uuid::new_v4(),
+    )?;
     author.revision = AuthorRevision(author.revision.0 + 1);
     let previous = author;
-    assert!(matches!(store.resolve_ghost_to_existing(author, proposal, id(&world, 2), Uuid::new_v4()), Err(Error::InvalidInput(_))));
+    assert!(matches!(
+        store.resolve_ghost_to_existing(author, proposal, id(&world, 2), Uuid::new_v4()),
+        Err(Error::InvalidInput(_))
+    ));
     store.resolve_ghost_to_existing(author, proposal, id(&world, 1), Uuid::new_v4())?;
     author.revision = AuthorRevision(author.revision.0 + 1);
-    assert_eq!(store.ghost_proposals(author)?[0].promoted, Some(id(&world, 1)));
+    assert_eq!(
+        store.ghost_proposals(author)?[0].promoted,
+        Some(id(&world, 1))
+    );
     assert!(!store.ghost_proposals(previous)?[0].reviewed);
-    let block = |audience, content| LayoutElement {id: ElementId(Uuid::new_v4()), audience, content};
-    let page = |entry, children| LayoutDocument {
-        schema_version: LAYOUT_SCHEMA_VERSION, entry, root: block(ClaimAudience::Public, ElementContent::Stack(children)),
+    let block = |audience, content| LayoutElement {
+        id: ElementId(Uuid::new_v4()),
+        audience,
+        content,
     };
-    let target = page(event, vec![block(ClaimAudience::Public, ElementContent::Text("Released event".into()))]);
+    let page = |entry, children| LayoutDocument {
+        schema_version: LAYOUT_SCHEMA_VERSION,
+        entry,
+        root: block(ClaimAudience::Public, ElementContent::Stack(children)),
+    };
+    let target = page(
+        event,
+        vec![block(
+            ClaimAudience::Public,
+            ElementContent::Text("Released event".into()),
+        )],
+    );
     author.revision = store.save_entry_layout(author, &target, true, Uuid::new_v4())?;
-    let entry = page(id(&world, 1), vec![block(ClaimAudience::Public, ElementContent::PublishedStatements(event))]);
+    let entry = page(
+        id(&world, 1),
+        vec![block(
+            ClaimAudience::Public,
+            ElementContent::PublishedStatements(event),
+        )],
+    );
     author.revision = store.save_entry_layout(author, &entry, true, Uuid::new_v4())?;
-    let read = |context| ViewContext {scope: Scope::Public,..context};
+    let read = |context| ViewContext {
+        scope: Scope::Public,
+        ..context
+    };
     let control = QueryControl::new(Duration::from_secs(10))?;
-    assert_eq!(store.search_public_pages(read(author), "New Society", 10, &control)?.matches[0].entry, entry.entry);
+    assert_eq!(
+        store
+            .search_public_pages(read(author), "New Society", 10, &control)?
+            .matches[0]
+            .entry,
+        entry.entry
+    );
     let control = QueryControl::new(Duration::from_secs(10))?;
-    assert!(store.search_public_pages(read(author), "Secret Circle", 10, &control)?.matches.is_empty());
+    assert!(
+        store
+            .search_public_pages(read(author), "Secret Circle", 10, &control)?
+            .matches
+            .is_empty()
+    );
     author.revision = store.apply(&Command {
-        world: world.id, branch: world.main, expected: author.revision, id: Uuid::new_v4(),
-        author: "Fixture".into(), rationale: "Withdraw statement audience".into(), scope: Scope::Author,
-        changes: vec![Change::Correct(claim, record("Alice Vale encountered New Society.", ClaimAudience::Author))],
+        world: world.id,
+        branch: world.main,
+        expected: author.revision,
+        id: Uuid::new_v4(),
+        author: "Fixture".into(),
+        rationale: "Withdraw statement audience".into(),
+        scope: Scope::Author,
+        changes: vec![Change::Correct(
+            claim,
+            record("Alice Vale encountered New Society.", ClaimAudience::Author),
+        )],
     })?;
     let control = QueryControl::new(Duration::from_secs(10))?;
-    assert!(store.search_public_pages(read(author), "New Society", 10, &control)?.matches.is_empty());
+    assert!(
+        store
+            .search_public_pages(read(author), "New Society", 10, &control)?
+            .matches
+            .is_empty()
+    );
     Ok(())
 }
 
@@ -2248,23 +2389,67 @@ fn title_rules_offices_and_issue_positions_have_typed_dated_constraints() -> Res
     let rule = make(IdentityKind::SuccessionRule, "House charter")?;
     let faction = make(IdentityKind::Faction, "Council")?;
     let issue = make(IdentityKind::ConflictIssue, "Wage dispute")?;
-    let holding = NetworkInput {subject: id(&world,1),target:title,source:id(&world,9),kind:NetworkKind::TitleHolding,role:"holder".into(),starts_at:13,ends_before:Some(20)};
-    store.record_network_fact(author,&holding,Uuid::new_v4())?;
-    author.revision=AuthorRevision(author.revision.0+1);
-    let duplicate=NetworkInput{subject:id(&world,2),..holding.clone()};
-    assert!(matches!(store.record_network_fact(author,&duplicate,Uuid::new_v4()),Err(Error::InvalidInput(_))));
-    let next=NetworkInput{starts_at:20,ends_before:None,..duplicate};
-    store.record_network_fact(author,&next,Uuid::new_v4())?;
-    author.revision=AuthorRevision(author.revision.0+1);
-    let charter=NetworkInput{subject:rule,target:title,source:id(&world,9),kind:NetworkKind::RuleOf,role:"absolute_primogeniture".into(),starts_at:13,ends_before:None};
-    store.record_network_fact(author,&charter,Uuid::new_v4())?;
-    author.revision=AuthorRevision(author.revision.0+1);
-    let stance=NetworkInput{subject:faction,target:issue,source:id(&world,9),kind:NetworkKind::ConflictPosition,role:"opposes".into(),starts_at:13,ends_before:None};
-    store.record_network_fact(author,&stance,Uuid::new_v4())?;
-    author.revision=AuthorRevision(author.revision.0+1);
-    assert_eq!(store.network_facts(author,issue)?[0].input,stance);
-    assert!(store.network_facts(author,title)?.iter().any(|f|f.input==holding));
-    author.day=WorldDay(20);
-    assert!(store.network_facts(author,title)?.iter().any(|f|f.input==next));
+    let holding = NetworkInput {
+        subject: id(&world, 1),
+        target: title,
+        source: id(&world, 9),
+        kind: NetworkKind::TitleHolding,
+        role: "holder".into(),
+        starts_at: 13,
+        ends_before: Some(20),
+    };
+    store.record_network_fact(author, &holding, Uuid::new_v4())?;
+    author.revision = AuthorRevision(author.revision.0 + 1);
+    let duplicate = NetworkInput {
+        subject: id(&world, 2),
+        ..holding.clone()
+    };
+    assert!(matches!(
+        store.record_network_fact(author, &duplicate, Uuid::new_v4()),
+        Err(Error::InvalidInput(_))
+    ));
+    let next = NetworkInput {
+        starts_at: 20,
+        ends_before: None,
+        ..duplicate
+    };
+    store.record_network_fact(author, &next, Uuid::new_v4())?;
+    author.revision = AuthorRevision(author.revision.0 + 1);
+    let charter = NetworkInput {
+        subject: rule,
+        target: title,
+        source: id(&world, 9),
+        kind: NetworkKind::RuleOf,
+        role: "absolute_primogeniture".into(),
+        starts_at: 13,
+        ends_before: None,
+    };
+    store.record_network_fact(author, &charter, Uuid::new_v4())?;
+    author.revision = AuthorRevision(author.revision.0 + 1);
+    let stance = NetworkInput {
+        subject: faction,
+        target: issue,
+        source: id(&world, 9),
+        kind: NetworkKind::ConflictPosition,
+        role: "opposes".into(),
+        starts_at: 13,
+        ends_before: None,
+    };
+    store.record_network_fact(author, &stance, Uuid::new_v4())?;
+    author.revision = AuthorRevision(author.revision.0 + 1);
+    assert_eq!(store.network_facts(author, issue)?[0].input, stance);
+    assert!(
+        store
+            .network_facts(author, title)?
+            .iter()
+            .any(|f| f.input == holding)
+    );
+    author.day = WorldDay(20);
+    assert!(
+        store
+            .network_facts(author, title)?
+            .iter()
+            .any(|f| f.input == next)
+    );
     Ok(())
 }

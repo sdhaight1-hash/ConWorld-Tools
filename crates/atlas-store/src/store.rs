@@ -2312,14 +2312,7 @@ impl Store {
             return Ok(Vec::new());
         }
         if let Scope::Character(reader) = view.scope {
-            require_person(
-                tx,
-                world.id,
-                reader,
-                view.branch,
-                view.revision.0,
-                view.day,
-            )?;
+            require_person(tx, world.id, reader, view.branch, view.revision.0, view.day)?;
         }
         let mut query = tx.prepare(
             "SELECT DISTINCT claim_id FROM claim_versions WHERE world_id = ?1 AND subject_id = ?2 ORDER BY claim_id"

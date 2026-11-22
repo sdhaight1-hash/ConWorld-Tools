@@ -127,7 +127,8 @@ impl Store {
                 if matches!(subject.record.data, ObjectData::Title)
                     && institution(&target.record.data) => {}
             NetworkKind::Ownership
-                if (matches!(subject.record.data, ObjectData::Person) || institution(&subject.record.data))
+                if (matches!(subject.record.data, ObjectData::Person)
+                    || institution(&subject.record.data))
                     && matches!(target.record.data, ObjectData::Asset) => {}
             NetworkKind::IssueOf
                 if matches!(subject.record.data, ObjectData::ConflictIssue)
@@ -142,14 +143,24 @@ impl Store {
                 if matches!(subject.record.data, ObjectData::SuccessionRule)
                     && matches!(target.record.data, ObjectData::Title) =>
             {
-                if !matches!(input.role.as_str(), "elective" | "primogeniture" | "absolute_primogeniture" |
-                    "matrilineal" | "designated_heir" | "custom") {
+                if !matches!(
+                    input.role.as_str(),
+                    "elective"
+                        | "primogeniture"
+                        | "absolute_primogeniture"
+                        | "matrilineal"
+                        | "designated_heir"
+                        | "custom"
+                ) {
                     return Err(Error::InvalidInput("succession rule kind"));
                 }
             }
             NetworkKind::ConflictPosition
                 if matches!(subject.record.data, ObjectData::Faction)
-                    && matches!(target.record.data, ObjectData::Conflict | ObjectData::ConflictIssue) =>
+                    && matches!(
+                        target.record.data,
+                        ObjectData::Conflict | ObjectData::ConflictIssue
+                    ) =>
             {
                 if !matches!(
                     input.role.as_str(),
@@ -192,7 +203,10 @@ impl Store {
         }
         // An office/title represents one seat, and a title has one active rule.
         // A multi-seat body uses multiple office identities.
-        if matches!(input.kind, NetworkKind::OfficeHolding | NetworkKind::TitleHolding | NetworkKind::RuleOf) {
+        if matches!(
+            input.kind,
+            NetworkKind::OfficeHolding | NetworkKind::TitleHolding | NetworkKind::RuleOf
+        ) {
             let occupied: bool = tx.query_row(
                 "SELECT EXISTS(SELECT 1 FROM network_facts WHERE world_id=?1 AND kind=?2
                  AND target_id=?3 AND recorded_revision<=?4 AND (withdrawn_revision IS NULL OR withdrawn_revision>?4)
@@ -411,9 +425,24 @@ impl Store {
             let existing = found
                 .rows
                 .into_iter()
-                .filter(|item| matches!(item.record.data, ObjectData::Person | ObjectData::Organization |
-                    ObjectData::FamilyHouse | ObjectData::Household | ObjectData::Faction | ObjectData::Conflict |
-                    ObjectData::Office | ObjectData::Title | ObjectData::Asset | ObjectData::Population | ObjectData::ConflictIssue | ObjectData::ConflictPhase | ObjectData::SuccessionRule))
+                .filter(|item| {
+                    matches!(
+                        item.record.data,
+                        ObjectData::Person
+                            | ObjectData::Organization
+                            | ObjectData::FamilyHouse
+                            | ObjectData::Household
+                            | ObjectData::Faction
+                            | ObjectData::Conflict
+                            | ObjectData::Office
+                            | ObjectData::Title
+                            | ObjectData::Asset
+                            | ObjectData::Population
+                            | ObjectData::ConflictIssue
+                            | ObjectData::ConflictPhase
+                            | ObjectData::SuccessionRule
+                    )
+                })
                 .map(|item| item.object)
                 .collect();
             results.push(crate::network::GhostCandidate {
@@ -435,19 +464,46 @@ impl Store {
         target: ObjectRef,
         command_id: Uuid,
     ) -> Result<(), Error> {
-        let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let world = author_context(&tx, view)?;
-        let (claim, branch, state, recorded, label, kind, day): ([u8;16], [u8;16], i64, i64, String, String, i64) =
-            tx.query_row(
+        let (claim, branch, state, recorded, label, kind, day): (
+            [u8; 16],
+            [u8; 16],
+            i64,
+            i64,
+            String,
+            String,
+            i64,
+        ) = tx
+            .query_row(
                 "SELECT claim_id,claim_branch,claim_state_revision,claim_revision,label,kind,day
                  FROM ghost_proposals WHERE world_id=?1 AND id=?2 AND reviewed_revision IS NULL",
                 params![view.world.0.as_bytes(), proposal.as_bytes()],
-                |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?)),
-            ).optional()?.ok_or(Error::NotFound)?;
-        let effective = ViewContext { day: WorldDay(day), ..view };
+                |r| {
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get(3)?,
+                        r.get(4)?,
+                        r.get(5)?,
+                        r.get(6)?,
+                    ))
+                },
+            )
+            .optional()?
+            .ok_or(Error::NotFound)?;
+        let effective = ViewContext {
+            day: WorldDay(day),
+            ..view
+        };
         let latest = resolved(&tx, effective, ref_id(view.world, claim))?;
-        if latest.source_branch.0.as_bytes() != &branch || latest.state_revision.0 != state ||
-            latest.recorded_at.0 != recorded {
+        if latest.source_branch.0.as_bytes() != &branch
+            || latest.state_revision.0 != state
+            || latest.recorded_at.0 != recorded
+        {
             return Err(Error::InvalidInput("ghost source changed"));
         }
         let existing = resolved(&tx, effective, target)?;
@@ -455,18 +511,29 @@ impl Store {
             return Err(Error::WrongKind);
         }
         let matches_alias = if kind == "person" {
-            active_alias_versions(&tx, effective)?.iter().any(|alias| alias.person == target &&
-                alias.active && alias.starts_at.is_none_or(|start| start <= effective.day)
-                && alias.ends_before.is_none_or(|end| effective.day < end)
-                && alias.label.to_lowercase() == label.to_lowercase())
+            active_alias_versions(&tx, effective)?.iter().any(|alias| {
+                alias.person == target
+                    && alias.active
+                    && alias.starts_at.is_none_or(|start| start <= effective.day)
+                    && alias.ends_before.is_none_or(|end| effective.day < end)
+                    && alias.label.to_lowercase() == label.to_lowercase()
+            })
         } else {
             false
         };
         if existing.record.label.to_lowercase() != label.to_lowercase() && !matches_alias {
-            return Err(Error::InvalidInput("existing identity name or alias does not match"));
+            return Err(Error::InvalidInput(
+                "existing identity name or alias does not match",
+            ));
         }
-        let revision = append_revision(&tx, &world, world.main, view.revision, command_id,
-            ("Local author", "Resolve draft to existing identity"))?;
+        let revision = append_revision(
+            &tx,
+            &world,
+            world.main,
+            view.revision,
+            command_id,
+            ("Local author", "Resolve draft to existing identity"),
+        )?;
         tx.execute(
             "UPDATE ghost_proposals SET reviewed_revision=?3,promoted_id=?4 WHERE world_id=?1 AND id=?2",
             params![view.world.0.as_bytes(), proposal.as_bytes(), revision, target.id.0.as_bytes()],

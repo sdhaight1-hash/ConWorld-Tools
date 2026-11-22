@@ -282,11 +282,18 @@ impl Store {
             }
             return Err(Error::InvalidRevision);
         }
-        let public = ViewContext { scope: Scope::Public, ..view };
+        let public = ViewContext {
+            scope: Scope::Public,
+            ..view
+        };
         if !self.entry_link_target_visible(public, target)? {
             return Ok(Vec::new());
         }
-        Ok(self.evidence_at_inner(target, public)?.into_iter().map(|row| row.statement).collect())
+        Ok(self
+            .evidence_at_inner(target, public)?
+            .into_iter()
+            .map(|row| row.statement)
+            .collect())
     }
 
     /// Find literal, case-insensitive text within a single authorized entry.
@@ -490,7 +497,11 @@ fn find_text_blocks(page: DisplayElement, needle: &str, limit: usize) -> EntryTe
             }
             DisplayContent::Text(text) => text,
             DisplayContent::ObjectLink(link) => link.label,
-            DisplayContent::ReferenceRows { links, .. } => links.into_iter().map(|link| link.label).collect::<Vec<_>>().join("\n"),
+            DisplayContent::ReferenceRows { links, .. } => links
+                .into_iter()
+                .map(|link| link.label)
+                .collect::<Vec<_>>()
+                .join("\n"),
             DisplayContent::StatementRows { statements, .. } => statements.join("\n"),
             _ => continue,
         };
@@ -515,7 +526,10 @@ fn replace_public_page_index(
 ) -> Result<(), Error> {
     conn.execute(
         "DELETE FROM public_dynamic_dependencies WHERE world_id=?1 AND entry_id=?2",
-        params![document.entry.world.0.as_bytes(),document.entry.id.0.as_bytes()],
+        params![
+            document.entry.world.0.as_bytes(),
+            document.entry.id.0.as_bytes()
+        ],
     )?;
     conn.execute(
         "DELETE FROM entry_caption_candidates WHERE world_id=?1 AND entry_id=?2",

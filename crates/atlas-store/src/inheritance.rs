@@ -166,8 +166,12 @@ impl crate::Store {
     ) -> Result<FounderGenome, Error> {
         use std::collections::{HashMap, HashSet};
         fn visit(
-            store: &crate::Store, view: crate::ViewContext, subject: ObjectRef, seed: u64,
-            depth: u8, active: &mut HashSet<ObjectRef>,
+            store: &crate::Store,
+            view: crate::ViewContext,
+            subject: ObjectRef,
+            seed: u64,
+            depth: u8,
+            active: &mut HashSet<ObjectRef>,
             memo: &mut HashMap<ObjectRef, FounderGenome>,
         ) -> Result<FounderGenome, Error> {
             if let Some(value) = memo.get(&subject) {
@@ -179,12 +183,17 @@ impl crate::Store {
             if !active.insert(subject) {
                 return Err(Error::InvalidInput("accepted biological ancestry cycle"));
             }
-            let mut parents: Vec<_> = store.family_links(view, subject)?.into_iter()
+            let mut parents: Vec<_> = store
+                .family_links(view, subject)?
+                .into_iter()
                 .filter(|link| link.child == subject && link.kind == ParentageKind::Biological)
-                .map(|link| link.parent).collect();
+                .map(|link| link.parent)
+                .collect();
             parents.sort_unstable_by_key(|item| item.id.0);
             if parents.len() > 2 {
-                return Err(Error::InvalidInput("more than two accepted biological parents"));
+                return Err(Error::InvalidInput(
+                    "more than two accepted biological parents",
+                ));
             }
             let mut homologues = [Vec::new(), Vec::new()];
             for (slot, segments) in homologues.iter_mut().enumerate() {
@@ -194,7 +203,9 @@ impl crate::Store {
                     let random = mix(seed ^ id as u64 ^ mix((id >> 64) as u64) ^ slot as u64);
                     let boundary = 1 + (random % u64::from(MODEL_LENGTH - 1)) as u32;
                     let first = (random >> 63) as usize;
-                    for (index, lo, hi) in [(first, 0, boundary), (1-first, boundary, MODEL_LENGTH)] {
+                    for (index, lo, hi) in
+                        [(first, 0, boundary), (1 - first, boundary, MODEL_LENGTH)]
+                    {
                         for segment in &genome.homologues[index] {
                             let start = segment.start.max(lo);
                             let end = segment.end.min(hi);
@@ -206,14 +217,23 @@ impl crate::Store {
                                         continue;
                                     }
                                 }
-                                segments.push(FounderSegment { start, end, allele: segment.allele });
+                                segments.push(FounderSegment {
+                                    start,
+                                    end,
+                                    allele: segment.allele,
+                                });
                             }
                         }
                     }
                 } else {
                     segments.push(FounderSegment {
-                        start: 0, end: MODEL_LENGTH,
-                        allele: FounderAllele { founder: subject, homologue: slot as u8, unresolved_parent: true },
+                        start: 0,
+                        end: MODEL_LENGTH,
+                        allele: FounderAllele {
+                            founder: subject,
+                            homologue: slot as u8,
+                            unresolved_parent: true,
+                        },
                     });
                 }
                 if segments.len() > 4096 {
@@ -221,11 +241,22 @@ impl crate::Store {
                 }
             }
             active.remove(&subject);
-            let result = FounderGenome { model: FOUNDER_MODEL_VERSION, homologues };
+            let result = FounderGenome {
+                model: FOUNDER_MODEL_VERSION,
+                homologues,
+            };
             memo.insert(subject, result.clone());
             Ok(result)
         }
-        visit(self, view, subject, seed, 0, &mut HashSet::new(), &mut HashMap::new())
+        visit(
+            self,
+            view,
+            subject,
+            seed,
+            0,
+            &mut HashSet::new(),
+            &mut HashMap::new(),
+        )
     }
 }
 
@@ -265,12 +296,21 @@ impl crate::Store {
                             return Err(Error::QueryBudgetExceeded);
                         }
                         result.push(FounderMatch {
-                            first_homologue: i as u8, second_homologue: j as u8,
-                            segment: FounderSegment { start, end, allele: l.allele },
+                            first_homologue: i as u8,
+                            second_homologue: j as u8,
+                            segment: FounderSegment {
+                                start,
+                                end,
+                                allele: l.allele,
+                            },
                         });
                     }
-                    if l.end <= r.end { x += 1; }
-                    if r.end <= l.end { y += 1; }
+                    if l.end <= r.end {
+                        x += 1;
+                    }
+                    if r.end <= l.end {
+                        y += 1;
+                    }
                 }
             }
         }
