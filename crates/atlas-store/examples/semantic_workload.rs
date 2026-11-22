@@ -197,6 +197,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             started.elapsed().as_millis()
         );
     }
+    let descriptor_spec = QuerySpec {
+        filter: QueryFilter::ClassifiedBy(descriptor),
+        ..spec.clone()
+    };
+    let started = Instant::now();
+    let mut cursor = None;
+    let mut seen = std::collections::HashSet::new();
+    for _ in 0..2 {
+        let control = QueryControl::new(Duration::from_secs(30))?;
+        let page = store.execute_query_page_controlled(
+            &descriptor_spec,
+            view,
+            cursor.as_ref(),
+            &control,
+        )?;
+        assert_eq!(page.rows.len(), 500);
+        for row in page.rows {
+            assert!(seen.insert(row.object));
+        }
+        cursor = page.next_cursor;
+    }
+    assert_eq!(seen.len(), 1000);
+    assert_eq!(cursor.is_some(), count > 1000);
+    println!(
+        "descriptor_first_two_pages=2 distinct={} elapsed_ms={}",
+        seen.len(),
+        started.elapsed().as_millis()
+    );
     let control = QueryControl::new(Duration::from_secs(30))?;
     control.cancel();
     assert!(matches!(

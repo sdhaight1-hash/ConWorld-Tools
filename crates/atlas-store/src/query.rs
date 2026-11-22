@@ -609,7 +609,7 @@ impl Store {
 
     /// Page only complete, bounded author queries. Reevaluate the immutable
     /// recorded view on each call; do not cache raw rows or trust offsets.
-    /// Standalone classification profiles seek an indexed label/UUID window.
+    /// Standalone classification profile/descriptor predicates seek an indexed label/UUID window.
     /// Other predicates retain the existing bounded materialization planner.
     pub fn execute_query_page(
         &self,
@@ -626,9 +626,13 @@ impl Store {
         {
             return Err(Error::InvalidInput("query cursor context"));
         }
-        if let QueryFilter::ClassifiedAs(profile) = &spec.filter {
+        if matches!(
+            &spec.filter,
+            QueryFilter::ClassifiedAs(_) | QueryFilter::ClassifiedBy(_)
+        ) {
             let boundary = after.map(|cursor| (cursor.label.as_str(), cursor.last));
-            let (rows, has_more) = self.classification_page(view, *profile, boundary, spec.limit)?;
+            let (rows, has_more) =
+                self.classification_page(view, &spec.filter, boundary, spec.limit)?;
             let next_cursor = if has_more {
                 rows.last().map(|last| QueryCursor {
                     spec: spec.clone(),

@@ -3394,6 +3394,19 @@ fn classifications_preserve_pins_and_branch_local_withdrawals() -> Result<(), Er
             .rows
             .is_empty()
     );
+    assert_eq!(
+        store
+            .execute_query_page(&descriptor_query, inherited, None)?
+            .rows[0]
+            .object,
+        concept
+    );
+    assert!(
+        store
+            .execute_query_page(&descriptor_query, after, None)?
+            .rows
+            .is_empty()
+    );
     assert!(store.resolve_semantic_fact(fact_ref, after)?.is_none());
     assert!(store.semantic_fact_backlinks(concept, after)?.is_empty());
     assert!(
@@ -4293,5 +4306,123 @@ fn annotations_and_retirement_are_historical_and_branch_local() -> Result<(), Er
         reopened.classifications(main, Some(concept), None)?.len(),
         2
     );
+    Ok(())
+}
+
+#[test]
+fn classification_descriptor_pages_deduplicate_and_pin_cursor_context() -> Result<(), Error> {
+    use atlas_store::semantic::{ClassificationInput, ConceptProfile, DefinitionPin};
+    let mut store = Store::open(":memory:")?;
+    let world = seed(&mut store)?;
+    let mut author = view(&world, 13);
+    let first = id(&world, 200);
+    let second = id(&world, 201);
+    let descriptor = id(&world, 202);
+    let command = |expected, changes| Command {
+        world: world.id,
+        branch: world.main,
+        expected,
+        id: Uuid::new_v4(),
+        author: "Fixture".into(),
+        rationale: "Test descriptor cursor".into(),
+        scope: Scope::Author,
+        changes,
+    };
+    let concept = |label: &str| Record {
+        label: label.into(),
+        data: ObjectData::Concept,
+        valid: ValidInterval::default(),
+        source: None,
+    };
+    author.revision = store.apply(&command(
+        author.revision,
+        vec![
+            Change::Create(first, concept("Same label")),
+            Change::Create(second, concept("Same label")),
+            Change::Create(
+                descriptor,
+                Record {
+                    label: "Descriptor".into(),
+                    data: ObjectData::Definition {
+                        definition: Definition::Tag,
+                        description: "Fixture category".into(),
+                    },
+                    valid: ValidInterval::default(),
+                    source: None,
+                },
+            ),
+        ],
+    ))?;
+    let pin = DefinitionPin {
+        version: store.get_object(descriptor, author)?.unwrap().reference(),
+    };
+    for (subject, profile) in [
+        (first, ConceptProfile::Culture),
+        (first, ConceptProfile::Language),
+        (second, ConceptProfile::Language),
+    ] {
+        store.record_classification(
+            author,
+            ClassificationInput {
+                subject,
+                profile,
+                descriptor: pin,
+                source: id(&world, 9),
+                starts_at: author.day,
+                ends_before: None,
+            },
+            Uuid::new_v4(),
+        )?;
+        author.revision = AuthorRevision(author.revision.0 + 1);
+    }
+    let spec = QuerySpec {
+        limit: 1,
+        ..query(QueryFilter::ClassifiedBy(descriptor))
+    };
+    let old = author;
+    let page = store.execute_query_page(&spec, old, None)?;
+    assert_eq!(page.rows[0].object, first);
+    let cursor = page.next_cursor.unwrap();
+    author.revision = store.apply(&command(
+        author.revision,
+        vec![Change::Correct(second, concept("A renamed concept"))],
+    ))?;
+    let page = store.execute_query_page(&spec, old, Some(&cursor))?;
+    assert_eq!(page.rows[0].object, second);
+    assert!(page.next_cursor.is_none());
+    assert!(matches!(
+        store.execute_query_page(&spec, author, Some(&cursor)),
+        Err(Error::InvalidInput("query cursor context"))
+    ));
+    let updated = store.execute_query_page(&spec, author, None)?;
+    assert_eq!(updated.rows[0].object, second);
+    assert!(matches!(
+        store.execute_query_page(
+            &query(QueryFilter::ClassifiedBy(first)),
+            author,
+            None
+        ),
+        Err(Error::WrongKind)
+    ));
+    assert!(matches!(
+        store.execute_query_page(
+            &spec,
+            ViewContext {
+                scope: Scope::Public,
+                ..author
+            },
+            None
+        ),
+        Err(Error::CapabilityDenied)
+    ));
+    let other = store.create_world("Another world", Scope::Author)?;
+    assert!(matches!(
+        store.execute_query_page(
+            &query(QueryFilter::ClassifiedBy(id(&other, 1))),
+            author,
+            None
+        ),
+        Err(Error::WrongWorld)
+    ));
     Ok(())
 }

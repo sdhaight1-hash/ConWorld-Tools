@@ -317,18 +317,8 @@ impl Store {
         self.check_query_control()?;
         let tx = self.conn.unchecked_transaction()?;
         metadata_world(&tx, view, false)?;
-        let Some(version) = resolve_object(&tx, descriptor, view.branch, view.revision, view.day)?
-        else {
+        if !visible_tag_descriptor(&tx, view, descriptor)? {
             return Ok(Vec::new());
-        };
-        if !matches!(
-            version.record.data,
-            ObjectData::Definition {
-                definition: Definition::Tag,
-                ..
-            }
-        ) {
-            return Err(Error::WrongKind);
         }
         let mut statement = tx.prepare(&format!(
             "{METADATA_CTE} {ACTIVE}
@@ -365,14 +355,31 @@ impl Store {
     pub(crate) fn classification_page(
         &self,
         view: ViewContext,
-        profile: ConceptProfile,
+        filter: &QueryFilter,
         after: Option<(&str, ObjectRef)>,
         limit: usize,
     ) -> Result<(Vec<Version>, bool), Error> {
+        use rusqlite::types::Value;
+
         require_author(view.scope)?;
         self.check_query_control()?;
         let tx = self.conn.unchecked_transaction()?;
         metadata_world(&tx, view, false)?;
+        let (condition, value) = match filter {
+            QueryFilter::ClassifiedAs(profile) => {
+                ("p.profile=?7", Value::Text(profile.key().into()))
+            }
+            QueryFilter::ClassifiedBy(descriptor) => {
+                if !visible_tag_descriptor(&tx, view, *descriptor)? {
+                    return Ok((Vec::new(), false));
+                }
+                (
+                    "p.descriptor_id=?7",
+                    Value::Blob(descriptor.id.0.as_bytes().to_vec()),
+                )
+            }
+            _ => return Err(Error::InvalidInput("classification page filter")),
+        };
         let label = after.map_or("", |(label, _)| label);
         let id = after.map_or([0; 16], |(_, object)| *object.id.0.as_bytes());
         let mut statement = tx.prepare(&format!(
@@ -383,7 +390,7 @@ impl Store {
              AND EXISTS (SELECT 1 FROM eligible l
                  WHERE l.branch_id=v.branch_id AND v.revision<=l.rev)
              AND EXISTS (SELECT 1 FROM active_classification p
-                 WHERE p.subject_id=v.object_id AND p.profile=?7
+                 WHERE p.subject_id=v.object_id AND {condition}
                  AND p.starts_at<=?4 AND (p.ends_before IS NULL OR p.ends_before>?4))
              ORDER BY v.label,v.object_id LIMIT 2001"
         ))?;
@@ -394,8 +401,18 @@ impl Store {
             view.day.0,
             label,
             &id[..],
-            profile.key()
+            &value
         ])?;
+        let mut descriptor_matches = tx.prepare(&format!(
+            "{METADATA_CTE} {ACTIVE}
+             SELECT p.id,p.subject_id,p.profile,p.descriptor_id,p.descriptor_branch,
+                    p.descriptor_state_revision,p.descriptor_revision,p.source_id,p.starts_at,
+                    p.ends_before,p.recorded_revision,p.branch_id
+             FROM active_classification p
+             WHERE p.subject_id=?8 AND {condition}
+             AND p.starts_at<=?4 AND (p.ends_before IS NULL OR p.ends_before>?4)
+             ORDER BY p.id LIMIT 5"
+        ))?;
         let mut result = Vec::new();
         let mut scanned = 0;
         while let Some(row) = rows.next()? {
@@ -414,10 +431,41 @@ impl Store {
             else {
                 continue;
             };
-            if version.record.data != ObjectData::Concept
-                || version.record.label != candidate
-                || !has_profile(&tx, view, object, profile)?
-            {
+            if version.record.data != ObjectData::Concept || version.record.label != candidate {
+                continue;
+            }
+            let matches = match filter {
+                QueryFilter::ClassifiedAs(profile) => has_profile(&tx, view, object, *profile)?,
+                QueryFilter::ClassifiedBy(_) => {
+                    let mut assignments = descriptor_matches.query(params![
+                        view.world.0.as_bytes(),
+                        view.branch.0.as_bytes(),
+                        view.revision.0,
+                        view.day.0,
+                        rusqlite::types::Null,
+                        rusqlite::types::Null,
+                        &value,
+                        object.id.0.as_bytes(),
+                    ])?;
+                    let mut visible = false;
+                    let mut profiles = HashSet::new();
+                    while let Some(row) = assignments.next()? {
+                        self.check_query_control()?;
+                        let profile = ConceptProfile::parse(&row.get::<_, String>(2)?)?;
+                        if !profiles.insert(profile) {
+                            return Err(Error::Integrity(
+                                "overlapping active classifications".into(),
+                            ));
+                        }
+                        if read_classification(&tx, view, row)?.is_some() {
+                            visible = true;
+                        }
+                    }
+                    visible
+                }
+                _ => unreachable!("classification page filter validated"),
+            };
+            if !matches {
                 continue;
             }
             result.push(version);
@@ -484,6 +532,31 @@ impl Store {
         }
         Ok(result)
     }
+}
+
+/// The same descriptor preflight applies to point-list and paged queries.
+fn visible_tag_descriptor(
+    conn: &Connection,
+    view: ViewContext,
+    descriptor: ObjectRef,
+) -> Result<bool, Error> {
+    if descriptor.world != view.world {
+        return Err(Error::WrongWorld);
+    }
+    let Some(version) = resolve_object(conn, descriptor, view.branch, view.revision, view.day)?
+    else {
+        return Ok(false);
+    };
+    if !matches!(
+        version.record.data,
+        ObjectData::Definition {
+            definition: Definition::Tag,
+            ..
+        }
+    ) {
+        return Err(Error::WrongKind);
+    }
+    Ok(true)
 }
 
 /// Shared payload decoding and historical endpoint checks for point and list reads.
