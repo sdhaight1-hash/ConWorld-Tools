@@ -105,3 +105,7 @@ At minimum: WrongWorld, WrongKind, RevisionConflict, UnresolvableCalendar, Inval
 ## Migration gate
 
 Phase One verifies fresh migrations, upgrade and reopen, foreign-key checks, pinned branch and author-revision behavior, multi-effect event rollback, and SQLite backup restore. Delete and merge policies, derived-index rebuild and full export/import remain gates for the phases that introduce those features. No test in this specification is evidence that the application is implemented.
+
+## Spatial schema/API extension
+
+[13](13-Spatial-and-Nested-Location-Model.md) defines logical Place/PlaceEdge/LocatedAt/Frame/GeometryVersion plus versioned MapSpec/LayerSpec and read-only MapScene. Reuse registry, branch/revision, typed facts, provenance, visibility and audit; exact table names and migration number pending re-audit of #62/#63. Add typed place creation, dated edge/placement edits, optional geometry mutation and explicit candidate promotion through atomic expected-revision commands. Extend query rather than bypass it. Preserve existing records, IDs and branch freeze; test upgrade, wrong-kind/cross-world, rollback, restore and derived rebuild parity. Archive recipes, frames, styles/symbols and assets with pins/hashes; raw SVG/mesh/index is derivative, never canonical. Public release distinct from full author backup.

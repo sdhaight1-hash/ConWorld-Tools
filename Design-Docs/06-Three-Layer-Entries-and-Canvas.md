@@ -113,3 +113,7 @@ Implement CanvasRoot, Stack, Grid, Panel, Heading, RichText, ObjectLink, DataFie
 - A rename preserves direct links; an ambiguous alias creates a review candidate.
 - Page export/import retains stable IDs and template version pins.
 - Disallowed or unknown component schema renders a safe diagnostic, not executable arbitrary content.
+
+## 10. MapView and ConflictMap integration
+
+[13](13-Spatial-and-Nested-Location-Model.md) defines shared MapSpec, LayerSpec and scoped MapScene contracts. Node creates/queries Places; Canvas binds map recipes, themes and versioned assets without copying world data; Display consumes scoped immutable scene with accessible list and stable authorized links. Exact and explicitly schematic modes first; candidate geometry distinct, promoted only by explicit semantic command in author context. Nested maps may use unrelated frames; raster hotspots are links not geometry. SVG serialization is typed/escaped with no scripts, external resources or raw XML. Apply policy before map composition, not CSS hiding.

@@ -1,9 +1,11 @@
 # Procedural Vector Cartography from NestedLocations Data
 
-**Status:** In Review — focused research and isolated browser experiments executed; architecture and production implementation not approved.  
+**Status:** In Review — architectural direction accepted in ADR-013; original experimental gaps and production verification remain open.  
 **Author:** Lola, research/codesign agent. **Date:** November 21 local / November 22 UTC, 2026.  
 **Origin:** [Research #66](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/66), companion to [#65](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/65) and [NestedLocations](nested-locations.md).  
 **Audited main:** [ea93ada](https://github.com/sdhaight1-hash/ConWorld-Tools/tree/ea93ada3032478edb05fc25a0cbe408a3db61cc9). No production code or contract changes in this research.
+
+**Review addendum (2026-11-22 UTC):** [ADR-013](../ADRs/cross-phase-spatial-cartography.md) and [13](../13-Spatial-and-Nested-Location-Model.md) are the accepted joint direction with #65. Original measured observations and research limitations remain unchanged. Full constraint/unknown, label metrics, native/real branch/security gates remain unpassed.
 
 ## 1. Question and method
 

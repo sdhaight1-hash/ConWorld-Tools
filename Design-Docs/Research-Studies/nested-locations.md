@@ -1,9 +1,11 @@
 # NestedLocations — Hierarchical, Spatial and Historical Place Modeling
 
-**Status:** In Review — investigation and isolated experiment completed; proposed architecture not accepted or implemented.  
+**Status:** Reviewed — investigation completed; architectural direction accepted in ADR-013; not implemented.  
 **Research issue:** [#65](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/65)  
 **Author:** Lola, research/codesign agent. **Date:** 2026-11-21 local / 2026-11-22 UTC.  
 **Inspected baseline:** [main d901dc7](https://github.com/sdhaight1-hash/ConWorld-Tools/tree/d901dc7ec2b7b7621ab8ba8e65eb430311318f33), schema 33. Related open stacked PRs [#62](https://github.com/sdhaight1-hash/ConWorld-Tools/pull/62), [#63](https://github.com/sdhaight1-hash/ConWorld-Tools/pull/63) were not merged as part of this study.
+
+**Review addendum (2026-11-22 UTC):** [ADR-013](../ADRs/cross-phase-spatial-cartography.md) and [13](../13-Spatial-and-Nested-Location-Model.md) reconcile this study with #66. Their normative decisions supersede proposal-only recommendations below; original observations and limitations are preserved. Exact implementation and advanced choices remain gated.
 
 ## 1. Research question and method
 

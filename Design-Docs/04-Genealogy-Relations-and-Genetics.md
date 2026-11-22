@@ -80,3 +80,7 @@ Queries must distinguish **biological ancestor**, **legal ancestor**, **family-h
 - Genealogy-derived cousin path computes on demand and respects parentage type.
 - Synthetic DNA re-run is deterministic; inappropriate cultural inferences are absent.
 - Editing a parent or population rule invalidates only affected derived genetic products, never canon.
+
+## 9. Spatial integration
+
+Use [13](13-Spatial-and-Nested-Location-Model.md) LocatedAt role facts for residence, birthplace, burial, migration, headquarters and population origin; query historically scoped enclosing places via the appropriate lens. Household residence, asset ownership and physical occupancy are independent. Jurisdiction/control are distinct institutional facts. Founder migration/geographical isolation may inform synthetic populations without inferring culture, citizenship or biology from map membership. No duplicate location strings as canonical identity; unresolved text remains evidence/candidate.

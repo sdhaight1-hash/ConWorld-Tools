@@ -87,3 +87,7 @@ Given event E, return recorded direct effects on typed objects, then optionally 
 - A related but merely earlier incident is not treated as causal.
 - Events have organizations as participants and can be attributed to secret or public sponsors without revealing that fact to unauthorized viewers.
 - Multi-hop impact traversal obeys depth, audience and truncation budgets.
+
+## 10. Spatial event and conflict effects
+
+[13](13-Spatial-and-Nested-Location-Model.md) supplies typed event site/affected region associations and dated jurisdiction, control and claim facts. Conquest, annexation, destruction and boundary change are explicit sourced effects, not map recoloring or inferred cause. Multiple sites, uncertain site claims and competing control must remain distinct. Historical MapView uses same branch/time/revision/audience as causal narrative; no interpolation asserted as historical fact.

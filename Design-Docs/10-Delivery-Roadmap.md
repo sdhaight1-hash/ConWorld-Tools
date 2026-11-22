@@ -71,6 +71,19 @@ All ten issues start **open** and link to their relevant design contracts and ac
 - Use only one read query engine and one publication policy enforcement path across three studios.
 - "Done" always means implemented and tested; roadmap issue existence does not imply feature completion.
 
+## Spatial/cartographic cross-phase extension (accepted direction; implementation pending)
+
+[ADR-013](ADRs/cross-phase-spatial-cartography.md) and [13](13-Spatial-and-Nested-Location-Model.md) reconcile research #65/#66. No Phase 10, no automatic reopening #1–#3. Foundation scope is stable Place, exact typed containment/roles, branch/time and shared query (P0); bounded exact/schematic maps and authoring (P1); advanced geographical generation/simulation (P2). Existing accepted order preserved: prior branch/media consolidation and baseline checks before spatial migrations; do not reserve a migration number.
+
+- #4 Phase 3 anchors foundation integration of #1/#2/#3 contracts plus spatial query/discovery (SP-01–06, policy from first query).
+- #5 Phase 4 owns exact local geometry and schematic interactive SVG, typed MapView style/recipe, links and fallback (SP-07–09); later constrained proposal generation (SP-10) after relevant privacy and data constraints.
+- #6/#7 Phases 5–6 consume residence/asset/institution location and historical event/control/claim effects (SP-12).
+- #8 Phase 7 owns adversarial spatial privacy/branch hardening (SP-04/11) across all surfaces including exports and generated layouts.
+- #9 Phase 8 population origin/migration (SP-12), no cultural inference.
+- #10 Phase 9 archive portability, actual native dense fixture performance and optional accelerated renderer (SP-13/14). Geometry library, uncertainty schema, advanced constraints, tiles/planet projections and GPU choice remain explicit gated decisions.
+
+Full acceptance in [09](09-Acceptance-and-Verification.md). Research findings are not production acceptance evidence.
+
 ## Issue content template
 
 Each Roadmap Phase issue MUST contain: objectives, prerequisites, design links, architecture decisions required, engineering deliverables, acceptance tests (referencing AT- and INV-/feature IDs), risks/unknowns, non-goals and a checklist including design review, implementation, tests, actual validation evidence and docs update. Prefer subissues for large implementation tasks after the phase design is accepted. Never create duplicate source-of-truth specifications inside issue descriptions.

@@ -112,3 +112,7 @@ All read APIs, FTS, graph scenes, nested Canvas components, asset access and exp
 ## 9. Integrity checks
 
 World-scoped composite foreign keys; no orphan tags or edges; valid typed endpoints; no biological ancestry cycles; chronology policy catches impossible exact dates while permitting explicit speculative settings; invalid conflicting canonical state rejected or flagged for author arbitration; event/action effect transactions atomic; unknown dates remain uncertain; stable ID survives rename. Destructive merges require a link/effect/asset impact review and never silently erase history.
+
+## 10. Spatial identity and history
+
+[13](13-Spatial-and-Nested-Location-Model.md) is normative for Place, versioned frames/geometry, strict typed containment, location roles and their branch/interval semantics. Place is already a registry kind in this design; actual implementation remains pending. Validate strict cycles over co-effective intersections in author mutation graph; do not mix physical/admin lenses. Geometry is optional, reparenting and ownership independent, moving interior identity stable. Claims and draft maps never mutate canonical geography without explicit acceptance.

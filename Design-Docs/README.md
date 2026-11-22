@@ -23,6 +23,7 @@
 | [10 — Delivery Roadmap](10-Delivery-Roadmap.md) | Ordered implementation with cross-layer vertical slices |
 | [11 — AI Engineering Instructions](11-AI-Engineering-Instructions.md) | Coding-agent workflow, non-negotiables, handoff and evidence |
 | [12 — Decisions & Reconciliation](12-Decisions-and-Reconciliation.md) | Resolved conflicts, pending ADRs, prior-source map and change policy |
+| [13 — Historical Spatial Model & Procedural Vector Cartography](13-Spatial-and-Nested-Location-Model.md) | Place identity, historical containment, query-bound maps and constrained generation |
 
 ## Document authority
 
@@ -48,6 +49,8 @@
 The ten original issues link to their relevant design contracts and acceptance gates. Phases 0–2 are closed; Phases 3–9 remain open. The planned phase number is independent of the GitHub issue number.
 
 ## Current repository state
+
+- [ADR-013 spatial/cartography reconciliation](ADRs/cross-phase-spatial-cartography.md): accepted direction from research #65/#66; implementation and native verification pending.
 
 - [Consolidation and integration record — 2026-11-21](Consolidation-2026-11-21.md): all ten stacked PRs merged, shared schema 26, exact CI evidence and outstanding gates.
 

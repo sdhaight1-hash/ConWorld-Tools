@@ -36,6 +36,12 @@ The older files are historical design inputs, **not alternate live specification
 | D-014 | Genetics synthetic/deterministic and optional | No need for actual whole-genome simulator; genealogy works independently |
 | D-015 | First vertical slice proves relationship event change across surfaces | Correct core model before expansive UI or generative simulation |
 | D-016 | Offline/local-first authoring, optional AI/NPC adapters | Core product usable without external provider |
+| D-017 | Stable historical Place, typed temporal/lens-specific containment and optional versioned geometry/frame | Reject fixed tree, geometry-first dependency and duplicated history |
+| D-018 | Exact/schematic/draft modes; explicit author promotion of candidate geography | No rendered or inferred geography silently becomes canon |
+| D-019 | Shared authorized spatial QuerySpec and immutable MapScene; policy before all derivation | Prevent hidden paths, anchors, geometry, labels and export leakage |
+| D-020 | Versioned map recipes/styles, bounded SVG first, accessible fallback and evidence-gated wgpu | Avoid renderer authority and premature GIS/GPU complexity |
+
+See [ADR-013 cross-phase spatial/cartography](ADRs/cross-phase-spatial-cartography.md) and [13 spatial specialist contract](13-Spatial-and-Nested-Location-Model.md), approved reconciliation of #65/#66; production evidence pending.
 
 ## Contradictions resolved
 
@@ -75,6 +81,7 @@ The [Phase Zero architecture baseline](ADRs/phase-0-architecture-baseline.md) re
 | ADR-012 | Simulated branch merger, world import cross-references and external NPC write-back | Later | Explicit conflict test and schema migration plan |
 
 **OPEN** does not permit an AI coder to invent a global policy silently. Propose the smallest coherent decision, test it, then update its ADR/status.
+| ADR-013 (implementation details open) | Spatial schema reuse, uncertainty/frame/geometry validation, procedural constraints, renderer and privacy gates | Phases 3–9 | SP-01–14, real native and archive tests; design direction accepted |
 
 ## Change control
 

@@ -51,6 +51,11 @@
 | QRY-03 | Audience-safe display search, facets, snippets, exported indexes and graph navigation | Side-channel tests verify no withheld data leakage |
 | IMP-01 | Offline portable, versioned, backup-compatible project bundles | Import/export semantic equality and missing-assets report |
 | NPC-01 | Optional typed external NPC adapter, no dependency on an LLM | Offline authoring still complete with adapter disabled |
+| SPA-01 | Stable Place identity and optional location type/geometry, typed historical containment/placement; independent lenses and branch/revision | SP-01–05 |
+| SPA-02 | Spatial queries use shared bounded authorized engine; independent roles, optional frames and unresolved locations | SP-05–06, SP-11–12 |
+| MAP-01 | Exact and clearly marked schematic vector maps, nested navigation, typed recipes and accessible fallback as derived views | SP-07–09 |
+| MAP-02 | Bounded reproducible constraints-based draft geography, no silent canonical promotion; explicit transactional approval | SP-10–11 |
+| MAP-03 | Safe map publication/export, optional GPU, portable recipes/assets, scoped noninterference and measured performance | SP-09/11/13/14 |
 
 ## C. User-facing interaction requirements
 
@@ -61,10 +66,12 @@
 
 ## D. Prioritization
 
-**P0 (foundation):** INV-01 through INV-16 except generation implementation, REL-01–03, EVT-01–03 limited vertical slice, ENT-01, basic CAN-01/02, LNK-01, QRY-01/03, EVD-01, IMP-01 scaffold.
+**P0 (foundation):** INV-01 through INV-16 except generation implementation, REL-01–03, EVT-01–03 limited vertical slice, ENT-01, basic CAN-01/02, LNK-01, QRY-01/03, EVD-01, IMP-01 scaffold, SPA-01/02 (stable identity, historical containment and scoped query foundation).
 
-**P1 (core product):** full GEN, ORG, CON, advanced Canvas components, visual query builder, conflict/genealogy views, robust evidence and publication.
+**P1 (core product):** full GEN, ORG, CON, advanced Canvas components, visual query builder, conflict/genealogy views, robust evidence and publication, MAP-01 and basic MAP-03 (bounded maps, navigation, safe export).
 
-**P2 (simulation):** DNA-01/02, population dynamics, generative histories, enhanced geography, AI-NPC bidirectional integration.
+**P2 (simulation):** DNA-01/02, population dynamics, generative histories, enhanced geography (advanced frames, constrained procedural generation MAP-02, optional acceleration/tiles in MAP-03), AI-NPC bidirectional integration.
 
 Do not interpret P2 as permission to omit data-model hooks, IDs, schema-versioning or test seams now.
+
+See [13](13-Spatial-and-Nested-Location-Model.md) and SP acceptance gates in [09](09-Acceptance-and-Verification.md). Basic spatial modeling is no longer deferred with enhanced geography; phase ownership remains in [10](10-Delivery-Roadmap.md).

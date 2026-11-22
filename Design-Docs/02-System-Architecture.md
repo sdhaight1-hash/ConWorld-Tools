@@ -98,3 +98,7 @@ Use 1k/10k/50k seeded object fixtures. Measure time-to-open, 1-hop graph focus, 
 ## 8. Shipping boundary
 
 The entire application need not exist to demonstrate correctness. A first useful vertical slice contains two characters, one reified relationship, a dated betrayal event with actors and claim/source, a valid-time change, a basic Node graph, one Canvas bound timeline component and public Display search. That slice exercises all crucial boundaries; build it before broadening the plugin catalog.
+
+## 9. Shared spatial and cartographic pipeline
+
+[D-017–D-020 and 13](13-Spatial-and-Nested-Location-Model.md) extend the existing domain/store/query facade: canonical Place and spatial facts/optional geometry → scoped query → derived schematic/exact/draft scene → SVG/Canvas2D/optional wgpu. No separate database, renderer authority or compulsory GIS; SVG first for bounded maps and accessible list, target measurements gate acceleration. Apply authorization before any procedural derivation or labeling; assets and recipes use existing persistence/archives.

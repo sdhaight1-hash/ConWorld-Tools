@@ -58,6 +58,29 @@ All named objects need reproducible IDs, explicit dated facts and expected answe
 
 Earlier acceptance examples from v0.1–v0.4 are folded into these testable scenarios. Implement actual automated tests and record their commands/results; this file is only a specification.
 
+## Spatial + cartographic acceptance extension (SP gates)
+
+These new, unpassed production gates consolidate NL-01–14 and VC-01–14 from the studies; no renumbering or retroactive change to prior AT results. Link [13](13-Spatial-and-Nested-Location-Model.md) and ADR-013.
+
+| ID | Scenario and required result | Related AT / issue |
+|---|---|---|
+| SP-01 | Unlocated Place create/reopen/rename/type history; stable references, unknown not zero; wrong-world/kind rejected | AT-01/26, #4 |
+| SP-02 | Multiple parent lenses, overlap, adjacency, event/placement roles; no mixed-lens or ownership/routing inference | AT-08/12/22, #4/#6/#7 |
+| SP-03 | Co-effective strict cycle including staged batch/branch rejected atomically; disjoint intervals allowed; bounded failure safe | AT-14/23/33, #4 |
+| SP-04 | Dated reparent/control, prior revision, inherited fork/withdrawal/nested sibling isolation, uncertainty/claim separation | AT-14–16, #4/#7/#8 |
+| SP-05 | Moving vessel cabin and same XY different floors; uncalibrated frames never compared; documented extent/north/scale only when known | AT-01/22, #4/#5 |
+| SP-06 | Scoped recursive query and alias ambiguity, pagination/cancel, saved binding/rebuild/intermediate dependency parity | AT-21–25/35, #4 |
+| SP-07 | Exact geometry validity, holes/shared edge and candidate bbox false positive; topology-aware LOD if introduced | AT-23/24, #5/#10 |
+| SP-08 | Native Node→Canvas→Display nested map navigation, pinned recipes, accessible list and same historical selection; schematic labeled and unplaced list correct | AT-17–20/22/32, #5 |
+| SP-09 | Style/theme changes never mutate world; safe SVG export; deterministic label priorities/collision metrics, visible hit targets | AT-18/20/27, #5 |
+| SP-10 | Deterministic draft/locks, unsatisfied/unknown report, no canonical writes until explicit stale-safe transactional promotion; no randomization from unrelated edits | AT-15/33, #5 |
+| SP-11 | Public noninterference with secret root/path/anchor/geometry/label/count/extent/legend/hit/export/cache; redacted raster; policy change and reader error/cursor/budget leakage | AT-13/20/25/34, #8 across all |
+| SP-12 | Institution residence/property and multi-site conflicts, migration and population origins retain role separation and historical effects; no culture/genetic inference | AT-02/06–12/28–30, #6/#7/#9 |
+| SP-13 | Archive upgrade/export/restore preserves Place/fact/geometry/frame/recipe IDs, pins and hashes, missing assets diagnostics, semantic read equality | AT-26/27/33, #10 |
+| SP-14 | Real native desktop, offline/no-GPU, 1k/10k/50k dense mixed feature fixture; timing, memory, geometry vertices, labels, pan/zoom/export and device fallback documented on target hardware; no arbitrary SLA from isolated benchmarks | AT-23/31/32/36, #10 |
+
+SP-01–06 are foundation/query gates; SP-08/09 start with SVG/schematic, SP-07 applies to exact geometry when introduced, SP-10 only to candidate feature, SP-11 applies from first read, SP-12–14 cross-phase. No screenshot of a prototype or isolated SQLite experiment passes these production gates.
+
 ## Test layers
 
 **Unit:** typed IDs, time/branch semantics, relationship inverse and symmetry, biological cycle rejection, role validation, AST normalization, permission intersections and layout child constraints.

@@ -117,3 +117,7 @@ Example author query: "descendants of House Vale who belonged to the merchant gu
 - Two views of a dated query at different time/revision coordinates produce appropriately different results.
 - Text mentions can propose links and draft nodes; membership or causality requires explicit structured approval.
 - Keyboard-accessible result lists serve as graph fallback; results retain navigation context across studios.
+
+## 9. Spatial query extensions
+
+[13](13-Spatial-and-Nested-Location-Model.md) defines WithinPlace, LocatedIn, SpatialRelationTo, contextual PlaceName and scoped MapFeatures projection as extensions of the existing versioned QuerySpec and saved-query bindings. Typed/lens-specific bounded adjacency; intersect effective intervals along historical paths, retain uncertainty, filter hidden paths before traversal/aggregation/map derivation. Viewport is not privilege. Stable IDs/cursors, authorized labels and explicit incomplete geometry. Derived spatial indexes/caches rebuildable; invalidate prior/new ancestor, geometry, frame, recipe and policy dependencies. R*Tree is optional candidate lookup, never exact truth.
