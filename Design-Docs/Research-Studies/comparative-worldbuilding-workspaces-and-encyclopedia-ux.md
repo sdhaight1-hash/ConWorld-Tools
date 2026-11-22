@@ -170,3 +170,88 @@ All accessed 2026-11-22 (mutable documentation unless dated). Source claims para
 - [R26] Obsidian Portal, public campaigns. https://www.obsidianportal.com/campaigns ; attempted https://king-melchior.obsidianportal.com/ and https://thefinalreaping.obsidianportal.com/ (human-check blocked).
 - [R27] Campfire, official homepage. https://www.campfirewriting.com/
 - [R28] Campfire, worldbuilding modules and panels. https://www.campfirewriting.com/worldbuilding-tools
+
+## 8. Deeper implementation review — 2026-11-22
+
+Opened additional official help on Kanka quick creation, LegendKeeper templates and map tools, World Anvil article templates/categories/secrets, Notion database templates/view opening, Obsidian Bases view configuration and syntax, and ProseMirror document/transaction architecture [R29–R39]. These are documented workflows, not observed logged-in author actions. The older community-maintained World Anvil Codex explicitly warns of outdated material; use current Learn documentation in preference. The current Secrets guide independently confirms that a secret-associated tab is visible even when the viewer cannot read any of its contents. This is a documented design distinction, not a claim of exploit or current implementation testing.
+
+### 8.1 Four independent structures, not one tree
+
+World Anvil documents nested article categories, parent articles and tags; Kanka quick creation creates referenced entities without navigating away, while LegendKeeper can select templates during mention creation. [R29–R33] These suggest that presentation organization, identity, reference, and real-world containment must be separate. Example: Alder Guild can appear under Institutions, in Trade, under a curated chapter about Riverhold, and on an authorized map. None of those navigation choices establishes territorial jurisdiction, physical location or membership.
+
+- Canonical typed graph: existing ObjectRef and validated temporal fact identity.
+- Explorer grouping: initial allowlisted kind filters, saved queries and selected labels (no persistence expansion required for first slice); later curated collection references only after demonstrating need and reviewing storage. A category folder is not a Place.
+- Canvas document: LayoutElement tree, stable ElementId, versioned pinned templates. A section may reference other identities but is not an entity automatically.
+- Authorized reader TOC/breadcrumbs/backlinks: derive entirely from released, scoped output. Do not include hidden category names, private article counts, placeholders for secret sections or inaccessible ancestor paths.
+
+A topic hierarchy should allow one identity to appear through multiple noncanonical navigation routes instead of duplicating records. No general multi-parent folder engine before the simpler directory/saved views work. No change to #68 physical/admin containment contract.
+
+### 8.2 Writing-first creation and typed snippets
+
+Kanka quick creator documentation describes a persistent create entry action/keyboard shortcut and bulk name entry; LegendKeeper help describes creating template-backed pages during mention composition. World Anvil's tailored prompts are optional and do not force authors to fill every field. [R29–R31] Notion templates provide repeatable record/page structure and side-peek opening [R34/R35]. Transfer: the smallest useful entry can be a named identity before anything is known about it. Allow create action from a compatible picker without losing text, with confirmation of kind and date semantics; preserve stable ID and caller revision. If incompatible, refuse or leave as unlinked text; never automatically create a fact.
+
+Inspect current Atlas layout.rs:1–109, 548–700, access.rs, canvas-tree.ts:27–75, canvas-templates.ts:1–54. Version 1 LayoutElement has ElementId, audience and content. Global max 512 elements, depth 16, 16 queries; text 16384 bytes; template v1 and custom pin; new blocks Author; reparent in layout.rs restricts inherited permission, and frontend records bounded 32 snapshots. Keep those constraints. Plain Text encodes no headings or inline reference identity. Three alternatives:
+1. Existing Text + ObjectLink blocks with improved layout editor. No compatibility burden; fastest shell/authoring improvement; not adequate for genuine in-paragraph links/TOC.
+2. Minimal structured typed runs in new supported component variant (recommended research candidate): heading levels 2–4, paragraph runs text / object link / citation; optional emphasis limited to explicit validated marks. Block ElementId persists; references at run level may need stable IDs for indexing and navigation. No nested arbitrary DOM, raw user markup or arbitrary executable code. Existing Text and ObjectLink remain readable and not implicitly upgraded. Review schema/version policy, serialized size/depth/element limits and backward compatibility before production.
+3. Full editor schema/runtime library, e.g. ProseMirror documents, steps/transactions, mapping and NodeViews [R36]. Potentially useful for IME, clipboard, selection, history and structured editing once proven necessary. Do not choose it solely because mature products support blocks; map to authoritative typed Rust format, audit transitive dependencies/licenses, accessibility, WebView compatibility, zero-network packaging. No local integration test performed; defer library adoption until a small editor spike shows that existing DOM controls cannot meet required UX.
+
+Pseudo-contract proposal, not approved wire format:
+```text
+Heading { level, text }
+Paragraph { runs: [Text(text), Link(run_id, target ObjectRef, caption), Citation(run_id, source ObjectRef, caption)] }
+DisplayParagraph = authorized projected runs only
+```
+Why runs rather than raw UTF-8 spans: collaborative editor positions, browser UTF-16 offsets and Rust byte offsets differ; an inserted Unicode prefix can invalidate offsets. Structured runs retain target reference outside unchanged link; full selection editing, Unicode/IME, split/merge, duplicate run IDs, paste, stale revisions and historical reference pins still need test. No hidden run caption fallback unless it is independently authored and explicitly authorized; removing link/citation run can alter grammar, editor must preview exact projection. The compiler and index must share authorized content. Maintain canonical facts separately. No silent rewriting or promotion of mentions.
+
+### 8.3 Query definition versus view versus results
+
+Notion views support side/center/full page opening, filters, sorting and grouping. Obsidian Bases explicitly distinguishes a base's data, per-view configuration, filters, ordering, grouping and embedded views [R35/R37/R38]. Current Atlas QuerySpec (query.rs:18–74) has version/filter/limit; PredicateInput is allowlisted, and saved binding pins world/query ID/definition revision with typed parameters (layout.rs:143–174). Dynamic queries are currently author-only (layout.rs:332–362, 687+). Do not pretend saved definitions already support arbitrary grouping, ordering or display columns. Start with existing result shape (ObjectRef,label) and list/table views; alternate styling needs no new query. A view descriptor can be ephemeral first, later persisted as presentation metadata if repeated-use evidence warrants; never store copied canonical rows.
+
+```text
+query definition + typed parameters + existing authorized context -> bounded rows + continuation
+view options -> presentation of those rows (same selected ID)
+whole result aggregate -> separate explicitly supported bounded server computation
+```
+If a gallery needs portrait, a timeline needs intervals, graph needs accepted edges, an infobox needs source-backed facts: obtain exactly those authorized fields through tested domain service, not guessed joins or frontend enrichment with author-only payload. The list renderer cannot count an entire paginated query from its first page; label that value as visible page subtotal, or explicit incomplete/unknown. Missing field != unknown fact != zero != hidden. Scope before count or grouping, not after; no hidden counts or ordering derived from unavailable fields. Use deterministic tie-breaking and cancellation. Only one first narrow membership-style projection should be reviewed under #5/#8 before arbitrary aggregation; no formula interpreter.
+
+### 8.4 Fine-grained disclosure and visible-existence leaks
+
+Current World Anvil Secrets documentation [R39] distinguishes the visible Secrets tab from the restricted content inside it. Atlas should deliberately reject a comparable existence signal in restricted mode, because INV-15 includes counts, titles, paths and conditional components. This is stronger than a mere editor setting. Current Atlas access.rs already intersects inherited scope: author sees all, public sees only public, character sees public and own character content; conflicting character constraints yield Author. Compiler prunes subtree before query evaluation; published layout gate denies ordinary dynamic query bindings. Reader current release and selected day are separate. No public arbitrary query exposure, and no actual production reveal-history subsystem. Realm Works player disclosure is not a permission template to copy literally. A new reveal timeline or audience group infrastructure would need approved semantics and owner review.
+
+Required negative tests: insert author-only heading, nested author query, hidden link, private image hotspot; compare serialized reader page, TOC, count, search matches/snippets, backlink output and export byte content before/after. Revoke target page and recompile: remove link and secret caption and clear stale result/focus. Move private nested block into public container: must remain restricted, no type/ID change. Earlier effective day cannot silently change manually written prose. Revoke or invalidate cached page and reauthorize navigation; timing side channels are not solved just by equivalent DTOs. Distinguish author-facing secret indicators (allowed in author mode) from public reveal hints (deny).
+
+### 8.5 Executed isolated semantic prototype
+
+[check.js](workspace-projection-prototype/check.js), [actual results](workspace-projection-prototype/results.json), [method/boundaries](workspace-projection-prototype/README.md). Executed exact JavaScript function in V8 isolate. 25 checks passed. Nested headings and runs, separate scopes author/public/two fictional characters, explicit permitted links, half-open dates, synthetic row arrays. Source and results committed separately. No UI, rendering, SQLite, branch/revision resolver or actual policy calls, no performance claim.
+
+| Raw synthetic rows | Authorized at day 12 | House A / B full oracle | First 50 subtotal A / B |
+|---:|---:|---:|---:|
+| 1,000 | 686 | 229 / 457 | 17 / 33 |
+| 10,000 | 6,857 | 2,286 / 4,571 | 17 / 33 |
+| 50,000 | 34,286 | 11,429 / 22,857 | 17 / 33 |
+
+Each size verified identical list/card page IDs, exact authorized grouping, page != whole count, hidden-only injected row noninterference and half-open date exclusion. Nested document verifies hidden query not evaluated, public DTO unchanged by secret heading addition, distinct character headings, revoked target/caption omission, inherited audience after moving a block, stronger intersection of two character scopes, author visibility, and Unicode prefix insertion without retargeting structured link. This simple reference model illustrates why data-view polish cannot be implemented only by CSS or frontend filtering. No 50k runtime latency measured and no production gates satisfied; whole-row materialization here is an oracle, not suggested production algorithm.
+
+### 8.6 Refined implementation sequence and stop conditions
+
+- S0 (existing contracts): F-01/02 and UX-02 protected context/draft; one shared selection; complete kind filter and compatible picker. Test competing write, no implicit date shift and no draft loss. No schema.
+- S1 (first useful workbench): persistent explorer, search/open/peek, compact list/table, directory and authored article title; existing layout renderer and current explicit release. Test native at 460/1080/1920, keyboard focus, duplicate names, 50k focused operation. Do not build custom dashboards yet.
+- S2 (encyclopedia writing): improve block editing using existing stable layout; narrow heading/inline link/citation trial, explicit compatibility check before any new layout version. Keep text-only diagnostic fallback; no library chosen by this study. Compare editing 10, 100, 512 blocks, insert/move/undo/save/reopen, IME, copy/paste, source selection. Check no leaked body or captions. No arbitrary contenteditable HTML as canonical authority.
+- S3 (derived presentation): one approved typed membership read view and explicit bounded count if needed; list/table equality then optional cards/timeline; context/date/branch/audience pin and parity against current Rust services. Do not adopt aggregation if author just needs existing member list, or enable public components before Rust policy validated. 
+- S4 (specialized exploration): domain views and maps from #6/#7/#68, portable reader output from #10; #70 still requires comparative task gap; no new feature/architectural evolution ticket solely from precedent.
+
+Prioritize actual workflow improvement and existing defects over new frameworks. Source-review/isolated evidence now deeper, external interactive authoring benchmarks, native prototype and owner review still open; no production changes or capture applicable to this numerical test.
+
+### Additional references (all accessed 2026-11-22)
+
+- [R29] Kanka, *Quick Creator*. https://docs.kanka.io/en/latest/features/quick-creator.html
+- [R30] LegendKeeper, *Help*, Templates and Maps. https://www.legendkeeper.com/help/
+- [R31] World Anvil, *How to Use Article Templates*. https://www.worldanvil.com/learn/article-guides/article-templates
+- [R32] World Anvil, *Feature Guide to Articles*. https://www.worldanvil.com/learn/article-guides/articles
+- [R33] World Anvil, *Guide to the Old Version Edit Interface* (explicitly historical interface). https://www.worldanvil.com/learn/article-guides/guide-articles-editing
+- [R34] Notion, *Using database templates to help cement your team's process*. https://www.notion.com/help/guides/using-database-templates-for-teams
+- [R35] Notion, *Database views, filters, sorts & groups*. https://www.notion.com/help/views-filters-and-sorts
+- [R36] ProseMirror, *Guide*. https://prosemirror.net/docs/guide/
+- [R37] Obsidian, *Views*. https://obsidian.md/help/bases/views
+- [R38] Obsidian, *Bases syntax*. https://obsidian.md/help/bases/syntax
+- [R39] World Anvil, *Feature Guide to Secrets*. https://www.worldanvil.com/learn/secrets/secrets
