@@ -3536,10 +3536,10 @@ fn classifications_preserve_pins_and_branch_local_withdrawals() -> Result<(), Er
     let mut exposed = layout.clone();
     if let ElementContent::Stack(children) = &mut exposed.root.content {
         children[1].audience = ClaimAudience::Public;
-        if let ElementContent::Panel(tables) = &mut children[1].content {
-            if let ElementContent::SavedQuery(pin) = &mut tables[0].content {
-                pin.definition_revision = main.revision.0 + 1;
-            }
+        if let ElementContent::Panel(tables) = &mut children[1].content
+            && let ElementContent::SavedQuery(pin) = &mut tables[0].content
+        {
+            pin.definition_revision = main.revision.0 + 1;
         }
     }
     assert!(matches!(
