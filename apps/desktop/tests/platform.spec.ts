@@ -2305,7 +2305,7 @@ test("classification authoring and evidence backlinks use historical author comm
             people: [], relationships: [], events: [], definitions: [],
           };
           if (command === "workspace_saved_queries") return [];
-          if (command === "workspace_record_classification" || command === "workspace_withdraw_classification") {
+          if (["workspace_record_classification", "workspace_withdraw_classification", "workspace_annotate_semantic_fact", "workspace_retire_semantic_descriptor"].includes(command)) {
             writes.push({ command, args }); world.revision++; return null;
           }
           if (command === "workspace_classifications") return [{
@@ -2314,6 +2314,9 @@ test("classification authoring and evidence backlinks use historical author comm
           }];
           if (command === "workspace_semantic_fact_backlinks") return [fact];
           if (command === "workspace_semantic_fact") return fact;
+          if (command === "workspace_semantic_fact_annotations") return [{
+            id: "note", claim: { world: "archive", id: "claim" }, recorded_at: 6,
+          }];
           throw new Error("Unexpected mock command: " + command);
         },
       },
@@ -2338,12 +2341,32 @@ test("classification authoring and evidence backlinks use historical author comm
   await expect(studio.locator("[data-semantic-links]")).toContainText("Language classification");
   await studio.getByRole("button", { name: "Resolve classification fact" }).click();
   await expect(studio.locator("[data-semantic-detail]")).toContainText("evidence folio");
-  await studio.getByRole("button", { name: "Withdraw classification" }).click();
+  await studio.getByRole("button", { name: "Select fact for annotation" }).click();
+  await expect(studio.getByLabel("Annotation fact UUID")).toHaveValue("classification");
+  await studio.getByLabel("Sourced claim UUID").fill("claim");
+  await studio.getByRole("button", { name: "Link sourced annotation" }).click();
   await expect(page.locator("#author-world-info")).toContainText("Author revision 6 / 6");
+  await studio.locator("summary").click();
+  await studio.getByLabel("Annotation fact family").selectOption("classification");
+  await studio.getByLabel("Annotation fact UUID").fill("classification");
+  await studio.getByRole("button", { name: "Inspect annotations" }).click();
+  await expect(studio.locator("[data-annotations]")).toContainText("Claim claim");
+  await studio.getByLabel("Retire Tag definition UUID").fill("tag");
+  await studio.getByLabel("Confirm retirement").check();
+  await studio.getByRole("button", { name: "Retire descriptor", exact: true }).click();
+  await expect(page.locator("#author-world-info")).toContainText("Author revision 7 / 7");
+  await studio.locator("summary").click();
+  await studio.getByLabel("Classification focus concept").fill("language");
+  await studio.getByRole("button", { name: "Inspect classifications" }).click();
+  await studio.getByRole("button", { name: "Withdraw classification" }).click();
+  await expect(page.locator("#author-world-info")).toContainText("Author revision 8 / 8");
   const writes = await page.evaluate(() => (window as unknown as { __classificationWrites: unknown[] }).__classificationWrites);
   expect(writes).toMatchObject([
     { command: "workspace_record_classification", args: { request: { revision: 4 },
       input: { subject_id: "language", descriptor_id: "tag", source_id: "folio", profile: "language" } } },
-    { command: "workspace_withdraw_classification", args: { request: { revision: 5 }, factId: "classification" } },
+    { command: "workspace_annotate_semantic_fact", args: { request: { revision: 5 },
+      fact: { world: "archive", family: "classification", id: "classification" }, claimId: "claim" } },
+    { command: "workspace_retire_semantic_descriptor", args: { request: { revision: 6 }, descriptorId: "tag" } },
+    { command: "workspace_withdraw_classification", args: { request: { revision: 7 }, factId: "classification" } },
   ]);
 });

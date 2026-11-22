@@ -210,7 +210,15 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
         const inspect = document.createElement("button");
         inspect.type = "button"; inspect.textContent = "Resolve " + fact.reference.family + " fact";
         inspect.onclick = () => void resolveFact(fact.reference);
-        row.append(inspect); list.append(row);
+        const annotate = document.createElement("button");
+        annotate.type = "button"; annotate.textContent = "Select fact for annotation";
+        annotate.onclick = () => {
+          const f = form("[data-fact-annotation]");
+          (f.elements.namedItem("family") as HTMLSelectElement).value = fact.reference.family;
+          (f.elements.namedItem("fact") as HTMLInputElement).value = fact.reference.id;
+          (f.elements.namedItem("claim") as HTMLInputElement).focus();
+        };
+        row.append(inspect, annotate); list.append(row);
       }
       status.textContent = facts.length + " active semantic backlinks.";
     } catch (error) { if (valid() && ctx === request) status.textContent = String(error); }

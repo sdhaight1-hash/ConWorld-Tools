@@ -208,6 +208,7 @@ impl Store {
         if resolve_object(&tx, target, view.branch, view.revision, view.day)?.is_none() {
             return Ok(Vec::new());
         }
+        let annotation_target = super::annotation::visible_sourced_claim(&tx, view, target)?;
         let mut statement = tx.prepare(&format!(
             "{METADATA_CTE} {ACTIVE} {AREA}
              SELECT 0 AS family,id FROM active_network
@@ -225,6 +226,15 @@ impl Store {
              SELECT 3,id FROM active_site_area
                WHERE (place_id=?5 OR source_id=?5 OR descriptor_id=?5)
                AND starts_at<=?4 AND (ends_before IS NULL OR ends_before>?4)
+             UNION
+             SELECT CASE a.family
+                 WHEN 'network' THEN 0 WHEN 'parentage' THEN 1
+                 WHEN 'classification' THEN 2 WHEN 'site_area' THEN 3 END,a.fact_id
+               FROM fact_annotations a
+               JOIN author_revisions r ON r.world_id=a.world_id AND r.revision=a.recorded_revision
+               JOIN eligible l ON l.branch_id=r.branch_id
+               WHERE a.world_id=?1 AND a.claim_id=?5 AND ?6
+               AND a.recorded_revision<=l.rev AND a.starts_at<=l.cutoff
              ORDER BY family,id LIMIT 2001"
         ))?;
         let mut rows = statement.query(params![
@@ -232,7 +242,8 @@ impl Store {
             view.branch.0.as_bytes(),
             view.revision.0,
             view.day.0,
-            target.id.0.as_bytes()
+            target.id.0.as_bytes(),
+            annotation_target
         ])?;
         let mut result = Vec::new();
         let mut scanned = 0;

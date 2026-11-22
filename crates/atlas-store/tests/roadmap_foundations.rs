@@ -4025,6 +4025,11 @@ fn annotations_and_retirement_are_historical_and_branch_local() -> Result<(), Er
     let prior = author;
     let annotation = store.annotate_semantic_fact(author, fact, claim, Uuid::new_v4())?;
     author.revision = AuthorRevision(5);
+    assert!(store.semantic_fact_backlinks(claim, prior)?.is_empty());
+    assert_eq!(
+        store.semantic_fact_backlinks(claim, author)?[0].reference,
+        fact
+    );
     assert!(store.semantic_fact_annotations(prior, fact)?.is_empty());
     assert_eq!(
         store.semantic_fact_annotations(author, fact)?[0].id,

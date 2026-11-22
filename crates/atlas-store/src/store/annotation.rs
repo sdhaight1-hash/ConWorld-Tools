@@ -123,7 +123,7 @@ impl Store {
     }
 }
 
-fn visible_sourced_claim(
+pub(super) fn visible_sourced_claim(
     conn: &Connection,
     view: ViewContext,
     claim: ObjectRef,
