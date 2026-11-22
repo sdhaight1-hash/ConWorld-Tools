@@ -3439,12 +3439,16 @@ fn classifications_preserve_pins_and_branch_local_withdrawals() -> Result<(), Er
         branch: world.main,
         ..after
     };
+    let semantic_spec = query(QueryFilter::And(vec![
+        QueryFilter::ClassifiedAs(ConceptProfile::Language),
+        QueryFilter::ClassifiedBy(definition),
+    ]));
     let saved = store.save_named_parameterized_query(SaveNamedLabelQuery {
         world_id: world.id,
         expected: main.revision,
         query_id: None,
         name: "Languages",
-        spec: &profile_query,
+        spec: &semantic_spec,
         command_id: Uuid::new_v4(),
         scope: Scope::Author,
     })?;
@@ -3453,12 +3457,21 @@ fn classifications_preserve_pins_and_branch_local_withdrawals() -> Result<(), Er
         world: world.id,
         query_id: saved.id,
         definition_revision: saved.recorded_at.0,
-        bindings: vec![ParameterBinding {
-            name: "concept_profile_1".into(),
-            value: ParameterValue::ConceptProfile {
-                value: ConceptProfile::Language,
+        bindings: vec![
+            ParameterBinding {
+                name: "concept_profile_1".into(),
+                value: ParameterValue::ConceptProfile {
+                    value: ConceptProfile::Language,
+                },
             },
-        }],
+            ParameterBinding {
+                name: "descriptor_2".into(),
+                value: ParameterValue::Descriptor {
+                    world_id: world.id.0.to_string(),
+                    descriptor_id: definition.id.0.to_string(),
+                },
+            },
+        ],
     };
     assert_eq!(
         store
@@ -3467,27 +3480,182 @@ fn classifications_preserve_pins_and_branch_local_withdrawals() -> Result<(), Er
             .object,
         concept
     );
+    let entry = id(&world, 1);
+    let block = |audience, content| LayoutElement {
+        id: ElementId(Uuid::new_v4()),
+        audience,
+        content,
+    };
+    let table = block(
+        ClaimAudience::Public,
+        ElementContent::SavedQuery(binding.clone()),
+    );
+    let table_id = table.id;
     let layout = LayoutDocument {
         schema_version: LAYOUT_SCHEMA_VERSION,
-        entry: concept,
-        root: LayoutElement {
-            id: ElementId(Uuid::new_v4()),
-            audience: ClaimAudience::Public,
-            content: ElementContent::Stack(vec![LayoutElement {
-                id: ElementId(Uuid::new_v4()),
-                audience: ClaimAudience::Author,
-                content: ElementContent::SavedQuery(binding),
-            }]),
-        },
+        entry,
+        root: block(
+            ClaimAudience::Public,
+            ElementContent::Stack(vec![
+                block(
+                    ClaimAudience::Public,
+                    ElementContent::Text("Released register".into()),
+                ),
+                block(ClaimAudience::Author, ElementContent::Panel(vec![table])),
+            ]),
+        ),
     };
+    let direct = store.execute_query(&binding.resolve(&store, main)?, main)?;
+    let expected_rows: Vec<_> = direct
+        .rows
+        .iter()
+        .map(|row| (row.object, row.record.label.clone()))
+        .collect();
+    let table_rows = |page: atlas_store::layout::DisplayElement| {
+        let DisplayContent::Stack(children) = page.content else {
+            panic!("expected root stack");
+        };
+        let DisplayContent::Panel(private) = &children[1].content else {
+            panic!("expected private panel");
+        };
+        assert_eq!(private[0].id, table_id);
+        let DisplayContent::QueryRows { records, truncated } = &private[0].content else {
+            panic!("expected semantic table");
+        };
+        (records.clone(), *truncated)
+    };
+    let preview = |store: &Store, context| {
+        let control = atlas_store::query::QueryControl::new(std::time::Duration::from_secs(30))?;
+        store.preview_author_layout(context, &layout, &control)
+    };
+    assert_eq!(
+        table_rows(preview(&store, main)?.unwrap()),
+        (expected_rows.clone(), direct.truncated)
+    );
+    assert!(store.entry_layout(main, entry)?.is_none());
+    let mut exposed = layout.clone();
+    if let ElementContent::Stack(children) = &mut exposed.root.content {
+        children[1].audience = ClaimAudience::Public;
+        if let ElementContent::Panel(tables) = &mut children[1].content {
+            if let ElementContent::SavedQuery(pin) = &mut tables[0].content {
+                pin.definition_revision = main.revision.0 + 1;
+            }
+        }
+    }
+    assert!(matches!(
+        store.save_entry_layout(main, &exposed, true, Uuid::new_v4()),
+        Err(Error::CapabilityDenied)
+    ));
+    assert!(store.entry_layout(main, entry)?.is_none());
+    assert_eq!(
+        store.world(world.id, Scope::Author)?.revision,
+        main.revision
+    );
     main.revision = store.save_entry_layout(main, &layout, true, Uuid::new_v4())?;
+    let pinned_layout = main;
+    assert_eq!(
+        table_rows(store.display_entry(main, entry)?.unwrap()),
+        (expected_rows.clone(), direct.truncated)
+    );
     let public = ViewContext {
         scope: Scope::Public,
         ..main
     };
+    let character = ViewContext {
+        scope: Scope::Character(id(&world, 2)),
+        ..main
+    };
+    let reader_page = store.display_entry(public, entry)?.unwrap();
+    assert!(matches!(
+        &reader_page.content,
+        DisplayContent::Stack(children) if children.len() == 1
+    ));
+    for reader in [public, character] {
+        assert_eq!(store.display_entry(reader, entry)?.unwrap(), reader_page);
+        assert!(matches!(
+            binding.resolve(&store, reader),
+            Err(Error::CapabilityDenied)
+        ));
+        assert!(matches!(
+            preview(&store, reader),
+            Err(Error::CapabilityDenied)
+        ));
+        assert!(
+            store
+                .search_entry_text(reader, entry, "Estuary speech", 10)?
+                .unwrap()
+                .matches
+                .is_empty()
+        );
+    }
+    let search = |store: &Store, context, term: &str| {
+        let control = atlas_store::query::QueryControl::new(std::time::Duration::from_secs(30))?;
+        store.search_public_pages(context, term, 10, &control)
+    };
+    let before_search = search(&store, public, "Estuary speech")?;
+    assert!(before_search.matches.is_empty());
+    assert!(!before_search.truncated);
+    let positive = search(&store, public, "Released register")?;
+    assert_eq!(positive.matches.len(), 1);
+    assert_eq!(positive.matches[0].entry, entry);
+
+    let revised = store.save_named_label_query(SaveNamedLabelQuery {
+        world_id: world.id,
+        expected: main.revision,
+        query_id: Some(saved.id),
+        name: "Different definition",
+        spec: &query(QueryFilter::ClassifiedAs(ConceptProfile::Material)),
+        command_id: Uuid::new_v4(),
+        scope: Scope::Author,
+    })?;
+    main.revision = revised.recorded_at;
     assert_eq!(
-        store.display_entry(public, concept)?.unwrap().content,
-        DisplayContent::Stack(vec![])
+        table_rows(store.display_entry(main, entry)?.unwrap()),
+        (expected_rows.clone(), direct.truncated)
+    );
+    store.withdraw_classification(main, assignment, Uuid::new_v4())?;
+    main.revision = AuthorRevision(main.revision.0 + 1);
+    assert_eq!(
+        table_rows(store.display_entry(main, entry)?.unwrap()),
+        (vec![], false)
+    );
+    assert_eq!(
+        table_rows(store.display_entry(pinned_layout, entry)?.unwrap()),
+        (expected_rows.clone(), direct.truncated)
+    );
+    assert_eq!(
+        store.entry_layout(main, entry)?,
+        Some((layout.clone(), true))
+    );
+    let current_public = ViewContext {
+        scope: Scope::Public,
+        ..main
+    };
+    assert_eq!(
+        store.display_entry(current_public, entry)?.unwrap(),
+        reader_page
+    );
+    assert_eq!(
+        search(&store, current_public, "Estuary speech")?,
+        before_search
+    );
+    assert_eq!(
+        search(&store, current_public, "Released register")?,
+        positive
+    );
+    assert!(matches!(
+        store.display_entry(public, entry),
+        Err(Error::InvalidRevision)
+    ));
+    let cancelled = atlas_store::query::QueryControl::new(std::time::Duration::from_secs(30))?;
+    cancelled.cancel();
+    assert!(matches!(
+        store.preview_author_layout(main, &layout, &cancelled),
+        Err(Error::QueryCancelled)
+    ));
+    assert_eq!(
+        table_rows(preview(&store, main)?.unwrap()),
+        (vec![], false)
     );
     let backup = dir.path().join("backup.sqlite");
     let restored = dir.path().join("restored.sqlite");
@@ -3502,9 +3670,19 @@ fn classifications_preserve_pins_and_branch_local_withdrawals() -> Result<(), Er
         reopened.semantic_fact_backlinks(concept, main)?,
         store.semantic_fact_backlinks(concept, main)?
     );
+    for context in [current_public, pinned_layout, main] {
+        assert_eq!(
+            reopened.display_entry(context, entry)?,
+            store.display_entry(context, entry)?
+        );
+    }
     assert_eq!(
-        reopened.display_entry(public, concept)?,
-        store.display_entry(public, concept)?
+        search(&reopened, current_public, "Estuary speech")?,
+        before_search
+    );
+    assert_eq!(
+        reopened.entry_layout(main, entry)?,
+        Some((layout.clone(), true))
     );
     assert!(reopened.resolve_semantic_fact(fact_ref, after)?.is_none());
     store.verify_foreign_keys(Scope::Author)?;

@@ -17,11 +17,13 @@ impl Store {
         if document.entry.world != view.world {
             return Err(Error::WrongWorld);
         }
-        // Validate all author bindings against the same immutable historical view.
-        document.compile(self, view)?;
+        // Reject unsupported publication before resolving author-only data.
         if published {
+            document.validate()?;
             document.validate_publication()?;
         }
+        // Validate all author bindings against the same immutable historical view.
+        document.compile(self, view)?;
         let text =
             serde_json::to_string(document).map_err(|_| Error::InvalidInput("layout encoding"))?;
         if text.len() > 1_048_576 {
