@@ -172,6 +172,7 @@ fn compare(variant: char) -> Result<(), Error> {
         material,
         drive_a,
         drive_b,
+        unrelated_technology,
         place,
         vocabulary,
         drive_tag,
@@ -215,6 +216,7 @@ fn compare(variant: char) -> Result<(), Error> {
             create(material, "Amber", ObjectData::Concept),
             create(drive_a, "Drive One", ObjectData::Concept),
             create(drive_b, "Drive Two", ObjectData::Concept),
+            create(unrelated_technology, "Water wheel", ObjectData::Concept),
             create(place, "Workshop", ObjectData::Place),
             create(vocabulary, "Vocabulary", tag("Curated profiles")),
             create(drive_tag, "Aetheric drive", tag("Local technology category")),
@@ -300,6 +302,17 @@ fn compare(variant: char) -> Result<(), Error> {
                 )?;
                 assert_eq!(find_claim(&store, view, "Estuary speech")?, vec![note]);
                 assert!(find_claim(&store, before, "Estuary speech")?.is_empty());
+                let original = view;
+                commit(
+                    &mut store,
+                    &mut view,
+                    vec![Change::Correct(
+                        note,
+                        claim("language", "Estuary culture documented Estuary Standard."),
+                    )],
+                )?;
+                assert_eq!(find_claim(&store, original, "Estuary speech")?, vec![note]);
+                assert_eq!(find_claim(&store, view, "Estuary Standard")?, vec![note]);
                 false
             }
             (_, "culture_language") => {
@@ -353,7 +366,31 @@ fn compare(variant: char) -> Result<(), Error> {
                     id,
                 };
                 assert!(store.resolve_semantic_fact(reference, before)?.is_none());
-                assert!(store.resolve_semantic_fact(reference, view)?.is_some());
+                let recorded = store.resolve_semantic_fact(reference, view)?.unwrap();
+                let original = view;
+                let mut renamed = store.get_object(language, view)?.unwrap().record;
+                renamed.label = "Estuary Standard".into();
+                commit(&mut store, &mut view, vec![Change::Correct(language, renamed)])?;
+                assert_eq!(
+                    rows(
+                        &store,
+                        original,
+                        QueryFilter::ExactLabel("Estuary speech".into())
+                    )?,
+                    vec![language]
+                );
+                assert_eq!(
+                    rows(
+                        &store,
+                        view,
+                        QueryFilter::ExactLabel("Estuary Standard".into())
+                    )?,
+                    vec![language]
+                );
+                assert_eq!(
+                    store.resolve_semantic_fact(reference, view)?,
+                    Some(recorded)
+                );
                 assert!(
                     store
                         .semantic_fact_backlinks(source, view)?
@@ -385,13 +422,21 @@ fn compare(variant: char) -> Result<(), Error> {
                     ConceptProfile::Material,
                     vocabulary,
                 )?;
+                let category = if variant == 'C' { drive_tag } else { vocabulary };
+                classify(
+                    &mut store,
+                    &mut view,
+                    unrelated_technology,
+                    ConceptProfile::Technology,
+                    vocabulary,
+                )?;
                 for drive in [drive_a, drive_b] {
                     classify(
                         &mut store,
                         &mut view,
                         drive,
                         ConceptProfile::Technology,
-                        drive_tag,
+                        category,
                     )?;
                     relate(
                         &mut store,
@@ -402,13 +447,48 @@ fn compare(variant: char) -> Result<(), Error> {
                         "working_medium",
                     )?;
                 }
-                let drives = rows(&store, view, QueryFilter::ClassifiedBy(drive_tag))?;
-                assert_eq!(drives.len(), 2);
-                assert!(drives.contains(&drive_a) && drives.contains(&drive_b));
-                assert!(rows(&store, before, QueryFilter::ClassifiedBy(drive_tag))?.is_empty());
+                let technologies = QueryFilter::ClassifiedAs(ConceptProfile::Technology);
+                let all = rows(&store, view, technologies.clone())?;
+                assert_eq!(all.len(), 3);
+                assert!(all.contains(&unrelated_technology));
+                assert!(rows(&store, before, technologies)?.is_empty());
+                let local = rows(&store, view, QueryFilter::ClassifiedBy(drive_tag))?;
+                if variant == 'C' {
+                    assert_eq!(local.len(), 2);
+                    assert!(local.contains(&drive_a) && local.contains(&drive_b));
+                    assert!(!local.contains(&unrelated_technology));
+                } else {
+                    assert!(local.is_empty());
+                }
+                println!(
+                    "variant={variant} category_candidates={} exact_category_matches={}",
+                    all.len(),
+                    local.len()
+                );
                 let facts = store.network_facts(view, material)?;
                 assert_eq!(facts.len(), 2);
                 assert!(facts.iter().all(|fact| fact.input.source == source));
+                let original = view;
+                let mut renamed = store.get_object(material, view)?.unwrap().record;
+                renamed.label = "Golden resin".into();
+                commit(&mut store, &mut view, vec![Change::Correct(material, renamed)])?;
+                let later = store.network_facts(view, material)?;
+                assert_eq!(later.len(), facts.len());
+                for fact in facts {
+                    assert!(
+                        later
+                            .iter()
+                            .any(|row| row.id == fact.id && row.input == fact.input)
+                    );
+                }
+                assert_eq!(
+                    store.get_object(material, original)?.unwrap().record.label,
+                    "Amber"
+                );
+                assert_eq!(
+                    store.get_object(material, view)?.unwrap().record.label,
+                    "Golden resin"
+                );
                 true
             }
             ('C', "site_area") => {

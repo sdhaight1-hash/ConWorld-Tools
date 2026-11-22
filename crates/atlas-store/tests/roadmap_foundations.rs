@@ -3575,7 +3575,48 @@ fn semantic_network_relations_require_curated_endpoint_profiles() -> Result<(), 
     };
     assert!(store.resolve_semantic_fact(reference, before)?.is_none());
     assert_eq!(store.network_facts(author, culture)?[0].input, relation);
-    assert!(store.resolve_semantic_fact(reference, author)?.is_some());
+    let original = author;
+    let recorded = store.resolve_semantic_fact(reference, original)?.unwrap();
+    let mut renamed = store.get_object(language, original)?.unwrap().record;
+    renamed.label = "Estuary Standard".into();
+    author.revision = store.apply(&Command {
+        world: world.id,
+        branch: world.main,
+        expected: author.revision,
+        id: Uuid::new_v4(),
+        author: "Fixture".into(),
+        rationale: "Correct language name".into(),
+        scope: Scope::Author,
+        changes: vec![Change::Correct(language, renamed)],
+    })?;
+    assert_eq!(
+        store.get_object(language, original)?.unwrap().record.label,
+        "Estuary language"
+    );
+    assert_eq!(
+        store.get_object(language, author)?.unwrap().record.label,
+        "Estuary Standard"
+    );
+    assert_eq!(
+        store.resolve_semantic_fact(reference, author)?,
+        Some(recorded.clone())
+    );
+    assert!(
+        store
+            .semantic_fact_backlinks(language, author)?
+            .contains(&recorded)
+    );
+    assert_eq!(store.network_facts(author, culture)?[0].id, fact);
+    assert_eq!(
+        store
+            .execute_query(
+                &query(QueryFilter::ClassifiedAs(ConceptProfile::Language)),
+                author
+            )?
+            .rows[0]
+            .object,
+        language
+    );
     store.verify_foreign_keys(Scope::Author)?;
     Ok(())
 }
