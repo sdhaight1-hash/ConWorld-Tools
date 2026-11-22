@@ -26,3 +26,8 @@ jobs:
           cargo +stable run -p atlas-store --example focused_world --locked --release -- 1000
           cargo +stable run -p atlas-store --example focused_world --locked --release -- 10000
           cargo +stable run -p atlas-store --example focused_world --locked --release -- 50000
+      - name: Measure native semantic sparse and dense workloads (1k, 10k, 50k)
+        run: |
+          cargo +stable run -p atlas-store --example semantic_workload --locked --release -- 1000
+          cargo +stable run -p atlas-store --example semantic_workload --locked --release -- 10000
+          cargo +stable run -p atlas-store --example semantic_workload --locked --release -- 50000

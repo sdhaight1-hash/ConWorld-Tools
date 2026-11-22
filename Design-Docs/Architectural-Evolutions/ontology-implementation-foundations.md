@@ -65,3 +65,7 @@ Registered the classification and semantic reference commands in the Tauri handl
 Verified baseline cd7b917: all six Windows/Ubuntu CI checks passed. Added descriptor-ID classification predicates to the shared query planner, saved query wire shape and runtime parameter contract; existing assignments retain their historical version pins even when the definition label changes. Author-only descriptor lookup uses the normalized index and the same visibility/budget rules as profile lookup. Desktop combined-query controls expose the stable descriptor ID. This is metadata categorization, not a new arbitrary field editor.
 
 Canvas parameter editing now also supports stable descriptor references and curated profile selectors using the same typed saved-query contract, without exposing author metadata in published components.
+
+## Native semantic scale harness
+
+The new semantic_workload example creates real canonical Concept identities and source-backed classification facts through the Rust Store. At 1k/10k/50k it exercises sparse (1%) and dense (99%) profile search, explicit truncation/budget rejection, stable fact point lookup, subject backlinks and cancellation; reports observed setup and repeated read times, plus Linux process high-water RSS when available. The Rust CI workflow runs the workloads on Windows and Ubuntu. This is a native in-memory benchmark, not a human desktop workflow or measured disk-write benchmark. Actual results must be read from CI before AE-08 can pass.
