@@ -633,14 +633,8 @@ impl Store {
                     spec.limit,
                 );
             }
-            QueryFilter::WithinPlace {
-                root,
-                kind,
-                lens,
-                include_self,
-                max_depth,
-            } => {
-                return self.within_place(view, *root, *kind, lens, *include_self, *max_depth, spec.limit);
+            QueryFilter::WithinPlace { .. } => {
+                return self.within_place(view, &spec.filter, spec.limit);
             }
             QueryFilter::RelationshipPath { .. } => {
                 return self.indexed_relationship_path_at(view, &spec.filter, spec.limit);

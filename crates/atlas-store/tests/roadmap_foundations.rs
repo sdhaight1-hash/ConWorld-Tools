@@ -2893,24 +2893,56 @@ fn spatial_facts_preserve_temporal_lenses_and_branch_history() -> Result<(), Err
         starts_at,
         ends_before,
     };
-    let first = make(town, valley, NetworkKind::ProperPartWithin, "physical", 13, Some(20));
+    let first = make(
+        town,
+        valley,
+        NetworkKind::ProperPartWithin,
+        "physical",
+        13,
+        Some(20),
+    );
     let fact = store.record_network_fact(author, &first, Uuid::new_v4())?;
     author.revision.0 += 1;
-    let second = make(manor, town, NetworkKind::ProperPartWithin, "physical", 13, None);
+    let second = make(
+        manor,
+        town,
+        NetworkKind::ProperPartWithin,
+        "physical",
+        13,
+        None,
+    );
     store.record_network_fact(author, &second, Uuid::new_v4())?;
     author.revision.0 += 1;
-    let cycle = make(valley, manor, NetworkKind::ProperPartWithin, "physical", 13, Some(20));
+    let cycle = make(
+        valley,
+        manor,
+        NetworkKind::ProperPartWithin,
+        "physical",
+        13,
+        Some(20),
+    );
     assert!(matches!(
         store.record_network_fact(author, &cycle, Uuid::new_v4()),
         Err(Error::InvalidInput("spatial containment cycle"))
     ));
-    let disjoint = NetworkInput { starts_at: 20, ends_before: None, ..cycle };
+    let disjoint = NetworkInput {
+        starts_at: 20,
+        ends_before: None,
+        ..cycle
+    };
     store.record_network_fact(author, &disjoint, Uuid::new_v4())?;
     author.revision.0 += 1;
     let admin = make(valley, town, NetworkKind::AdminPartOf, "county", 13, None);
     store.record_network_fact(author, &admin, Uuid::new_v4())?;
     author.revision.0 += 1;
-    let placement = make(id(&world, 1), manor, NetworkKind::LocatedAt, "residence", 13, None);
+    let placement = make(
+        id(&world, 1),
+        manor,
+        NetworkKind::LocatedAt,
+        "residence",
+        13,
+        None,
+    );
     store.record_network_fact(author, &placement, Uuid::new_v4())?;
     author.revision.0 += 1;
     let spec = query(QueryFilter::WithinPlace {
@@ -2921,10 +2953,30 @@ fn spatial_facts_preserve_temporal_lenses_and_branch_history() -> Result<(), Err
         max_depth: 8,
     });
     let rows = store.execute_query(&spec, author)?.rows;
-    assert_eq!(rows.iter().map(|row| row.object).collect::<Vec<_>>(), vec![manor, town]);
-    assert!(store.execute_query(&spec, ViewContext { day: WorldDay(20), ..author })?.rows.is_empty());
+    assert_eq!(
+        rows.iter().map(|row| row.object).collect::<Vec<_>>(),
+        vec![manor, town]
+    );
+    assert!(
+        store
+            .execute_query(
+                &spec,
+                ViewContext {
+                    day: WorldDay(20),
+                    ..author
+                }
+            )?
+            .rows
+            .is_empty()
+    );
     assert!(matches!(
-        store.execute_query(&spec, ViewContext { scope: Scope::Public, ..author }),
+        store.execute_query(
+            &spec,
+            ViewContext {
+                scope: Scope::Public,
+                ..author
+            }
+        ),
         Err(Error::CapabilityDenied)
     ));
     let fork = store.fork(&ForkCommand {
@@ -2938,7 +2990,10 @@ fn spatial_facts_preserve_temporal_lenses_and_branch_history() -> Result<(), Err
         scope: Scope::Author,
     })?;
     author.revision = fork.created_revision;
-    let mut child = ViewContext { branch: fork.id, ..author };
+    let mut child = ViewContext {
+        branch: fork.id,
+        ..author
+    };
     store.withdraw_network_fact(child, fact, Uuid::new_v4())?;
     child.revision.0 += 1;
     author.revision = child.revision;

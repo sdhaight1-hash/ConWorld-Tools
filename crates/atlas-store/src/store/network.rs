@@ -103,7 +103,10 @@ fn check_spatial_cycle(
 }
 
 fn strict_spatial(kind: NetworkKind) -> bool {
-    matches!(kind, NetworkKind::ProperPartWithin | NetworkKind::AdminPartOf)
+    matches!(
+        kind,
+        NetworkKind::ProperPartWithin | NetworkKind::AdminPartOf
+    )
 }
 
 fn valid_spatial_lens(lens: &str) -> bool {
@@ -184,9 +187,16 @@ impl Store {
             }
             NetworkKind::LocatedAt if matches!(target.record.data, ObjectData::Place) => {
                 let compatible = match input.role.as_str() {
-                    "birth" | "death" | "presence" => matches!(subject.record.data, ObjectData::Person),
-                    "residence" => matches!(subject.record.data, ObjectData::Person | ObjectData::Household),
-                    "event_site" => matches!(subject.record.data, ObjectData::HistoricalEvent { .. }),
+                    "birth" | "death" | "presence" => {
+                        matches!(subject.record.data, ObjectData::Person)
+                    }
+                    "residence" => matches!(
+                        subject.record.data,
+                        ObjectData::Person | ObjectData::Household
+                    ),
+                    "event_site" => {
+                        matches!(subject.record.data, ObjectData::HistoricalEvent { .. })
+                    }
                     "headquarters" => institution(&subject.record.data),
                     "asset_placement" => matches!(subject.record.data, ObjectData::Asset),
                     "population_origin" => matches!(subject.record.data, ObjectData::Population),
@@ -496,21 +506,29 @@ impl Store {
     pub(crate) fn within_place(
         &self,
         view: ViewContext,
-        root: ObjectRef,
-        kind: NetworkKind,
-        lens: &str,
-        include_self: bool,
-        max_depth: u8,
+        filter: &QueryFilter,
         limit: usize,
     ) -> Result<crate::query::QueryResult, Error> {
-        metadata_world(&self.conn, view, false)?;
+        let QueryFilter::WithinPlace {
+            root,
+            kind,
+            lens,
+            include_self,
+            max_depth,
+        } = filter
+        else {
+            return Err(Error::InvalidInput("spatial query"));
+        };
+        let (root, kind, include_self, max_depth) = (*root, *kind, *include_self, *max_depth);
+        let tx = self.conn.unchecked_transaction()?;
+        metadata_world(&tx, view, false)?;
         if !strict_spatial(kind) || !valid_spatial_lens(lens) {
             return Err(Error::InvalidInput("spatial hierarchy"));
         }
         if !(1..=32).contains(&max_depth) {
             return Err(Error::InvalidInput("spatial traversal depth"));
         }
-        let root_version = resolved(&self.conn, view, root)?;
+        let root_version = resolved(&tx, view, root)?;
         if !matches!(root_version.record.data, ObjectData::Place) {
             return Err(Error::WrongKind);
         }
@@ -521,7 +539,7 @@ impl Store {
             result.push(root_version);
         }
         let mut work = 0;
-        let mut stmt = self.conn.prepare(&format!(
+        let mut stmt = tx.prepare(&format!(
             "{METADATA_CTE} SELECT subject_id,source_id FROM active_network
              WHERE kind=?5 AND role=?6 AND target_id=?7
              AND starts_at<=?4 AND (ends_before IS NULL OR ends_before>?4)
@@ -550,13 +568,13 @@ impl Store {
                 let child = ref_id(view.world, row.get(0)?);
                 let source = ref_id(view.world, row.get(1)?);
                 if seen.contains(&child)
-                    || resolve_object(&self.conn, source, view.branch, view.revision, view.day)?
+                    || resolve_object(&tx, source, view.branch, view.revision, view.day)?
                         .is_none()
                 {
                     continue;
                 }
                 let Some(version) =
-                    resolve_object(&self.conn, child, view.branch, view.revision, view.day)?
+                    resolve_object(&tx, child, view.branch, view.revision, view.day)?
                 else {
                     continue;
                 };
@@ -574,6 +592,8 @@ impl Store {
                 .cmp(&b.record.label)
                 .then(a.object.id.0.cmp(&b.object.id.0))
         });
+        drop(stmt);
+        tx.commit()?;
         let truncated = result.len() > limit;
         result.truncate(limit);
         Ok(crate::query::QueryResult {
