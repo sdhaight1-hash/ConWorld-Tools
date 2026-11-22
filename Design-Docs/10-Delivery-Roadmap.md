@@ -1,6 +1,6 @@
 # 10 — Delivery Roadmap: Numbered Design and Implementation Phases
 
-> **Feature-scope hold (2026-11-22 UTC):** Owner directed the formal [New Feature #68](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/68) process before any further development. The reconciled spatial/cartographic extension is a technical direction, not an accepted feature scope. SPA/MAP requirements, SP gates and cross-phase integration additions are provisional for #68; they do not change the original roadmap's exit criteria before explicit feature approval. Preserve original research and design record; no code/merge authorization from this document. Draft #67 is held pending approval and a feature-specific design under `Design-Docs/Features/`.
+> **Feature scope accepted (2026-11-22 UTC):** [New Feature #68](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/68) received [explicit owner approval](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/68#issuecomment-7073427305). The [accepted feature specification](https://github.com/sdhaight1-hash/ConWorld-Tools/blob/main/Design-Docs/Features/nested-locations-and-procedural-vector-cartography.md) governs SPA/MAP extensions and SP-01–14 as feature-specific requirements/gates; original roadmap phase exit criteria are unchanged. The earlier hold remains in Git history (8f39572). Draft #67 requires baseline and exact-head design/test review before further coding or merge; no implementation or production verification is implied by scope approval.
 
 
 **Status:** Accepted sequence; each phase has one GitHub issue titled exactly \`Roadmap Phase N — ...\`. Issue bodies contain accountable design deliverables and exit gates. Links to those issues are added once created.
@@ -74,7 +74,7 @@ All ten issues start **open** and link to their relevant design contracts and ac
 - Use only one read query engine and one publication policy enforcement path across three studios.
 - "Done" always means implemented and tested; roadmap issue existence does not imply feature completion.
 
-## Spatial/cartographic cross-phase extension (accepted direction; implementation pending)
+## Accepted feature #68 — spatial/cartographic integration dependencies (not phase exit gates)
 
 [ADR-013](ADRs/cross-phase-spatial-cartography.md) and [13](13-Spatial-and-Nested-Location-Model.md) reconcile research #65/#66. No Phase 10, no automatic reopening #1–#3. Foundation scope is stable Place, exact typed containment/roles, branch/time and shared query (P0); bounded exact/schematic maps and authoring (P1); advanced geographical generation/simulation (P2). Existing accepted order preserved: prior branch/media consolidation and baseline checks before spatial migrations; do not reserve a migration number.
 

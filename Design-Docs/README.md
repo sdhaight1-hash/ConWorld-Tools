@@ -50,7 +50,7 @@ The ten original issues link to their relevant design contracts and acceptance g
 
 ## Current repository state
 
-- [ADR-013 spatial/cartography reconciliation](ADRs/cross-phase-spatial-cartography.md): accepted direction from research #65/#66; implementation and native verification pending.
+- [ADR-013 spatial/cartography reconciliation](ADRs/cross-phase-spatial-cartography.md): accepted direction from research #65/#66; [accepted New Feature #68 specification](Features/nested-locations-and-procedural-vector-cartography.md); implementation and native verification pending.
 
 - [Consolidation and integration record — 2026-11-21](Consolidation-2026-11-21.md): all ten stacked PRs merged, shared schema 26, exact CI evidence and outstanding gates.
 

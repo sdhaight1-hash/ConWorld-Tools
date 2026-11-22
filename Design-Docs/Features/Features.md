@@ -43,4 +43,4 @@ A new feature design SHOULD include:
 
 ## Feature index
 
-_No post-roadmap feature specifications are listed in this directory at the time this index was established. Add accepted feature links here as they are created._
+- [NestedLocations and Procedural Vector Cartography](nested-locations-and-procedural-vector-cartography.md) — **Accepted Design**, [New Feature #68](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/68), [owner approval](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/68#issuecomment-7073427305). Research #65/#66; dependency-gated implementation, verification pending; draft #67 held for review.

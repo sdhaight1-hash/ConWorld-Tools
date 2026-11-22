@@ -1,6 +1,6 @@
 # 13 — Historical Spatial Model & Procedural Vector Cartography
 
-> **Feature-scope hold (2026-11-22 UTC):** Owner directed the formal [New Feature #68](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/68) process before any further development. The reconciled spatial/cartographic extension is a technical direction, not an accepted feature scope. SPA/MAP requirements, SP gates and cross-phase integration additions are provisional for #68; they do not change the original roadmap's exit criteria before explicit feature approval. Preserve original research and design record; no code/merge authorization from this document. Draft #67 is held pending approval and a feature-specific design under `Design-Docs/Features/`.
+> **Feature scope accepted (2026-11-22 UTC):** [New Feature #68](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/68) received [explicit owner approval](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/68#issuecomment-7073427305). The [accepted feature specification](https://github.com/sdhaight1-hash/ConWorld-Tools/blob/main/Design-Docs/Features/nested-locations-and-procedural-vector-cartography.md) governs SPA/MAP extensions and SP-01–14 as feature-specific requirements/gates; original roadmap phase exit criteria are unchanged. The earlier hold remains in Git history (8f39572). Draft #67 requires baseline and exact-head design/test review before further coding or merge; no implementation or production verification is implied by scope approval.
 
 
 **Status:** Accepted architectural direction (owner-approved reconciliation, 2026-11-21 local / 2026-11-22 UTC). Implementation and detailed library/schema choices remain unverified.  
@@ -112,7 +112,7 @@ Portable archive preserves canonical IDs, spatial facts/frames/provenance/histor
 
 ## 9. Dependency-ordered delivery
 
-Existing #1–#3 closed phases remain closed; new spatial extension work tracked across existing open #4–#10, with baseline checks rather than claims that original gates passed for new scope.
+Existing #1–#3 remain closed. Feature #68 owns extension implementation and acceptance; #4–#10 are integration dependencies, not new original phase exit requirements.
 
 | Slice | Responsible issue | Gate before downstream |
 |---|---|---|
