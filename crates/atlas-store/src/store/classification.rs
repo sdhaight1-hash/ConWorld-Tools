@@ -438,6 +438,9 @@ impl Store {
              ORDER BY v.label,v.object_id LIMIT 2001"
         ))?;
         let mut rows = statement.query(rusqlite::params_from_iter(parameters.iter()))?;
+        // Internal assignments are accumulated in sets, not returned in fact-ID order.
+        // Avoid an ID-ordered world scan for every candidate. Any five active
+        // rows still expose a duplicate among the four permitted profiles.
         let mut subject_matches = tx.prepare(&format!(
             "{METADATA_CTE} {ACTIVE}
              SELECT p.id,p.subject_id,p.profile,p.descriptor_id,p.descriptor_branch,
@@ -446,7 +449,7 @@ impl Store {
              FROM active_classification p
              WHERE p.subject_id=?5
              AND p.starts_at<=?4 AND (p.ends_before IS NULL OR p.ends_before>?4)
-             ORDER BY p.id LIMIT 5"
+             LIMIT 5"
         ))?;
         let mut result = Vec::new();
         let mut scanned = 0;
