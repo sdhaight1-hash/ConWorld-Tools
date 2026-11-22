@@ -232,6 +232,7 @@ fn main() {
             workspace::workspace_instantiate_custom_template,
             workspace::workspace_ghost_candidates,
             workspace::workspace_resolve_ghost,
+            workspace::workspace_founder_matches,
             workspace::workspace_founder_genome,
             workspace::workspace_create_identity,
             workspace::workspace_network_facts,

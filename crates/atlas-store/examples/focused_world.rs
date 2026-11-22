@@ -66,14 +66,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::fs::metadata(&path)?.len()
     );
     drop(store);
-    let store = Store::open(&path)?;
-    let view = ViewContext {
+    let opened = Instant::now();
+    let mut store = Store::open(&path)?;
+    println!("reopen_ms={}", opened.elapsed().as_millis());
+    let mut view = ViewContext {
         world: world.id,
         branch: world.main,
         revision,
         day: WorldDay(10),
         scope: Scope::Author,
     };
+    let house = store.create_identity(view, atlas_store::network::IdentityKind::FamilyHouse, "Benchmark house", Uuid::new_v4())?;
+    view.revision = AuthorRevision(view.revision.0+1);
+    store.record_network_fact(view, &atlas_store::network::NetworkInput {
+        subject: object(count-1), target: house, source: object(2),
+        kind: atlas_store::network::NetworkKind::Membership, role: "member".into(), starts_at: 0, ends_before: None,
+    }, Uuid::new_v4())?;
+    view.revision = AuthorRevision(view.revision.0+1);
+    store.record_parentage(view, atlas_store::genealogy::RecordParentage {
+        parent: object(3), child: object(count-1), kind: ParentageKind::Biological,
+        starts_at: WorldDay(0), ends_before: None, rationale: "Fixture", command_id: Uuid::new_v4(),
+    })?;
+    view.revision = AuthorRevision(view.revision.0+1);
     let query = QuerySpec {
         schema_version: QUERY_SCHEMA_VERSION,
         filter: QueryFilter::FullTextPhrase(format!("Resident {}", count - 1)),
@@ -85,6 +99,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(result.rows.len(), 1);
         assert_eq!(result.rows[0].object, object(count - 1));
         let query_us = start.elapsed().as_micros();
+        let network_start = Instant::now();
+        assert_eq!(store.network_facts(view, house)?.len(), 1);
+        let network_us=network_start.elapsed().as_micros();
+        let founder_start=Instant::now();
+        assert_eq!(store.founder_genome(view,object(count-1),72)?.model,atlas_store::inheritance::FOUNDER_MODEL_VERSION);
+        let founder_us=founder_start.elapsed().as_micros();
+        println!("sample={sample} network_us={network_us} founder_us={founder_us}");
         let start = Instant::now();
         let pedigree = store.pedigree_at(
             view,
@@ -120,5 +141,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             start.elapsed().as_micros()
         );
     }
+    let start=Instant::now();
+    let backup=dir.path().join("backup.sqlite");
+    store.backup_to(&backup,Scope::Author)?;
+    println!("backup_ms={} backup_bytes={}",start.elapsed().as_millis(),std::fs::metadata(&backup)?.len());
+    let start=Instant::now();
+    let restore=dir.path().join("restored.sqlite");
+    atlas_store::archive::restore_archive(&backup,&restore,Scope::Author)?;
+    let restored=Store::open(&restore)?;
+    assert_eq!(restored.network_facts(view,house)?.len(),1);
+    assert_eq!(restored.founder_genome(view,object(count-1),72)?,store.founder_genome(view,object(count-1),72)?);
+    println!("restore_verify_ms={}",start.elapsed().as_millis());
     Ok(())
 }

@@ -228,3 +228,52 @@ impl crate::Store {
         visit(self, view, subject, seed, 0, &mut HashSet::new(), &mut HashMap::new())
     }
 }
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct FounderMatch {
+    pub first_homologue: u8,
+    pub second_homologue: u8,
+    pub segment: FounderSegment,
+}
+
+impl crate::Store {
+    /// Match identical founder alleles, retaining both homologue identities.
+    /// These intervals are not a real DNA match probability or centimorgan estimate.
+    pub fn founder_matches(
+        &self,
+        view: crate::ViewContext,
+        first: ObjectRef,
+        second: ObjectRef,
+        seed: u64,
+    ) -> Result<Vec<FounderMatch>, Error> {
+        if first == second {
+            return Err(Error::InvalidInput("select two distinct people"));
+        }
+        let a = self.founder_genome(view, first, seed)?;
+        let b = self.founder_genome(view, second, seed)?;
+        let mut result = Vec::new();
+        for (i, left) in a.homologues.iter().enumerate() {
+            for (j, right) in b.homologues.iter().enumerate() {
+                let (mut x, mut y) = (0, 0);
+                while x < left.len() && y < right.len() {
+                    let l = left[x];
+                    let r = right[y];
+                    let start = l.start.max(r.start);
+                    let end = l.end.min(r.end);
+                    if start < end && l.allele == r.allele {
+                        if result.len() >= 4096 {
+                            return Err(Error::QueryBudgetExceeded);
+                        }
+                        result.push(FounderMatch {
+                            first_homologue: i as u8, second_homologue: j as u8,
+                            segment: FounderSegment { start, end, allele: l.allele },
+                        });
+                    }
+                    if l.end <= r.end { x += 1; }
+                    if r.end <= l.end { y += 1; }
+                }
+            }
+        }
+        Ok(result)
+    }
+}

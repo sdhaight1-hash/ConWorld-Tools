@@ -2500,6 +2500,18 @@ pub fn workspace_resolve_ghost(
 }
 
 #[tauri::command]
+pub fn workspace_founder_matches(
+    workspace: State<'_, AuthorWorkspace>,
+    request: FamilyRequest,
+    other_id: String,
+    seed: u32,
+) -> Result<Vec<atlas_store::inheritance::FounderMatch>, String> {
+    let store=workspace.lock()?;
+    let (context, person)=request.resolve(&store)?;
+    store.founder_matches(context,person,reference(context.world,&other_id)?,u64::from(seed)).map_err(|e|e.to_string())
+}
+
+#[tauri::command]
 pub fn workspace_founder_genome(
     workspace: State<'_, AuthorWorkspace>,
     request: FamilyRequest,

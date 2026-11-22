@@ -36,6 +36,7 @@ fn main() {
             "workspace_instantiate_custom_template",
             "workspace_ghost_candidates",
             "workspace_resolve_ghost",
+            "workspace_founder_matches",
             "workspace_founder_genome",
             "workspace_create_identity",
             "workspace_network_facts",

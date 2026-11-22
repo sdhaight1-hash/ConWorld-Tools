@@ -20,7 +20,7 @@ export async function openFamilyHistory(panel: HTMLElement, request: FamilyConte
     <label>Compare with <select name="other" required></select></label>
     <label>Model seed <input type="number" name="seed" min="0" max="4294967295" value="1" required></label>
     <button>Compare segments</button></form><output></output></details>
-    <details class="founder-genome"><summary>Simulated multigenerational ancestry</summary><p>Dimensionless toy founder segments, not real DNA. Unrecorded parents are unresolved founders.</p><button type="button">Compute founder segments</button><div data-genome></div></details>`;
+    <details class="founder-genome"><summary>Simulated multigenerational ancestry</summary><p>Dimensionless toy founder segments, not real DNA. Unrecorded parents are unresolved founders.</p><button type="button">Compute founder segments</button><button type="button" data-compare-founders>Compare selected relative</button><div data-genome></div></details>`;
   panel.append(host);
   const form = host.querySelector("form")!;
   const fields = form.querySelector("fieldset")!;
@@ -65,6 +65,21 @@ export async function openFamilyHistory(panel: HTMLElement, request: FamilyConte
         }
         result.append(list);
       }
+    }catch(error){result.textContent=String(error);}
+  };
+  host.querySelector<HTMLButtonElement>("[data-compare-founders]")!.onclick=async()=>{
+    const result=host.querySelector<HTMLElement>("[data-genome]")!;
+    try{
+      const matches=await invoke<{first_homologue:number;second_homologue:number;segment:{start:number;end:number;allele:{founder:{id:string}}}}[]>("workspace_founder_matches",{request,otherId:other.value,seed:Number(new FormData(compare).get("seed"))});
+      if(!host.isConnected)return;
+      result.replaceChildren();
+      const list=document.createElement("ul");
+      for(const match of matches){
+        const row=document.createElement("li");
+        row.textContent="Homologues "+(match.first_homologue+1)+"/"+(match.second_homologue+1)+" · "+match.segment.allele.founder.id+" · ["+match.segment.start+", "+match.segment.end+")";
+        list.append(row);
+      }
+      result.append(matches.length ? list : "No shared founder alleles in this toy model.");
     }catch(error){result.textContent=String(error);}
   };
   let busy = false;

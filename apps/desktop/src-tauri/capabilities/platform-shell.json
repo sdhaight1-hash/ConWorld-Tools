@@ -40,6 +40,7 @@
     "allow-workspace-instantiate-custom-template",
     "allow-workspace-ghost-candidates",
     "allow-workspace-resolve-ghost",
+    "allow-workspace-founder-matches",
     "allow-workspace-founder-genome",
     "allow-workspace-create-identity",
     "allow-workspace-network-facts",

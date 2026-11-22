@@ -21,3 +21,8 @@ jobs:
       - run: cargo +stable fmt --all -- --check
       - run: cargo +stable clippy -p atlas-store --all-targets --locked -- -D warnings
       - run: cargo +stable test -p atlas-store --locked
+      - name: Measure persisted focused workloads (1k, 10k, 50k)
+        run: |
+          cargo +stable run -p atlas-store --example focused_world --locked --release -- 1000
+          cargo +stable run -p atlas-store --example focused_world --locked --release -- 10000
+          cargo +stable run -p atlas-store --example focused_world --locked --release -- 50000
