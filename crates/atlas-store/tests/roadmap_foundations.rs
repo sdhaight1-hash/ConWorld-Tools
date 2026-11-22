@@ -3221,7 +3221,12 @@ fn classifications_preserve_pins_and_branch_local_withdrawals() -> Result<(), Er
         ..inherited
     };
     assert!(store.execute_query(&profile_query, after)?.rows.is_empty());
-    assert!(store.execute_query(&descriptor_query, after)?.rows.is_empty());
+    assert!(
+        store
+            .execute_query(&descriptor_query, after)?
+            .rows
+            .is_empty()
+    );
     assert!(store.resolve_semantic_fact(fact_ref, after)?.is_none());
     assert!(store.semantic_fact_backlinks(concept, after)?.is_empty());
     assert!(

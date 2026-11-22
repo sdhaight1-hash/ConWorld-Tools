@@ -225,8 +225,7 @@ impl Store {
         self.check_query_control()?;
         let tx = self.conn.unchecked_transaction()?;
         metadata_world(&tx, view, false)?;
-        let Some(version) =
-            resolve_object(&tx, descriptor, view.branch, view.revision, view.day)?
+        let Some(version) = resolve_object(&tx, descriptor, view.branch, view.revision, view.day)?
         else {
             return Ok(Vec::new());
         };
