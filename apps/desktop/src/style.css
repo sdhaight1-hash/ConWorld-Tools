@@ -129,3 +129,21 @@ button:disabled { opacity: 0.55; cursor: default; }
 #world-definitions { margin: 0; padding-left: 1.2rem; overflow-wrap: anywhere; }
 #world-definitions li + li { margin-top: 0.35rem; }
 #record-details label { margin: 0.65rem 0 0.35rem; }
+
+.entry-panel, .entry-grid {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--border);
+  border-radius: 0.45rem;
+  padding: 0.65rem;
+  margin-block: 0.5rem;
+}
+.entry-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--entry-columns, 1), minmax(0, 1fr));
+  gap: 0.65rem;
+  align-items: start;
+  container-type: inline-size;
+}
+.entry-grid > * { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+@media (max-width: 760px) { .entry-grid { grid-template-columns: minmax(0, 1fr); } }

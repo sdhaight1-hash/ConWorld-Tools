@@ -1,13 +1,15 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import type { ParameterValue, SavedQuery } from "./author-workspace";
-import { publicReader, type ObjectLink, type Backlinks } from "./public-reader";
+import { publicReader, layoutContainer, type ObjectLink, type Backlinks } from "./public-reader";
 
 type Binding = { world: string; query_id: string; definition_revision: number;
   bindings: { name: string; value: ParameterValue }[] };
-type Block = { id: string; audience: string; content: { Text?: string; Stack?: Block[]; SavedQuery?: Binding; ObjectLink?: ObjectLink } };
+type Block = { id: string; audience: string; content: { Text?: string; Stack?: Block[]; Panel?: Block[];
+  Grid?: { columns: number; children: Block[] }; SavedQuery?: Binding; ObjectLink?: ObjectLink } };
 type Document = { schema_version: number; entry: { world: string; id: string }; root: Block };
-type Display = { content: { Text?: string; Stack?: Display[]; ObjectLink?: ObjectLink;
+type Display = { content: { Text?: string; Stack?: Display[]; Panel?: Display[];
+  Grid?: { columns: number; children: Display[] }; ObjectLink?: ObjectLink;
   QueryRows?: { records: [{ world: string; id: string }, string][]; truncated: boolean } } };
 type EntrySearch = { matches: [string, string][]; truncated: boolean };
 
@@ -18,6 +20,10 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
   const host = document.createElement("section");
   panel.append(host);
   host.innerHTML = `<h3 data-entry-heading></h3><p data-entry-identity class="hint"></p><form class="editor-form"><fieldset disabled>
+    <label>Page arrangement <select name="arrangement">
+      <option value="stack">Stack</option><option value="panel">Panel</option>
+      <option value="2">Two-column grid</option><option value="3">Three-column grid</option>
+      <option value="4">Four-column grid</option></select></label>
     <label>Page text <textarea name="body" required></textarea></label>
     <label>Author notes <textarea name="notes"></textarea></label>
     <label>Private saved query <select name="saved_query"><option value="">No query table</option></select></label>
@@ -122,10 +128,17 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
     const block = (audience: string): Block => ({ id: crypto.randomUUID(), audience, content: { Text: "" } });
     const layout: Document = saved?.[0] ?? { schema_version: 1, entry: { world: worldId, id: entryId },
       root: { id: crypto.randomUUID(), audience: "Public", content: { Stack: [block("Public"), block("Author")] } } };
-    const children = layout.root.content.Stack;
+    const arrangement = form.elements.namedItem("arrangement") as HTMLSelectElement;
+    const rootChildren = layout.root.content.Stack;
+    const wrapper = rootChildren?.length === 1 && rootChildren[0].audience === "Public" &&
+      (rootChildren[0].content.Panel || rootChildren[0].content.Grid) ? rootChildren[0] : undefined;
+    const children = wrapper ? (wrapper.content.Panel ?? wrapper.content.Grid?.children) : rootChildren;
+    const wrapperId = wrapper?.id ?? crypto.randomUUID();
+    if (wrapper?.content.Grid) arrangement.value = String(wrapper.content.Grid.columns);
+    else if (wrapper?.content.Panel) arrangement.value = "panel";
     const extras = children?.slice(2) ?? [];
     const savedQueries = extras.filter(block => block.content.SavedQuery !== undefined);
-    if (layout.root.audience !== "Public" || !children || children.length < 2 ||
+    if (layout.root.audience !== "Public" || !arrangement.value || !children || children.length < 2 ||
         children[0].audience !== "Public" || children[1].audience !== "Author" ||
         typeof children[0].content.Text !== "string" || typeof children[1].content.Text !== "string" ||
         savedQueries.length > 1 || extras.some(block => block.content.SavedQuery
@@ -255,7 +268,11 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
       // Retain existing component order and identities, append only new blocks.
       const order = new Map(children!.map((block, i) => [block.id, i]));
       blocks.sort((a, b) => (order.get(a.id) ?? children!.length) - (order.get(b.id) ?? children!.length));
-      return { ...layout, root: { ...layout.root, content: { Stack: blocks } } };
+      const arranged: Block[] = arrangement.value === "stack" ? blocks : [{
+        id: wrapperId, audience: "Public", content: arrangement.value === "panel"
+          ? { Panel: blocks } : { Grid: { columns: Number(arrangement.value), children: blocks } },
+      }];
+      return { ...layout, root: { ...layout.root, content: { Stack: arranged } } };
     }
     authorPreview.disabled = false;
     authorPreview.addEventListener("click", async () => {
@@ -270,11 +287,11 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
           { worldId, day, revision, document: draft(), requestId });
         if (sequence !== authorSequence || !host.isConnected) return;
         authorResult.replaceChildren();
-        function render(node: Display) {
+        function render(node: Display, parent = authorResult) {
           if (node.content.Text !== undefined) {
             const p = document.createElement("p");
             p.textContent = node.content.Text;
-            authorResult.append(p);
+            parent.append(p);
           }
           if (node.content.ObjectLink) {
             const link = node.content.ObjectLink;
@@ -283,7 +300,7 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
             button.textContent = link.label;
             button.disabled = !openAuthor || link.target.world !== worldId;
             button.addEventListener("click", () => openAuthor?.(link.target.id));
-            authorResult.append(button);
+            parent.append(button);
           }
           if (node.content.QueryRows) {
             const table = document.createElement("table");
@@ -307,9 +324,17 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
               cell.colSpan = 2;
               cell.textContent = "No matching records.";
             }
-            authorResult.append(table);
+            parent.append(table);
           }
-          node.content.Stack?.forEach(render);
+          node.content.Stack?.forEach(child => render(child, parent));
+          if (node.content.Panel) {
+            const container = layoutContainer(parent, "panel");
+            node.content.Panel.forEach(child => render(child, container));
+          }
+          if (node.content.Grid) {
+            const container = layoutContainer(parent, "grid", node.content.Grid.columns);
+            node.content.Grid.children.forEach(child => render(child, container));
+          }
         }
         if (display) render(display);
       } catch (error) {

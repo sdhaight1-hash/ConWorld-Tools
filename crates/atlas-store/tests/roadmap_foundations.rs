@@ -1499,3 +1499,123 @@ fn authored_links_follow_publication_and_historical_backlinks() -> Result<(), Er
     assert_eq!(find(&store, pinned, 50)?, historical);
     Ok(())
 }
+
+#[test]
+fn grid_and_panel_preserve_visibility_search_backlinks_and_moved_bindings() -> Result<(), Error> {
+    use atlas_store::{layout::ObjectLink, query::QueryControl};
+
+    let mut store = Store::open(":memory:")?;
+    let world = seed(&mut store)?;
+    let mut author = view(&world, 13);
+    let source = id(&world, 1);
+    let target = id(&world, 2);
+    let block = |audience, content| LayoutElement {
+        id: ElementId(Uuid::new_v4()),
+        audience,
+        content,
+    };
+    let destination = LayoutDocument {
+        schema_version: LAYOUT_SCHEMA_VERSION,
+        entry: target,
+        root: block(ClaimAudience::Public, ElementContent::Stack(vec![])),
+    };
+    author.revision = store.save_entry_layout(author, &destination, true, Uuid::new_v4())?;
+    let link = block(
+        ClaimAudience::Public,
+        ElementContent::ObjectLink(ObjectLink {
+            target,
+            label: "Council caption".into(),
+        }),
+    );
+    let link_id = link.id;
+    let query_block = block(
+        ClaimAudience::Public,
+        ElementContent::Query(query(QueryFilter::ExactLabel("Beatrice Thorne".into()))),
+    );
+    let query_id = query_block.id;
+    let grid = block(
+        ClaimAudience::Public,
+        ElementContent::Grid {
+            columns: 2,
+            children: vec![
+                block(
+                    ClaimAudience::Public,
+                    ElementContent::Text("Council biography".into()),
+                ),
+                link,
+            ],
+        },
+    );
+    let grid_id = grid.id;
+    let mut document = LayoutDocument {
+        schema_version: LAYOUT_SCHEMA_VERSION,
+        entry: source,
+        root: block(
+            ClaimAudience::Public,
+            ElementContent::Stack(vec![
+                grid,
+                block(
+                    ClaimAudience::Author,
+                    ElementContent::Panel(vec![
+                        query_block,
+                        block(
+                            ClaimAudience::Public,
+                            ElementContent::Text("Secret council testimony".into()),
+                        ),
+                    ]),
+                ),
+            ]),
+        ),
+    };
+    let mut invalid = document.clone();
+    if let ElementContent::Stack(children) = &mut invalid.root.content
+        && let ElementContent::Grid { columns, .. } = &mut children[0].content
+    {
+        *columns = 5;
+    }
+    assert!(matches!(invalid.validate(), Err(Error::InvalidInput(_))));
+    let public = |view| ViewContext {
+        scope: Scope::Public,
+        ..view
+    };
+    let before = document.compile(&store, public(author))?;
+    document.reparent(query_id, grid_id)?;
+    assert_eq!(document.compile(&store, public(author))?, before);
+    let projected = document.compile(&store, author)?.unwrap();
+    let DisplayContent::Stack(children) = projected.content else {
+        panic!("expected stack")
+    };
+    let DisplayContent::Grid { columns, children } = &children[0].content else {
+        panic!("expected grid")
+    };
+    assert_eq!(*columns, 2);
+    assert_eq!(children[2].id, query_id);
+    assert_eq!(
+        children[2].content,
+        DisplayContent::QueryRows {
+            records: vec![(target, "Beatrice Thorne".into())],
+            truncated: false,
+        }
+    );
+    author.revision = store.save_entry_layout(author, &document, true, Uuid::new_v4())?;
+    let control = QueryControl::new(std::time::Duration::from_secs(10))?;
+    let found = store.search_public_pages(public(author), "council", 2, &control)?;
+    assert_eq!(found.matches.len(), 2);
+    assert_eq!(found.matches[1].element, link_id);
+    assert!(!found.truncated);
+    assert!(
+        store
+            .search_public_pages(public(author), "secret", 1, &control)?
+            .matches
+            .is_empty()
+    );
+    let backlinks = store.entry_backlinks(public(author), target, 1, &control)?;
+    assert_eq!(backlinks.matches.len(), 1);
+    assert_eq!(backlinks.matches[0].element, link_id);
+    store.rebuild_search_index(Scope::Author)?;
+    assert_eq!(
+        store.search_public_pages(public(author), "council", 2, &control)?,
+        found
+    );
+    Ok(())
+}

@@ -21,7 +21,8 @@ pub(crate) const APPLICATION_ID: i64 = 0x4357_4c44; // CWLD
 mod entries;
 mod family;
 
-pub(crate) const SCHEMA_VERSION: i64 = 27;
+// Version 28 adds Grid and Panel layout variants without changing tables.
+pub(crate) const SCHEMA_VERSION: i64 = 28;
 
 // Candidate queries bind world (?1), focus/phrase (?2), author revision (?3),
 // limit (?4) and branch (?5). Follow only immutable inherited revisions.

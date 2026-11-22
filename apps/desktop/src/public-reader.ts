@@ -2,7 +2,17 @@ import { invoke } from "@tauri-apps/api/core";
 
 export type ObjectRef = { world: string; id: string };
 export type ObjectLink = { target: ObjectRef; label: string };
-export type PublicDisplay = { content: { Text?: string; Stack?: PublicDisplay[]; ObjectLink?: ObjectLink } };
+export type PublicDisplay = { content: { Text?: string; Stack?: PublicDisplay[]; Panel?: PublicDisplay[];
+  Grid?: { columns: number; children: PublicDisplay[] }; ObjectLink?: ObjectLink } };
+
+// Both reader and author preview render only the projected children, in layout order.
+export function layoutContainer(parent: HTMLElement, kind: "panel" | "grid", columns = 1) {
+  const container = document.createElement("div");
+  container.className = "entry-" + kind;
+  if (kind === "grid") container.style.setProperty("--entry-columns", String(Math.max(1, Math.min(4, columns))));
+  parent.append(container);
+  return container;
+}
 export type Backlinks = { matches: { source: ObjectRef; element: string; label: string }[]; truncated: boolean };
 
 // Navigation never reads author layouts. History stores IDs, not page contents.
@@ -32,22 +42,30 @@ export function publicReader(host: HTMLElement, worldId: string, day: number,
       previous.addEventListener("click", () => { if (valid()) void load(history[history.length - 2], true); });
       navigation.append(previous);
       host.append(navigation);
-      function linkButton(label: string, target: ObjectRef) {
+      function linkButton(label: string, target: ObjectRef, parent = host) {
         if (target.world !== worldId) return;
         const button = document.createElement("button");
         button.type = "button";
         button.textContent = label;
         button.addEventListener("click", () => { if (valid()) void load(target.id); });
-        host.append(button);
+        parent.append(button);
       }
-      function render(node: PublicDisplay) {
+      function render(node: PublicDisplay, parent = host) {
         if (node.content.Text !== undefined) {
           const p = document.createElement("p");
           p.textContent = node.content.Text;
-          host.append(p);
+          parent.append(p);
         }
-        if (node.content.ObjectLink) linkButton(node.content.ObjectLink.label, node.content.ObjectLink.target);
-        node.content.Stack?.forEach(render);
+        if (node.content.ObjectLink) linkButton(node.content.ObjectLink.label, node.content.ObjectLink.target, parent);
+        node.content.Stack?.forEach(child => render(child, parent));
+        if (node.content.Panel) {
+          const container = layoutContainer(parent, "panel");
+          node.content.Panel.forEach(child => render(child, container));
+        }
+        if (node.content.Grid) {
+          const container = layoutContainer(parent, "grid", node.content.Grid.columns);
+          node.content.Grid.children.forEach(child => render(child, container));
+        }
       }
       render(page);
       const incoming = document.createElement("button");
