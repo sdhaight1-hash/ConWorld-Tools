@@ -3,6 +3,9 @@ type Context = { world_id: string; branch_id?: string; day: number; revision: nu
 const selectedBranches = new Map<string, string>();
 type Ref = { world: string; id: string };
 type Fact = { id: string; input: { kind: string; role: string }; subject_label: string; target_label: string };
+type Classification = { id: string; profile: string; descriptor_id: string; descriptor_revision: number;
+  descriptor_branch: string; descriptor_state_revision: number; source_id: string; starts_at: number;
+  ends_before: number | null; recorded_at: number };
 type Ghost = { id: string; claim: Ref; label: string; kind: string; reviewed: boolean; promoted: Ref | null };
 
 export function openNetworkStudio(parent: HTMLElement, request: Context, editable: boolean,
@@ -20,6 +23,17 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
       <label>Identity label <input name="label" required maxlength="800"></label>
       <label>Identity type <select name="kind"><option value="organization">Organization</option><option value="household">Household</option><option value="family_house">Family house</option><option value="faction">Faction</option><option value="conflict">Conflict</option><option value="office">Office</option><option value="title">Hereditary or legal title</option><option value="asset">Asset</option><option value="population">Fictional population</option><option value="conflict_issue">Conflict issue</option><option value="conflict_phase">Conflict phase</option><option value="succession_rule">Succession rule</option><option value="concept">Concept</option><option value="person">Person</option></select></label>
       <button>Create identity</button></fieldset></form>
+    <form data-classification class="editor-form"><fieldset><legend>Record sourced concept classification</legend>
+      <p class="hint">Use a Concept identity, a Tag definition and a source from historical search. Classification is not a claim of membership or ancestry.</p>
+      <label>Concept identity <input name="subject" required></label>
+      <label>Semantic profile <select name="profile"><option value="culture">Culture</option><option value="language">Language</option><option value="material">Material</option><option value="technology">Technology</option></select></label>
+      <label>Tag definition identity <input name="descriptor" required></label>
+      <label>Evidence source identity <input name="source" required></label>
+      <label>Classification starts at day <input name="start" type="number" required></label>
+      <label>Classification ends before day <input name="end" type="number"></label>
+      <button>Record classification</button></fieldset></form>
+    <form data-classification-focus class="editor-form"><label>Classification focus concept <input name="subject" required></label><button>Inspect classifications</button></form>
+    <ul data-classifications aria-label="Historical concept classifications"></ul>
     <form data-fact class="editor-form"><fieldset><legend>Record sourced network fact</legend>
       <label>Subject identity <input name="subject" required></label><label>Target identity <input name="target" required></label>
       <label>Evidence source identity <input name="source" required></label>
@@ -50,6 +64,7 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
   const value = (f: HTMLFormElement, key: string) => String(new FormData(f).get(key) ?? "");
   const ref = (id: string) => ({ world: request.world_id, id });
   (form("[data-fact]").elements.namedItem("start") as HTMLInputElement).value = String(request.day);
+  (form("[data-classification]").elements.namedItem("start") as HTMLInputElement).value = String(request.day);
   host.querySelectorAll("fieldset").forEach(field => field.disabled = !editable);
   const selectedLabel=host.querySelector<HTMLElement>("[data-selected-branch]")!;
   selectedLabel.textContent = request.branch_id ? "Alternate branch: "+request.branch_id : "Main history";
@@ -58,7 +73,7 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
     if(id)selectedBranches.set(request.world_id,id);else selectedBranches.delete(request.world_id);
     if(id)request={...request,branch_id:id};else {const {branch_id:_,...main}=request;request=main;}
     selectedLabel.textContent=id?"Alternate branch: "+id:"Main history";
-    for(const selector of ["[data-facts]","[data-impact-results]","[data-identity-path]","[data-succession-result]","[data-ghosts]","[data-candidate-results]","[data-templates]"])host.querySelector(selector)?.replaceChildren();
+    for(const selector of ["[data-classifications]","[data-facts]","[data-impact-results]","[data-identity-path]","[data-succession-result]","[data-ghosts]","[data-candidate-results]","[data-templates]"])host.querySelector(selector)?.replaceChildren();
     host.querySelector<HTMLButtonElement>("[data-enact]")!.disabled=true;
   };
   host.querySelector<HTMLButtonElement>("[data-load-branches]")!.onclick=async()=>{
@@ -95,6 +110,30 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
     f.onsubmit = event => { event.preventDefault(); if (valid()) action(f); };
   }
   submit("[data-identity]", f => void write("workspace_create_identity", { kind: value(f,"kind"), label: value(f,"label") }));
+  submit("[data-classification]", f => void write("workspace_record_classification", { input: {
+    subject_id: value(f,"subject"), descriptor_id: value(f,"descriptor"), source_id: value(f,"source"),
+    profile: value(f,"profile"), starts_at: Number(value(f,"start")),
+    ends_before: value(f,"end") ? Number(value(f,"end")) : null,
+  } }));
+  submit("[data-classification-focus]", async f => {
+    const ctx = request;
+    const subjectId = value(f,"subject");
+    try {
+      const rows = await invoke<Classification[]>("workspace_classifications", { request: ctx, subjectId });
+      if (!valid() || ctx !== request || subjectId !== value(f,"subject")) return;
+      const list = host.querySelector("[data-classifications]")!;
+      list.replaceChildren();
+      for (const classification of rows) {
+        const row = document.createElement("li");
+        row.textContent = classification.profile + " · " + classification.starts_at + "–" +
+          (classification.ends_before ?? "open") + " · source " + classification.source_id +
+          " · definition " + classification.descriptor_id + " @ revision " + classification.descriptor_revision + " ";
+        row.append(action("Withdraw classification", () => void write("workspace_withdraw_classification", { factId: classification.id })));
+        list.append(row);
+      }
+      status.textContent = rows.length + " recorded classifications.";
+    } catch (error) { if (valid() && ctx === request) status.textContent = String(error); }
+  });
   submit("[data-fact]", f => void write("workspace_record_network_fact", { input: {
     subject:ref(value(f,"subject")),target:ref(value(f,"target")),source:ref(value(f,"source")),
     kind:value(f,"kind"),role:value(f,"role"),starts_at:Number(value(f,"start")),

@@ -39,3 +39,7 @@ Schema 38 adds author-only temporal classification assignments and branch-local 
 ## Classification query integration
 
 AE-05: the existing typed query planner now accepts curated profile predicates, including boolean composition, persisted predicate encoding and typed parameter binding. The profile vocabulary is fixed, while each assignment retains its descriptor version. Queries remain author-only, reuse the bounded classification service and honor query control. Profile filtering now uses separate SQL shapes for subject/profile indexes. Schema 38 migration is repeatable for existing downgrade-simulation regression fixtures. Desktop parameter controls updated, including composite profile selection. CI and native UI captures pending.
+
+## Native command and studio integration
+
+The existing branch-aware author studio exposes record, inspect and withdraw classification commands, with explicit Concept, Tag Definition, source, profile and dates. Rust resolves the descriptor in the requested historical context, checks the pin inside the write transaction and returns original recorded provenance when inspecting. No raw classification command is registered in the public reader. Branch changes clear stale results, and late responses are discarded. Native GUI verification and screenshots remain outstanding.
