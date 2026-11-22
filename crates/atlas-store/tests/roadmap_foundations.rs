@@ -2517,6 +2517,44 @@ fn branch_local_network_and_parentage_corrections_never_change_parent_or_sibling
         ..author
     };
     let prior = branch;
+    let member_ref = atlas_store::semantic::FactRef {
+        world: world.id,
+        family: atlas_store::semantic::FactFamily::Network,
+        id: member,
+    };
+    let parent_ref = atlas_store::semantic::FactRef {
+        world: world.id,
+        family: atlas_store::semantic::FactFamily::Parentage,
+        id: parent,
+    };
+    let original = store.resolve_semantic_fact(member_ref, prior)?.unwrap();
+    assert_eq!(original.source_branch, world.main);
+    assert_eq!(
+        original.data,
+        atlas_store::semantic::SemanticFactData::Network(fact.clone())
+    );
+    assert!(store.resolve_semantic_fact(parent_ref, prior)?.is_some());
+    assert!(
+        store
+            .resolve_semantic_fact(
+                atlas_store::semantic::FactRef {
+                    family: atlas_store::semantic::FactFamily::Parentage,
+                    ..member_ref
+                },
+                prior,
+            )?
+            .is_none()
+    );
+    assert!(matches!(
+        store.resolve_semantic_fact(
+            member_ref,
+            ViewContext {
+                scope: Scope::Public,
+                ..prior
+            }
+        ),
+        Err(Error::CapabilityDenied)
+    ));
     store.withdraw_network_fact(branch, member, Uuid::new_v4())?;
     branch.revision = AuthorRevision(branch.revision.0 + 1);
     store.withdraw_parentage(
@@ -2560,7 +2598,18 @@ fn branch_local_network_and_parentage_corrections_never_change_parent_or_sibling
         branch: sibling.id,
         ..main
     };
+    assert!(store.resolve_semantic_fact(member_ref, branch)?.is_none());
+    assert!(store.resolve_semantic_fact(parent_ref, branch)?.is_none());
+    assert_eq!(
+        store.resolve_semantic_fact(member_ref, prior)?,
+        Some(original.clone())
+    );
     for context in [main, sibling] {
+        assert_eq!(
+            store.resolve_semantic_fact(member_ref, context)?,
+            Some(original.clone())
+        );
+        assert!(store.resolve_semantic_fact(parent_ref, context)?.is_some());
         assert_eq!(store.network_facts(context, house)?[0].id, member);
         assert_eq!(store.family_links(context, person)?[0].id, parent);
     }

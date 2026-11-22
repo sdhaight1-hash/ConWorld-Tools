@@ -19,3 +19,7 @@ Work on PR #73 starts from schema 36 and ADR-007. This is an implementation chec
 The new semantic reference module preserves UUIDs and distinguishes network and parentage even if IDs coincide. Its object-only adapter delegates to Store::get_object; it denies raw non-author reads before reference lookup. Fact resolution is not implemented by this slice: use family-specific indexed point reads within one historical snapshot, not bounded adjacency scans. Do not expose raw fact data through Tauri or published views. No schema changes, new descriptor persistence, or feature-gate completion in this commit.
 
 Tests added for reference family discrimination, serialization, scope and wrong-world handling; execution pending CI. No visual change requiring a capture.
+
+## AE-02 historical point reads
+
+Prior reference-vocabulary commit `9086041` passed Windows and Ubuntu build/test and desktop verification. This slice adds author-only point resolution of network and parentage facts through the existing historical metadata CTE, with original source branch, author revision, rationale and typed payload. No migration or duplicate fact table. The existing branch-local regression now checks original, withdrawn, sibling and parent fact lookups, family mismatch and public denial. New checks await CI; scoped publication and annotation/backlink integration are still open. No visual changes.

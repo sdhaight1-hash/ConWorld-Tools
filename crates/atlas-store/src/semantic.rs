@@ -45,9 +45,48 @@ impl SemanticRef {
     }
 }
 
+/// Canonical fact data, never a second persisted copy.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SemanticFactData {
+    Network(crate::network::NetworkInput),
+    Parentage(crate::genealogy::Parentage),
+}
+
+/// The original author revision and branch are retained even on inherited reads.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResolvedFact {
+    pub reference: FactRef,
+    pub recorded_at: crate::AuthorRevision,
+    pub source_branch: crate::BranchId,
+    pub rationale: String,
+    pub data: SemanticFactData,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ResolvedSemanticRef {
+    Object(Version),
+    Fact(ResolvedFact),
+}
+
 impl Store {
+    /// Resolve one canonical identity in the supplied historical author context.
+    pub fn resolve_semantic_ref(
+        &self,
+        reference: SemanticRef,
+        view: ViewContext,
+    ) -> Result<Option<ResolvedSemanticRef>, Error> {
+        reference.validate_author_context(view)?;
+        match reference {
+            SemanticRef::Object(object) => Ok(self
+                .get_object(object, view)?
+                .map(ResolvedSemanticRef::Object)),
+            SemanticRef::Fact(fact) => Ok(self
+                .resolve_semantic_fact(fact, view)?
+                .map(ResolvedSemanticRef::Fact)),
+        }
+    }
+
     /// Delegate object resolution to the existing historical registry.
-    /// Fact lookup is deliberately not exposed by this preliminary adapter.
     pub fn resolve_semantic_object(
         &self,
         reference: SemanticRef,

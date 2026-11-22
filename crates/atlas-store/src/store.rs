@@ -22,6 +22,7 @@ mod entries;
 mod family;
 pub(crate) mod media;
 mod network;
+mod semantic;
 mod templates;
 
 // Version 29 adds version-pinned template layout variants without changing tables.
