@@ -70,8 +70,16 @@ See the [Phase Zero verification log](Phase-0-Verification.md) for the desktop a
 
 ## Review notes (non-normative)
 
+- [World Bible-first full repository congruence audit — 2026-11-22](../Development-Audits/2026-11-22-world-bible-congruence-audit.md) and [frozen inventory](../Development-Audits/2026-11-22-world-bible-congruence-inventory.md): exact branch/PR/issue/file register, CI status, architecture/document reconciliation, risks and integration plan; non-normative.
+
+- [World Bible-first research reassessment — 2026-11-22](Research-Studies/world-bible-research-reassessment-2026-11-22.md): evidence-based retrospective of #65/#66/#69/#71/#76, scope-preserving design disposition and comparative authoring plan.
+
+- [World Bible-first UX direction — 2026-11-22](World-Bible-UX-Direction-2026-11-22.md): consolidated owner discussion, audit mapping and isolated working concept; preserves the three underlying representations with contextual tools instead of mandatory separate studios.
+
+- [Article and entry UX concepts — 2026-11-22](Article-and-Entry-UX-Concepts-2026-11-22.md): owner-requested discussion record covering responsive article composition, visual archetypes, reusable elements, Write/Design/Bind modes, styling, collections and reader interactions; proposed sequencing and acceptance scenarios, not a normative change.
+
 - [Entry ontology review — 2026-11-22](Entry-Ontology-Review-2026-11-22.md): actual registry parity, existing-scope gaps and proposed worldbuilding taxonomy; recommendations only, no feature scope or production changes.
 
-- [Bug hunting and optimization review — 2026-11-22](Repository-Audit-2026-11-22-bugs-and-performance.md): frozen combined candidate, isolated SQLite defect reproductions, focused network plans, staged backup proposal and prioritized native regression criteria; no production change.
-
 - [Ontology consolidation acceptance review — 2026-11-22](Architectural-Evolutions/ontology-consolidation-review-2026-11-22.md): exact green baseline, scope/gate evidence, verified native capture, protected live migration and release fixture candidate; implementation verification still required.
+
+- [Bug hunting and optimization review — 2026-11-22](Repository-Audit-2026-11-22-bugs-and-performance.md): frozen combined candidate, isolated SQLite defect reproductions, focused network plans, staged backup proposal and prioritized native regression criteria; no production change.

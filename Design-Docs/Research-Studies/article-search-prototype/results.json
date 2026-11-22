@@ -1,0 +1,71 @@
+{
+  "sqlite": "3.46.1",
+  "ranking": {
+    "visible_before": [
+      "charter",
+      "river"
+    ],
+    "visible_after_500_hidden": [
+      "river",
+      "charter"
+    ],
+    "isolated_before": [
+      "charter",
+      "river"
+    ],
+    "isolated_after": [
+      "charter",
+      "river"
+    ]
+  },
+  "corpora": [
+    {
+      "raw_blocks": 1000,
+      "matching_articles": 93,
+      "block_page_distinct_articles": 1,
+      "article_page_distinct_articles": 50,
+      "second_page_count": 43,
+      "block_page_median_ms": 0.055,
+      "grouped_page_median_ms": 0.062
+    },
+    {
+      "raw_blocks": 10000,
+      "matching_articles": 993,
+      "block_page_distinct_articles": 1,
+      "article_page_distinct_articles": 50,
+      "second_page_count": 50,
+      "block_page_median_ms": 0.277,
+      "grouped_page_median_ms": 0.322
+    },
+    {
+      "raw_blocks": 50000,
+      "matching_articles": 4993,
+      "block_page_distinct_articles": 1,
+      "article_page_distinct_articles": 50,
+      "second_page_count": 50,
+      "block_page_median_ms": 1.574,
+      "grouped_page_median_ms": 1.669
+    }
+  ],
+  "names": {
+    "two_character_fts": [],
+    "two_character_substring_fallback": [
+      "Io",
+      "Iona"
+    ],
+    "composed_query": [
+      "Élodie"
+    ],
+    "decomposed_query": [
+      "Élodie"
+    ],
+    "normalized_candidate_matches": [
+      "Élodie",
+      "Élodie"
+    ],
+    "utf8_lengths": [
+      7,
+      8
+    ]
+  }
+}

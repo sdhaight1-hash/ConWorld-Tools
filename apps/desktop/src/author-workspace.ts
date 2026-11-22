@@ -1,3 +1,6 @@
+import { appendReferencePicker } from "./reference-picker";
+import { canLeaveEntryDrafts } from "./entry-drafts";
+import { objectKinds } from "./object-kinds";
 import { openFamilyHistory } from "./family-history";
 import { openNetworkStudio } from "./network-studio";
 import { openMediaStudio } from "./media-studio";
@@ -160,6 +163,9 @@ export async function showAuthorWorkspace(
   const pathForm = document.querySelector<HTMLFormElement>("#author-path-form")!;
   const participantEventsForm = document.querySelector<HTMLFormElement>("#author-participant-events-form")!;
   const compositeForm = document.querySelector<HTMLFormElement>("#author-composite-form")!;
+  const kindFilter = compositeForm.elements.namedItem("kind") as HTMLSelectElement;
+  kindFilter.replaceChildren(new Option("Any kind", ""), ...objectKinds.map(kind =>
+    new Option(kind.charAt(0).toUpperCase() + kind.slice(1).replaceAll("_", " "), kind)));
   const queryResults = document.querySelector<HTMLUListElement>("#author-query-results")!;
   const nextSearchPage = document.querySelector<HTMLButtonElement>("#author-next-search-page")!;
   const cancelSearch = document.querySelector<HTMLButtonElement>("#author-cancel-query")!;
@@ -205,6 +211,7 @@ export async function showAuthorWorkspace(
   const value = (form: HTMLFormElement, name: string) => field(form, name).value;
   const score = (form: HTMLFormElement) => value(form, "trust") === "" ? null : Number(value(form, "trust"));
   let snapshot: Snapshot | undefined;
+  let loadedControls: { world: string; day: string; revision: string } | undefined;
   let requestSequence = 0;
   let querySequence = 0;
   let publicSequence = 0;
@@ -467,6 +474,7 @@ export async function showAuthorWorkspace(
     const current = snapshot;
     if (current && people.some(person => person.id === id)) {
       button("Family history", () => {
+        if (!canLeaveEntryDrafts()) return;
         panel.replaceChildren();
         void openFamilyHistory(panel, { world_id: current.world.id, person_id: id, day: current.day, revision: current.view_revision },
           people, !revisionInput.value.trim(), async () => { await refresh(); selectNode(id); });
@@ -477,7 +485,7 @@ export async function showAuthorWorkspace(
       button(label, () => {
         const targets = entryTargets(current);
         const open = (target: string) => {
-          if (snapshot !== current) return;
+          if (snapshot !== current || !canLeaveEntryDrafts()) return;
           panel.replaceChildren();
           void openEntryEditor(panel, current.world.id, target, current.day, current.view_revision,
             !revisionInput.value.trim(), async () => {
@@ -617,6 +625,14 @@ export async function showAuthorWorkspace(
   });
 
   async function refresh() {
+    if (!canLeaveEntryDrafts()) {
+      if (loadedControls) {
+        worldSelect.value = loadedControls.world;
+        dayInput.value = loadedControls.day;
+        revisionInput.value = loadedControls.revision;
+      }
+      return;
+    }
     clearPublicSearch();
     const sequence = ++requestSequence;
     ++querySequence;
@@ -661,6 +677,7 @@ export async function showAuthorWorkspace(
     }
     if (sequence !== requestSequence) return;
     snapshot = next;
+    loadedControls = { world: worldId, day: String(day), revision: revision === null ? "" : String(revision) };
     savedQueries = saved;
     options(savedSelect, [{ id: "", label: "New saved search" },
       ...savedQueries.map((query) => ({ id: query.id, label: query.name + " · " + query.id.slice(0, 8) }))],
@@ -682,7 +699,7 @@ export async function showAuthorWorkspace(
     openMediaStudio(content,{world_id:next.world.id,revision:next.view_revision,day:next.day},!revisionInput.value.trim(),refresh,()=>snapshot===next);
     openNetworkStudio(content, { world_id: next.world.id, revision: next.view_revision, day: next.day },
       !revisionInput.value.trim(), refresh, () => snapshot === next);
-    info.textContent = `Author revision ${next.view_revision} / ${next.world.revision} · historical day ${next.day}` +
+    info.textContent = `Author revision ${next.view_revision} / ${next.world.revision} · historical day ${next.day} · Main history (author graph, queries and Canvas)` +
       (next.scene_limited ? " · Search-only mode: the complete scene exceeds its budget. Indexed search remains available." : "");
     const subject = field<HTMLSelectElement>(relationshipForm, "subject");
     const target = field<HTMLSelectElement>(relationshipForm, "target");
@@ -765,7 +782,7 @@ export async function showAuthorWorkspace(
   }
 
   function runQuery(message: string, execute: (requestId: string) => Promise<SearchResult>, page = 1) {
-    if (!snapshot || saving) return;
+    if (!snapshot || saving || !canLeaveEntryDrafts()) return;
     const sequence = ++querySequence;
     cancelActiveQuery();
     const requestId = crypto.randomUUID();
@@ -824,7 +841,7 @@ export async function showAuthorWorkspace(
             if (!current || sequence !== querySequence) return;
             const targets = entryTargets(current, { id: row.id, label: row.label });
             const open = (target: string) => {
-              if (sequence !== querySequence || snapshot !== current || !item.isConnected) return;
+              if (sequence !== querySequence || snapshot !== current || !item.isConnected || !canLeaveEntryDrafts()) return;
               item.replaceChildren();
               void openEntryEditor(item, current.world.id, target, current.day, current.view_revision,
                 !revisionInput.value.trim(), refresh, targets, open);
@@ -860,7 +877,7 @@ export async function showAuthorWorkspace(
                 open.textContent = match.label + " · " + match.source.id;
                 open.addEventListener("click", () => {
                   const navigate = (target: string) => {
-                    if (sequence !== querySequence || snapshot !== current) return;
+                    if (sequence !== querySequence || snapshot !== current || !canLeaveEntryDrafts()) return;
                     item.replaceChildren();
                     void openEntryEditor(item, current.world.id, target, current.day,
                       current.view_revision, !revisionInput.value.trim(), refresh, entryTargets(current, { id: row.id, label: row.label }), navigate);
@@ -925,7 +942,7 @@ export async function showAuthorWorkspace(
   }
 
   function reviewCandidate(candidate: MentionDiscovery["rows"][number], decision: "approved" | "dismissed") {
-    if (!snapshot || saving || selectedRevision() !== null) return;
+    if (!snapshot || saving || selectedRevision() !== null || !canLeaveEntryDrafts()) return;
     const focus = discoveryFocus;
     const request = {
       world_id: snapshot.world.id,
@@ -1059,7 +1076,7 @@ export async function showAuthorWorkspace(
   }
 
   cancelSearch.addEventListener("click", () => {
-    if (!activeQuery) return;
+    if (!activeQuery || !canLeaveEntryDrafts()) return;
     ++querySequence;
     cancelActiveQuery();
     pageCursor = undefined;
@@ -1111,7 +1128,7 @@ export async function showAuthorWorkspace(
       let control: HTMLInputElement | HTMLSelectElement;
       if (parameter.default.type === "object_kind") {
         control = document.createElement("select");
-        for (const kind of ["person", "concept", "place", "organization", "household", "family_house", "faction", "conflict", "office", "title", "asset", "population", "conflict_issue", "conflict_phase", "succession_rule", "definition", "relationship", "event_involvement", "actor_action", "historical_event", "source", "claim"]) {
+        for (const kind of objectKinds) {
           control.add(new Option(kind.replaceAll("_", " "), kind));
         }
       } else if (parameter.default.type === "concept_profile") {
@@ -1127,6 +1144,12 @@ export async function showAuthorWorkspace(
       parameterInputs.set(parameter.name, control);
       label.append(control);
       parameterFields.append(label);
+      if (snapshot && control instanceof HTMLInputElement &&
+          (parameter.default.type === "source" || parameter.default.type === "descriptor")) {
+        appendReferencePicker(parameterFields, control, {
+          world_id: snapshot.world.id, day: snapshot.day, revision: snapshot.view_revision,
+        }, parameter.default.type === "source" ? "source" : "tag", parameter.name.replaceAll("_", " "));
+      }
     }
   }
 
@@ -1188,7 +1211,7 @@ export async function showAuthorWorkspace(
 
   saveQueryForm.addEventListener("submit", (event) => {
     event.preventDefault();
-    if (!snapshot || saving) return;
+    if (!snapshot || saving || !canLeaveEntryDrafts()) return;
     if (selectedRevision() !== null) {
       queryStatus.textContent = "Historical author revisions are read-only.";
       return;
@@ -1282,7 +1305,7 @@ export async function showAuthorWorkspace(
   });
 
   saveComposite.addEventListener("click", () => {
-    if (!snapshot || saving) return;
+    if (!snapshot || saving || !canLeaveEntryDrafts()) return;
     if (selectedRevision() !== null) {
       queryStatus.textContent = "Historical author revisions are read-only.";
       return;
@@ -1367,18 +1390,19 @@ export async function showAuthorWorkspace(
   function bind(form: HTMLFormElement, action: (context: { world_id: string; expected_revision: number }) => Promise<void | string>) {
     form.addEventListener("submit", (event) => {
       event.preventDefault();
-      if (saving) return;
+      if (saving || !canLeaveEntryDrafts()) return;
       void (async () => {
         try {
           if (form !== worldForm) {
-            currentDay();
+            const day = currentDay();
             if (selectedRevision() !== null) throw new Error("Archived author revisions are read-only.");
-            if (!snapshot || snapshot.world.id !== worldSelect.value) throw new Error("Wait for the world to load.");
+            if (!snapshot || snapshot.world.id !== worldSelect.value || snapshot.day !== day ||
+                snapshot.view_revision !== snapshot.world.revision) throw new Error("Refresh the selected historical view before saving.");
             if (snapshot.scene_limited) throw new Error("Graph editing requires a complete scene.");
           }
           saving = true;
           syncButtons();
-          const savedNode = await action({ world_id: worldSelect.value, expected_revision: snapshot?.world.revision ?? 0 });
+          const savedNode = await action({ world_id: snapshot?.world.id ?? worldSelect.value, expected_revision: snapshot?.view_revision ?? 0 });
           if (form !== worldForm) await refresh();
           if (form === worldForm || form === personForm) field(form, "name").value = "";
           if (form === evidenceForm) {
@@ -1406,8 +1430,8 @@ export async function showAuthorWorkspace(
     revisionInput.value = "";
     await refreshWorlds(world.id);
   });
-  bind(personForm, async ({ world_id }) => {
-    await invoke("workspace_create_person", { worldId: world_id, name: value(personForm, "name") });
+  bind(personForm, async ({ world_id, expected_revision }) => {
+    await invoke("workspace_create_person", { worldId: world_id, expectedRevision: expected_revision, name: value(personForm, "name") });
   });
   field<HTMLSelectElement>(aliasForm, "alias_id").addEventListener("change", () => {
     const alias = snapshot?.aliases?.find((entry) => entry.id === value(aliasForm, "alias_id"));

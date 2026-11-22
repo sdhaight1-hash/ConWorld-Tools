@@ -1,0 +1,33 @@
+{
+  "passed": 23,
+  "checks": [
+    "observed top-level match rewrites supported self-like leaf",
+    "observed top-level match leaves nested supported filter unchanged",
+    "explicit nested self slot resolves destination",
+    "literal same-as-origin reference is preserved",
+    "independent source reference preserved",
+    "incompatible self slot rejected",
+    "unknown definition pin rejected",
+    "fresh IDs across instantiations",
+    "saved template version and existing instance unchanged",
+    "template instance defaults private",
+    "draft save does not replace published text",
+    "stale release rejected without state mutation",
+    "explicit release publishes current draft",
+    "restoring draft history does not undo revocation",
+    "restore adds new revision and preserves recorded history",
+    "shared source can appear twice without false cycle",
+    "private source and its reference caption omitted",
+    "author sees private source under author scope",
+    "hidden host reference does not include public source",
+    "cyclic embedding rejects without recursive expansion",
+    "shared expansion uses global work budget",
+    "source revocation removes both instances on recompile",
+    "original public output reproducible under same state"
+  ],
+  "notes": [
+    "Source-shaped top-level matching model, not actual Rust execution.",
+    "Candidate template/draft/release/embed rules intentionally synthetic.",
+    "No runtime timing or native application assertions."
+  ]
+}

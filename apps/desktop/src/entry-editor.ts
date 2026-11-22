@@ -1,3 +1,5 @@
+import { appendReferencePicker } from "./reference-picker";
+import { objectKinds } from "./object-kinds";
 import { invoke } from "@tauri-apps/api/core";
 
 import type { ParameterValue, SavedQuery } from "./author-workspace";
@@ -43,7 +45,9 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
     <p class="hint">A public link appears only when its target page is released. Private links remain author-only.</p>
     </fieldset><div data-tree-host hidden></div>
     <label><input type="checkbox" name="published"> Publish page text</label>
-    <button>Save page</button></fieldset></form>
+    <p class="hint">Saving replaces the current publication if checked; saving unchecked withdraws it. Public previews use current main history, not the selected author revision.</p>
+    <button>Save page</button><button type="button" data-discard-draft hidden>Discard unsaved page changes</button></fieldset></form>
+    <p data-draft-status role="status" tabindex="-1"></p>
     <button type="button" data-author-preview-button disabled>Preview author layout</button>
     <div data-author-preview aria-live="polite"></div>
     <button type="button" data-author-backlinks>Find authored backlinks</button>
@@ -75,7 +79,29 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
     authorResult.replaceChildren();
     if (requestId) void invoke("workspace_cancel_query", { requestId }).catch(() => {});
   }
-  form.addEventListener("input", clearAuthorPreview);
+  const draftStatus = host.querySelector<HTMLElement>("[data-draft-status]")!;
+  const discard = host.querySelector<HTMLButtonElement>("[data-discard-draft]")!;
+  function draftChanged() {
+    clearAuthorPreview();
+    if (!editable || host.dataset.entryDraftState === "saving") return;
+    host.dataset.entryDraftState = "dirty";
+    draftStatus.textContent = "Unsaved page changes.";
+    discard.hidden = false;
+  }
+  for (const event of ["input", "change"]) {
+    form.addEventListener(event, e => {
+      const target = e.target;
+      if (target instanceof Element && !target.closest("[data-reference-picker]") &&
+          (target.closest("[data-simple-fields]") || target === published)) draftChanged();
+    });
+  }
+  discard.addEventListener("click", () => {
+    if (host.dataset.entryDraftState !== "dirty" || !host.isConnected) return;
+    delete host.dataset.entryDraftState;
+    // Reopen the same identity and pinned context, not a different selection.
+    host.remove();
+    void openEntryEditor(panel, worldId, entryId, day, revision, editable, afterSave, targets, openAuthor);
+  });
   const args = { worldId, entryId, day };
   let request = 0;
   const incoming = host.querySelector<HTMLButtonElement>("[data-author-backlinks]")!;
@@ -150,7 +176,7 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
       simpleFields.hidden = true;
       treeButton.hidden = true;
       treeHost.hidden = false;
-      const tree = editCanvasTree(treeHost, document.root, worldId, entryId, day, revision, editable, clearAuthorPreview);
+      const tree = editCanvasTree(treeHost, document.root, worldId, entryId, day, revision, editable, draftChanged);
       currentDraft = () => ({ ...document, root: tree.root() });
     }
     function installEditorActions() {
@@ -257,12 +283,30 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
         ++request;
         result.replaceChildren();
         clearAuthorPreview();
+        host.dataset.entryDraftState = "saving";
+        discard.hidden = true;
+        draftStatus.textContent = "Saving page…";
         fields.disabled = true;
         authorPreview.disabled = true;
         try {
           await invoke("workspace_save_layout", { worldId, day, expectedRevision: revision, document, published: published.checked });
+        } catch (error) {
+          result.textContent = String(error);
+          host.dataset.entryDraftState = "dirty";
+          discard.hidden = false;
+          draftStatus.textContent = "Save failed. Your page changes are retained.";
+          fields.disabled = !editable;
+          authorPreview.disabled = false;
+          return;
+        }
+        delete host.dataset.entryDraftState;
+        draftStatus.textContent = "Page saved.";
+        // A failed refresh is not a failed commit. Do not allow stale retries.
+        try {
           if (host.isConnected) await afterSave();
-        } catch (error) { result.textContent = String(error); fields.disabled = !editable; authorPreview.disabled = false; }
+        } catch (error) {
+          draftStatus.textContent = "Page saved, but the view could not refresh: " + String(error);
+        }
       });
     }
     const arrangement = form.elements.namedItem("arrangement") as HTMLSelectElement;
@@ -320,11 +364,12 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
         label.append(element);
         row.append(label);
       }
+      if (editable) appendReferencePicker(row, target, { world_id: worldId, day, revision }, "entry", "link target");
       const remove = document.createElement("button");
       remove.type = "button";
       remove.textContent = "Remove entry link";
       remove.addEventListener("click", () => {
-        links.delete(id); row.remove(); addLink.disabled = false; clearAuthorPreview();
+        links.delete(id); row.remove(); addLink.disabled = false; draftChanged();
       });
       row.append(remove);
       links.set(id, { target, caption, audience });
@@ -332,7 +377,7 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
       addLink.disabled = links.size >= 64;
     }
     for (const block of extras.filter(block => block.content.ObjectLink)) addLinkRow(block);
-    addLink.addEventListener("click", () => { if (links.size < 64) { addLinkRow(); clearAuthorPreview(); } });
+    addLink.addEventListener("click", () => { if (links.size < 64) { addLinkRow(); draftChanged(); } });
     const key = (id: string, revision: number) => id + "@" + revision;
     const definitions = await invoke<SavedQuery[]>("workspace_saved_queries", { worldId, revision });
     if (!host.isConnected) return;
@@ -368,8 +413,7 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
         let control: HTMLInputElement | HTMLSelectElement;
         if (parameter.default.type === "object_kind") {
           control = document.createElement("select");
-          for (const kind of ["person", "concept", "place", "organization", "household", "family_house", "faction", "conflict", "office", "title", "asset", "population", "conflict_issue", "conflict_phase", "succession_rule", "definition", "relationship", "event_involvement", "actor_action",
-            "historical_event", "source", "claim"]) control.add(new Option(kind.replaceAll("_", " "), kind));
+          for (const kind of objectKinds) control.add(new Option(kind.replaceAll("_", " "), kind));
         } else if (parameter.default.type === "concept_profile") {
           control = document.createElement("select");
           for (const profile of ["culture", "language", "material", "technology"]) control.add(new Option(profile, profile));
@@ -381,11 +425,16 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
         control.value = selected.type === "source" ? selected.source_id : selected.type === "descriptor" ? selected.descriptor_id : selected.value;
         label.append(control);
         parameterHost.append(label);
+        if (editable && control instanceof HTMLInputElement &&
+            (parameter.default.type === "source" || parameter.default.type === "descriptor")) {
+          appendReferencePicker(parameterHost, control, { world_id: worldId, day, revision },
+            parameter.default.type === "source" ? "source" : "tag", parameter.name.replaceAll("_", " "));
+        }
         parameterInputs.set(parameter.name, control);
       }
     }
     renderParameters(true);
-    querySelect.addEventListener("change", () => { clearAuthorPreview(); renderParameters(false); });
+    querySelect.addEventListener("change", () => { draftChanged(); renderParameters(false); });
     const queryElementId = savedQueries[0]?.id ?? crypto.randomUUID();
     function draft(): Document {
       const query = choices.get(querySelect.value);

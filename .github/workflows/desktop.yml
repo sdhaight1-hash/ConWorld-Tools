@@ -128,6 +128,22 @@ jobs:
             Development-Screenshots/*_phase-03_query_mock-native-public-world-search_01.png
           if-no-files-found: error
           retention-days: 30
+      - name: Upload Phase 4 reference picker browser capture
+        if: runner.os == 'Linux' && success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: phase-04-browser-reference-picker
+          path: Development-Screenshots/*_phase-04_canvas_mock-native-reference-picker_01.png
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload Phase 4 draft guard browser capture
+        if: runner.os == 'Linux' && success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: phase-04-browser-draft-guard
+          path: Development-Screenshots/*_phase-04_canvas_mock-native-draft-guard_01.png
+          if-no-files-found: error
+          retention-days: 30
       - name: Upload Phase 4 private saved binding browser capture
         if: runner.os == 'Linux' && success()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -199,6 +215,14 @@ jobs:
           name: phase-04-browser-image-hotspots
           path: Development-Screenshots/*_phase-04_canvas_mock-native-image-hotspots_01.png
           if-no-files-found: error
+          retention-days: 30
+      - name: Upload World Bible prototype capture
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: phase-04-world-bible-prototype
+          path: Development-Screenshots/*_phase-04_canvas_world-bible-prototype_01.png
+          if-no-files-found: warn
           retention-days: 30
       - name: Upload semantic authoring browser captures
         if: runner.os == 'Linux' && success()

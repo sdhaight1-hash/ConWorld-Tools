@@ -1,3 +1,4 @@
+import { canLeaveEntryDrafts } from "./entry-drafts";
 import { invoke } from "@tauri-apps/api/core";
 
 type FamilyContext = { world_id: string; person_id: string; day: number; revision: number };
@@ -109,7 +110,7 @@ export async function openFamilyHistory(panel: HTMLElement, request: FamilyConte
   };
   let busy = false;
   async function save(command: string, payload: Record<string, unknown>) {
-    if (busy || !editable) return;
+    if (busy || !editable || !host.isConnected || !canLeaveEntryDrafts()) return;
     busy = true;
     host.querySelectorAll<HTMLButtonElement>("button").forEach(b => b.disabled = true);
     try {
