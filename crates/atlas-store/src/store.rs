@@ -27,7 +27,7 @@ mod semantic;
 mod templates;
 
 // Version 29 adds version-pinned template layout variants without changing tables.
-pub(crate) const SCHEMA_VERSION: i64 = 40;
+pub(crate) const SCHEMA_VERSION: i64 = 41;
 
 // Candidate queries bind world (?1), focus/phrase (?2), author revision (?3),
 // limit (?4) and branch (?5). Follow only immutable inherited revisions.
@@ -231,6 +231,9 @@ impl Store {
         }
         if version < 40 {
             tx.execute_batch(include_str!("../migrations/0040.sql"))?;
+        }
+        if version < 41 {
+            tx.execute_batch(include_str!("../migrations/0041.sql"))?;
         }
         if version < SCHEMA_VERSION {
             verify_foreign_keys(&tx)?;
@@ -3261,6 +3264,7 @@ fn write_version(
     let (kind, occurrence, citation) = match &record.data {
         ObjectData::Person => ("person", &EventDate::Unknown, None),
         ObjectData::Concept => ("concept", &EventDate::Unknown, None),
+        ObjectData::Place => ("place", &EventDate::Unknown, None),
         ObjectData::Organization => ("organization", &EventDate::Unknown, None),
         ObjectData::Household => ("household", &EventDate::Unknown, None),
         ObjectData::FamilyHouse => ("family_house", &EventDate::Unknown, None),
@@ -3643,6 +3647,7 @@ fn read_version(
     let data = match row.get::<_, String>(1)?.as_str() {
         "person" => ObjectData::Person,
         "concept" => ObjectData::Concept,
+        "place" => ObjectData::Place,
         "organization" => ObjectData::Organization,
         "household" => ObjectData::Household,
         "family_house" => ObjectData::FamilyHouse,

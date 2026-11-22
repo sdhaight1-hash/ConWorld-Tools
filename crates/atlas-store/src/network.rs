@@ -8,6 +8,7 @@ use crate::ObjectRef;
 #[serde(rename_all = "snake_case")]
 pub enum IdentityKind {
     Person,
+    Place,
     Concept,
     Organization,
     Household,
@@ -27,6 +28,7 @@ impl IdentityKind {
     pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Person => "person",
+            Self::Place => "place",
             Self::Concept => "concept",
             Self::Organization => "organization",
             Self::Household => "household",
@@ -46,6 +48,7 @@ impl IdentityKind {
     pub(crate) fn data(self) -> crate::ObjectData {
         match self {
             Self::Person => crate::ObjectData::Person,
+            Self::Place => crate::ObjectData::Place,
             Self::Concept => crate::ObjectData::Concept,
             Self::Organization => crate::ObjectData::Organization,
             Self::Household => crate::ObjectData::Household,
@@ -65,6 +68,7 @@ impl IdentityKind {
     pub(crate) fn parse(value: &str) -> Result<Self, crate::Error> {
         match value {
             "person" => Ok(Self::Person),
+            "place" => Ok(Self::Place),
             "concept" => Ok(Self::Concept),
             "organization" => Ok(Self::Organization),
             "household" => Ok(Self::Household),
@@ -105,6 +109,9 @@ pub enum NetworkKind {
     IdentityRedirect,
     Alliance,
     Settlement,
+    ProperPartWithin,
+    AdminPartOf,
+    LocatedAt,
     CultureLanguage,
     WorkingMaterial,
 }
@@ -131,6 +138,9 @@ impl NetworkKind {
             Self::IdentityRedirect => "identity_redirect",
             Self::Alliance => "alliance",
             Self::Settlement => "settlement",
+            Self::ProperPartWithin => "proper_part_within",
+            Self::AdminPartOf => "admin_part_of",
+            Self::LocatedAt => "located_at",
             Self::CultureLanguage => "culture_language",
             Self::WorkingMaterial => "working_material",
         }
@@ -157,6 +167,9 @@ impl NetworkKind {
             "identity_redirect" => Ok(Self::IdentityRedirect),
             "alliance" => Ok(Self::Alliance),
             "settlement" => Ok(Self::Settlement),
+            "proper_part_within" => Ok(Self::ProperPartWithin),
+            "admin_part_of" => Ok(Self::AdminPartOf),
+            "located_at" => Ok(Self::LocatedAt),
             "culture_language" => Ok(Self::CultureLanguage),
             "working_material" => Ok(Self::WorkingMaterial),
             _ => Err(crate::Error::WrongKind),

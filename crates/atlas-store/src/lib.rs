@@ -166,6 +166,7 @@ pub struct EvidenceStatement {
 pub enum ObjectData {
     Person,
     Concept,
+    Place,
     Organization,
     Household,
     FamilyHouse,

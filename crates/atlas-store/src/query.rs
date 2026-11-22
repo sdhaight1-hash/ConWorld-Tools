@@ -52,6 +52,14 @@ pub enum QueryFilter {
         participant: ObjectRef,
         role: Option<EventRole>,
     },
+    /// Author-only strict containment in one named hierarchy.
+    WithinPlace {
+        root: ObjectRef,
+        kind: crate::network::NetworkKind,
+        lens: String,
+        include_self: bool,
+        max_depth: u8,
+    },
     RelationshipPath {
         start: ObjectRef,
         kind: String,
@@ -67,6 +75,7 @@ pub enum QueryFilter {
 pub enum ObjectKindFilter {
     Person,
     Concept,
+    Place,
     Organization,
     Household,
     FamilyHouse,
@@ -93,6 +102,7 @@ impl From<&ObjectData> for ObjectKindFilter {
         match data {
             ObjectData::Person => Self::Person,
             ObjectData::Concept => Self::Concept,
+            ObjectData::Place => Self::Place,
             ObjectData::Organization => Self::Organization,
             ObjectData::Household => Self::Household,
             ObjectData::FamilyHouse => Self::FamilyHouse,
@@ -716,6 +726,9 @@ impl Store {
                     spec.limit,
                 );
             }
+            QueryFilter::WithinPlace { .. } => {
+                return self.within_place(view, &spec.filter, spec.limit);
+            }
             QueryFilter::RelationshipPath { .. } => {
                 return self.indexed_relationship_path_at(view, &spec.filter, spec.limit);
             }
@@ -758,6 +771,7 @@ impl Store {
             QueryFilter::RelationshipPath { .. } => {
                 unreachable!("handled by indexed relationship path")
             }
+            QueryFilter::WithinPlace { .. } => unreachable!("handled by spatial traversal"),
         };
         rows.sort_by(|a, b| {
             a.record
