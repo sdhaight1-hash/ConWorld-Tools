@@ -219,7 +219,11 @@ fn compare(variant: char) -> Result<(), Error> {
             create(unrelated_technology, "Water wheel", ObjectData::Concept),
             create(place, "Workshop", ObjectData::Place),
             create(vocabulary, "Vocabulary", tag("Curated profiles")),
-            create(drive_tag, "Aetheric drive", tag("Local technology category")),
+            create(
+                drive_tag,
+                "Aetheric drive",
+                tag("Local technology category"),
+            ),
             create(area_tag, "Recorded area", tag("Survey area")),
         ],
     )?;
@@ -370,7 +374,11 @@ fn compare(variant: char) -> Result<(), Error> {
                 let original = view;
                 let mut renamed = store.get_object(language, view)?.unwrap().record;
                 renamed.label = "Estuary Standard".into();
-                commit(&mut store, &mut view, vec![Change::Correct(language, renamed)])?;
+                commit(
+                    &mut store,
+                    &mut view,
+                    vec![Change::Correct(language, renamed)],
+                )?;
                 assert_eq!(
                     rows(
                         &store,
@@ -422,7 +430,11 @@ fn compare(variant: char) -> Result<(), Error> {
                     ConceptProfile::Material,
                     vocabulary,
                 )?;
-                let category = if variant == 'C' { drive_tag } else { vocabulary };
+                let category = if variant == 'C' {
+                    drive_tag
+                } else {
+                    vocabulary
+                };
                 classify(
                     &mut store,
                     &mut view,
@@ -471,7 +483,11 @@ fn compare(variant: char) -> Result<(), Error> {
                 let original = view;
                 let mut renamed = store.get_object(material, view)?.unwrap().record;
                 renamed.label = "Golden resin".into();
-                commit(&mut store, &mut view, vec![Change::Correct(material, renamed)])?;
+                commit(
+                    &mut store,
+                    &mut view,
+                    vec![Change::Correct(material, renamed)],
+                )?;
                 let later = store.network_facts(view, material)?;
                 assert_eq!(later.len(), facts.len());
                 for fact in facts {

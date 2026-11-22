@@ -1082,12 +1082,10 @@ pub(crate) fn classification_seek_anchors<'a>(
             QueryFilter::Kind(_) | QueryFilter::LabelContains(_) | QueryFilter::ExactLabel(_) => {
                 Some(Unbounded)
             }
-            QueryFilter::Not(inner) => {
-                Some(match walk(inner, invisible, depth + 1, nodes)? {
-                    Constant(value) => Constant(!value),
-                    _ => Unbounded,
-                })
-            }
+            QueryFilter::Not(inner) => Some(match walk(inner, invisible, depth + 1, nodes)? {
+                Constant(value) => Constant(!value),
+                _ => Unbounded,
+            }),
             QueryFilter::And(children) | QueryFilter::Or(children) => {
                 if !(2..=MAX_BOOLEAN_CHILDREN).contains(&children.len()) {
                     return None;
@@ -1147,12 +1145,12 @@ pub(crate) fn classification_candidate_matches(
     match filter {
         QueryFilter::ClassifiedAs(profile) => profiles.contains(profile),
         QueryFilter::ClassifiedBy(descriptor) => descriptors.contains(descriptor),
-        QueryFilter::And(children) => children.iter().all(|child| {
-            classification_candidate_matches(child, version, profiles, descriptors)
-        }),
-        QueryFilter::Or(children) => children.iter().any(|child| {
-            classification_candidate_matches(child, version, profiles, descriptors)
-        }),
+        QueryFilter::And(children) => children
+            .iter()
+            .all(|child| classification_candidate_matches(child, version, profiles, descriptors)),
+        QueryFilter::Or(children) => children
+            .iter()
+            .any(|child| classification_candidate_matches(child, version, profiles, descriptors)),
         QueryFilter::Not(inner) => {
             !classification_candidate_matches(inner, version, profiles, descriptors)
         }

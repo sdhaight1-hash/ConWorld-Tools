@@ -3653,10 +3653,7 @@ fn classifications_preserve_pins_and_branch_local_withdrawals() -> Result<(), Er
         store.preview_author_layout(main, &layout, &cancelled),
         Err(Error::QueryCancelled)
     ));
-    assert_eq!(
-        table_rows(preview(&store, main)?.unwrap()),
-        (vec![], false)
-    );
+    assert_eq!(table_rows(preview(&store, main)?.unwrap()), (vec![], false));
     let backup = dir.path().join("backup.sqlite");
     let restored = dir.path().join("restored.sqlite");
     store.backup_to(&backup, Scope::Author)?;
@@ -4019,7 +4016,10 @@ fn site_area_preserves_unknown_zero_units_corrections_and_archive() -> Result<()
     let inherited_fact = store.site_area(inherited, place)?.unwrap();
     let branch_input = SiteAreaInput {
         descriptor: DefinitionPin {
-            version: store.get_object(descriptor, inherited)?.unwrap().reference(),
+            version: store
+                .get_object(descriptor, inherited)?
+                .unwrap()
+                .reference(),
         },
         reading: AreaReading::Known {
             amount: 5,
@@ -4184,10 +4184,7 @@ fn site_area_preserves_unknown_zero_units_corrections_and_archive() -> Result<()
             inspect_archive(&malformed, Scope::Author),
             Err(Error::Integrity(_))
         ));
-        assert!(matches!(
-            Store::open(&malformed),
-            Err(Error::Integrity(_))
-        ));
+        assert!(matches!(Store::open(&malformed), Err(Error::Integrity(_))));
         assert!(restore_archive(&malformed, &rejected, Scope::Author).is_err());
         assert!(!rejected.exists());
         if name == "partial" {
@@ -4199,10 +4196,7 @@ fn site_area_preserves_unknown_zero_units_corrections_and_archive() -> Result<()
                  PRAGMA user_version=43;",
             )?;
             drop(connection);
-            assert!(matches!(
-                Store::open(&malformed),
-                Err(Error::Integrity(_))
-            ));
+            assert!(matches!(Store::open(&malformed), Err(Error::Integrity(_))));
             let connection = rusqlite::Connection::open(&malformed)?;
             let schema: i64 =
                 connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
@@ -4736,9 +4730,7 @@ fn classification_descriptor_pages_deduplicate_and_pin_cursor_context() -> Resul
             QueryFilter::ClassifiedAs(ConceptProfile::Culture),
             QueryFilter::And(vec![
                 QueryFilter::ClassifiedAs(ConceptProfile::Language),
-                QueryFilter::Not(Box::new(QueryFilter::ClassifiedAs(
-                    ConceptProfile::Culture,
-                ))),
+                QueryFilter::Not(Box::new(QueryFilter::ClassifiedAs(ConceptProfile::Culture))),
             ]),
         ]))
     };
@@ -4846,11 +4838,7 @@ fn classification_descriptor_pages_deduplicate_and_pin_cursor_context() -> Resul
     assert_eq!(page.rows[0].object, first);
     assert!(page.next_cursor.is_none());
     assert!(matches!(
-        store.execute_query_page(
-            &query(QueryFilter::ClassifiedBy(first)),
-            author,
-            None
-        ),
+        store.execute_query_page(&query(QueryFilter::ClassifiedBy(first)), author, None),
         Err(Error::WrongKind)
     ));
     assert!(matches!(

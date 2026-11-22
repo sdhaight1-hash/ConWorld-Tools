@@ -409,12 +409,10 @@ impl Store {
                 QueryFilter::ClassifiedAs(profile) => {
                     ("profile", Value::Text(profile.key().into()))
                 }
-                QueryFilter::ClassifiedBy(descriptor) => {
-                    (
-                        "descriptor_id",
-                        Value::Blob(descriptor.id.0.as_bytes().to_vec()),
-                    )
-                }
+                QueryFilter::ClassifiedBy(descriptor) => (
+                    "descriptor_id",
+                    Value::Blob(descriptor.id.0.as_bytes().to_vec()),
+                ),
                 _ => unreachable!("positive classification anchor"),
             };
             parameters.push(value);
@@ -461,8 +459,7 @@ impl Store {
                 world: view.world,
                 id: ObjectId(Uuid::from_bytes(row.get(1)?)),
             };
-            let Some(version) =
-                resolve_object(&tx, object, view.branch, view.revision, view.day)?
+            let Some(version) = resolve_object(&tx, object, view.branch, view.revision, view.day)?
             else {
                 continue;
             };

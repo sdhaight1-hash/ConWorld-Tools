@@ -188,8 +188,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(first.rows.len(), 500);
         assert!(first.next_cursor.is_some());
         let control = QueryControl::new(Duration::from_secs(30))?;
-        let second =
-            store.execute_query_page_controlled(&spec, view, first.next_cursor.as_ref(), &control)?;
+        let second = store.execute_query_page_controlled(
+            &spec,
+            view,
+            first.next_cursor.as_ref(),
+            &control,
+        )?;
         assert_eq!(second.rows.len(), 500);
         assert!(second.next_cursor.is_some());
         let mut ids = std::collections::HashSet::new();
@@ -245,8 +249,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(first.rows, direct.rows);
     assert!(direct.truncated);
     let control = QueryControl::new(Duration::from_secs(30))?;
-    let second =
-        store.execute_query_page_controlled(&composite, view, first.next_cursor.as_ref(), &control)?;
+    let second = store.execute_query_page_controlled(
+        &composite,
+        view,
+        first.next_cursor.as_ref(),
+        &control,
+    )?;
     assert_eq!(first.rows.len(), 500);
     assert_eq!(second.rows.len(), if count == 1000 { 490 } else { 500 });
     let mut ids = std::collections::HashSet::new();
@@ -263,9 +271,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             QueryFilter::ClassifiedAs(ConceptProfile::Culture),
             QueryFilter::And(vec![
                 QueryFilter::ClassifiedAs(ConceptProfile::Language),
-                QueryFilter::Not(Box::new(QueryFilter::ClassifiedAs(
-                    ConceptProfile::Culture,
-                ))),
+                QueryFilter::Not(Box::new(QueryFilter::ClassifiedAs(ConceptProfile::Culture))),
             ]),
         ]),
         ..spec.clone()
@@ -273,8 +279,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let started = Instant::now();
     let control = QueryControl::new(Duration::from_secs(30))?;
     let first = store.execute_query_page_controlled(&boolean, view, None, &control)?;
-    let second =
-        store.execute_query_page_controlled(&boolean, view, first.next_cursor.as_ref(), &control)?;
+    let second = store.execute_query_page_controlled(
+        &boolean,
+        view,
+        first.next_cursor.as_ref(),
+        &control,
+    )?;
     assert_eq!(first.rows.len(), 500);
     assert_eq!(second.rows.len(), 500);
     assert_eq!(second.next_cursor.is_some(), count > 1000);
@@ -283,7 +293,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         assert!(ids.insert(row.object));
     }
     assert_eq!(
-        store.execute_query_controlled(&boolean, view, &control)?.rows,
+        store
+            .execute_query_controlled(&boolean, view, &control)?
+            .rows,
         first.rows
     );
     println!(

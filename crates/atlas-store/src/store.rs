@@ -3056,13 +3056,14 @@ pub(crate) fn verify_semantic_schema_lineage(conn: &Connection, version: i64) ->
                 .collect::<Result<Vec<_>, _>>()?;
             if !exists
                 || actual.len() != columns.len()
-                || !actual.iter().zip(columns).all(
-                    |((column, collation, descending), expected)| {
+                || !actual
+                    .iter()
+                    .zip(columns)
+                    .all(|((column, collation, descending), expected)| {
                         column.as_deref() == Some(*expected)
                             && collation.as_deref() == Some("BINARY")
                             && !descending
-                    },
-                )
+                    })
             {
                 return Err(Error::Integrity(format!(
                     "missing or incompatible semantic index: {name}"
