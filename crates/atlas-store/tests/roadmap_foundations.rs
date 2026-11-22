@@ -4390,10 +4390,15 @@ fn ontology_migration_from_reconstructed_schema_36_preserves_fact_history() -> R
     )?;
     drop(connection);
     assert!(Store::open_with_migration_backup(&broken).is_err());
-    assert!(!std::fs::read_dir(dir.path())?
-        .collect::<Result<Vec<_>, _>>()?
-        .iter()
-        .any(|entry| entry.file_name().to_string_lossy().starts_with("broken.sqlite.pre-schema-")));
+    assert!(
+        !std::fs::read_dir(dir.path())?
+            .collect::<Result<Vec<_>, _>>()?
+            .iter()
+            .any(|entry| entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("broken.sqlite.pre-schema-"))
+    );
     // The lower-level migration must still roll back independently.
     assert!(Store::open(&broken).is_err());
     let connection = rusqlite::Connection::open(&broken)?;

@@ -51,10 +51,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 object(2),
                 record("Alice Vale", ObjectData::Person, Some(object(1))),
             ),
-            Change::Create(
-                object(3),
-                record("Beatrice Vale", ObjectData::Person, None),
-            ),
+            Change::Create(object(3), record("Beatrice Vale", ObjectData::Person, None)),
             Change::Create(
                 object(4),
                 record("House Vale", ObjectData::FamilyHouse, None),

@@ -474,7 +474,12 @@ fn version_one_database_retains_corrections_on_upgrade() -> Result<(), Error> {
     let backups = std::fs::read_dir(dir.path())?
         .collect::<Result<Vec<_>, _>>()?
         .into_iter()
-        .filter(|entry| entry.file_name().to_string_lossy().starts_with("v1.sqlite.pre-schema-1-"))
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("v1.sqlite.pre-schema-1-")
+        })
         .collect::<Vec<_>>();
     assert_eq!(backups.len(), 1);
     let backup = rusqlite::Connection::open_with_flags(
@@ -483,9 +488,8 @@ fn version_one_database_retains_corrections_on_upgrade() -> Result<(), Error> {
     )?;
     let old_schema: i64 = backup.pragma_query_value(None, "user_version", |row| row.get(0))?;
     assert_eq!(old_schema, 1);
-    let old_versions: i64 = backup.query_row("SELECT count(*) FROM object_versions", [], |row| {
-        row.get(0)
-    })?;
+    let old_versions: i64 =
+        backup.query_row("SELECT count(*) FROM object_versions", [], |row| row.get(0))?;
     assert_eq!(old_versions, 2);
     drop(backup);
     assert_eq!(

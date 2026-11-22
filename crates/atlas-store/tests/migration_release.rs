@@ -50,8 +50,12 @@ fn released_schema_36_preserves_identity_history_and_verified_recovery()
         revision: AuthorRevision(expected.first),
         ..view
     };
-    let original = store.get_object(object(2), historical)?.ok_or("original identity")?;
-    let current = store.get_object(object(2), view)?.ok_or("corrected identity")?;
+    let original = store
+        .get_object(object(2), historical)?
+        .ok_or("original identity")?;
+    let current = store
+        .get_object(object(2), view)?
+        .ok_or("corrected identity")?;
     assert_eq!(original.record.label, "Alice Vale");
     assert_eq!(current.record.label, "Alice Thorne");
     assert_eq!(original.object, current.object);
@@ -66,7 +70,9 @@ fn released_schema_36_preserves_identity_history_and_verified_recovery()
         family: FactFamily::Parentage,
         id: expected.parentage,
     };
-    let member = store.resolve_semantic_fact(membership, view)?.ok_or("membership")?;
+    let member = store
+        .resolve_semantic_fact(membership, view)?
+        .ok_or("membership")?;
     assert_eq!(member.reference, membership);
     assert_eq!(member.source_branch, expected.branch);
     assert_eq!(member.recorded_at, AuthorRevision(expected.first + 1));
@@ -82,7 +88,9 @@ fn released_schema_36_preserves_identity_history_and_verified_recovery()
             ends_before: None,
         })
     );
-    let parent = store.resolve_semantic_fact(parentage, view)?.ok_or("parentage")?;
+    let parent = store
+        .resolve_semantic_fact(parentage, view)?
+        .ok_or("parentage")?;
     assert_eq!(parent.reference, parentage);
     assert_eq!(parent.source_branch, expected.branch);
     assert_eq!(parent.recorded_at, AuthorRevision(expected.first + 2));
@@ -99,14 +107,28 @@ fn released_schema_36_preserves_identity_history_and_verified_recovery()
             accepted: true,
         })
     );
-    assert!(store.resolve_semantic_fact(membership, historical)?.is_none());
-    assert!(store.resolve_semantic_fact(parentage, historical)?.is_none());
-    assert!(store.classifications(view, Some(object(2)), None)?.is_empty());
+    assert!(
+        store
+            .resolve_semantic_fact(membership, historical)?
+            .is_none()
+    );
+    assert!(
+        store
+            .resolve_semantic_fact(parentage, historical)?
+            .is_none()
+    );
+    assert!(
+        store
+            .classifications(view, Some(object(2)), None)?
+            .is_empty()
+    );
     store.verify_foreign_keys(Scope::Author)?;
     drop(store);
     let prefix = format!(
         "{}.pre-schema-36-",
-        path.file_name().ok_or("fixture filename")?.to_string_lossy()
+        path.file_name()
+            .ok_or("fixture filename")?
+            .to_string_lossy()
     );
     let copies = std::fs::read_dir(path.parent().ok_or("fixture parent")?)?
         .collect::<Result<Vec<_>, _>>()?
