@@ -311,18 +311,22 @@ export function editCanvasTree(host: HTMLElement, original: Block, worldId: stri
         let input: HTMLInputElement | HTMLSelectElement;
         if (parameter.default.type === "object_kind") {
           input = document.createElement("select");
-          for (const kind of ["person", "organization", "household", "family_house", "faction", "conflict", "office", "title", "asset", "population", "conflict_issue", "conflict_phase", "succession_rule", "definition", "relationship", "event_involvement", "actor_action",
+          for (const kind of ["person", "concept", "organization", "household", "family_house", "faction", "conflict", "office", "title", "asset", "population", "conflict_issue", "conflict_phase", "succession_rule", "definition", "relationship", "event_involvement", "actor_action",
             "historical_event", "source", "claim"]) input.add(new Option(kind.replaceAll("_", " "), kind));
+        } else if (parameter.default.type === "concept_profile") {
+          input = document.createElement("select");
+          for (const profile of ["culture", "language", "material", "technology"]) input.add(new Option(profile, profile));
         } else {
           input = document.createElement("input");
-          input.maxLength = parameter.default.type === "source" ? 36 : 800;
+          input.maxLength = parameter.default.type === "source" || parameter.default.type === "descriptor" ? 36 : 800;
         }
-        input.value = value.type === "source" ? value.source_id : value.value;
+        input.value = value.type === "source" ? value.source_id : value.type === "descriptor" ? value.descriptor_id : value.value;
         input.required = true;
         input.disabled = !editable;
         input.addEventListener("input", () => {
           const bound: ParameterValue = parameter.default.type === "source"
             ? { type: "source", world_id: worldId, source_id: input.value }
+            : parameter.default.type === "descriptor" ? { type: "descriptor", world_id: worldId, descriptor_id: input.value }
             : { type: parameter.default.type, value: input.value };
           binding.bindings = binding.bindings.filter(item => item.name !== parameter.name);
           binding.bindings.push({ name: parameter.name, value: bound });

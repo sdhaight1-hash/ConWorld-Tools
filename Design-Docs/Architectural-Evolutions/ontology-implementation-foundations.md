@@ -63,3 +63,5 @@ Registered the classification and semantic reference commands in the Tauri handl
 ## Descriptor identity discovery
 
 Verified baseline cd7b917: all six Windows/Ubuntu CI checks passed. Added descriptor-ID classification predicates to the shared query planner, saved query wire shape and runtime parameter contract; existing assignments retain their historical version pins even when the definition label changes. Author-only descriptor lookup uses the normalized index and the same visibility/budget rules as profile lookup. Desktop combined-query controls expose the stable descriptor ID. This is metadata categorization, not a new arbitrary field editor.
+
+Canvas parameter editing now also supports stable descriptor references and curated profile selectors using the same typed saved-query contract, without exposing author metadata in published components.
