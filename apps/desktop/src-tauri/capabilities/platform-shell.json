@@ -31,6 +31,8 @@
     "allow-workspace-preview-author-layout",
     "allow-workspace-save-layout",
     "allow-workspace-public-entry",
+    "allow-workspace-author-entry-backlinks",
+    "allow-workspace-public-entry-backlinks",
     "allow-workspace-search-public-entry",
     "allow-workspace-search-public-pages",
     "allow-workspace-create-person",
