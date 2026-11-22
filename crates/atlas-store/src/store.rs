@@ -24,7 +24,7 @@ mod network;
 mod templates;
 
 // Version 29 adds version-pinned template layout variants without changing tables.
-pub(crate) const SCHEMA_VERSION: i64 = 32;
+pub(crate) const SCHEMA_VERSION: i64 = 33;
 
 // Candidate queries bind world (?1), focus/phrase (?2), author revision (?3),
 // limit (?4) and branch (?5). Follow only immutable inherited revisions.
@@ -190,7 +190,6 @@ impl Store {
         }
         if version < 27 {
             tx.execute_batch(include_str!("../migrations/0027.sql"))?;
-            entries::rebuild_public_page_index(&tx)?;
         }
         if version < 30 {
             tx.execute_batch(include_str!("../migrations/0030.sql"))?;
@@ -200,6 +199,10 @@ impl Store {
         }
         if version < 32 {
             tx.execute_batch(include_str!("../migrations/0032.sql"))?;
+        }
+        if version < 33 {
+            tx.execute_batch(include_str!("../migrations/0033.sql"))?;
+            entries::rebuild_public_page_index(&tx)?;
         }
         if version < SCHEMA_VERSION {
             verify_foreign_keys(&tx)?;
@@ -2278,11 +2281,20 @@ impl Store {
         event: ObjectRef,
         view: ViewContext,
     ) -> Result<Vec<EvidenceStatement>, Error> {
+        let _tx = self.conn.unchecked_transaction()?;
+        self.evidence_at_inner(event, view)
+    }
+
+    fn evidence_at_inner(
+        &self,
+        event: ObjectRef,
+        view: ViewContext,
+    ) -> Result<Vec<EvidenceStatement>, Error> {
         if event.world != view.world {
             return Err(Error::WrongWorld);
         }
-        let tx = self.conn.unchecked_transaction()?;
-        let world = load_world(&tx, event.world)?;
+        let tx = &self.conn;
+        let world = load_world(tx, event.world)?;
         if view.revision < AuthorRevision(0) || view.revision > world.revision {
             return Err(Error::InvalidRevision);
         }
@@ -2294,14 +2306,14 @@ impl Store {
                 return Err(Error::InvalidRevision);
             }
         }
-        if !resolve_object(&tx, event, view.branch, view.revision, view.day)?.is_some_and(
+        if !resolve_object(tx, event, view.branch, view.revision, view.day)?.is_some_and(
             |version| matches!(version.record.data, ObjectData::HistoricalEvent { .. }),
         ) {
             return Ok(Vec::new());
         }
         if let Scope::Character(reader) = view.scope {
             require_person(
-                &tx,
+                tx,
                 world.id,
                 reader,
                 view.branch,
@@ -2318,11 +2330,12 @@ impl Store {
         )?;
         let mut results = Vec::new();
         for id in ids {
+            self.check_query_control()?;
             let claim = ObjectRef {
                 world: event.world,
                 id: ObjectId(Uuid::from_bytes(id?)),
             };
-            let Some(version) = resolve_object(&tx, claim, view.branch, view.revision, view.day)?
+            let Some(version) = resolve_object(tx, claim, view.branch, view.revision, view.day)?
             else {
                 continue;
             };
@@ -2342,7 +2355,7 @@ impl Store {
                 version
                     .record
                     .source
-                    .map(|object| resolve_object(&tx, object, view.branch, view.revision, view.day))
+                    .map(|object| resolve_object(tx, object, view.branch, view.revision, view.day))
                     .transpose()?
                     .flatten()
                     .and_then(|source| match source.record.data {

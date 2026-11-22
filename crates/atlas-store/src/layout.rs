@@ -56,6 +56,7 @@ pub enum ElementContent {
     NetworkTable(ObjectRef),
     ImpactTable(ObjectRef),
     PublishedReferences(ObjectRef),
+    PublishedStatements(ObjectRef),
     ObjectLink(ObjectLink),
 }
 
@@ -154,6 +155,10 @@ pub enum DisplayContent {
         links: Vec<ObjectLink>,
         truncated: bool,
     },
+    StatementRows {
+        statements: Vec<String>,
+        truncated: bool,
+    },
     QueryRows {
         records: Vec<(ObjectRef, String)>,
         truncated: bool,
@@ -239,7 +244,8 @@ impl LayoutDocument {
                 ElementContent::FamilyTable(person)
                 | ElementContent::NetworkTable(person)
                 | ElementContent::ImpactTable(person)
-                | ElementContent::PublishedReferences(person) => {
+                | ElementContent::PublishedReferences(person)
+                | ElementContent::PublishedStatements(person) => {
                     if person.world != self.entry.world {
                         return Err(Error::WrongWorld);
                     }
@@ -284,7 +290,8 @@ impl LayoutDocument {
                 }
                 ElementContent::Text(_)
                 | ElementContent::ObjectLink(_)
-                | ElementContent::PublishedReferences(_) => {}
+                | ElementContent::PublishedReferences(_)
+                | ElementContent::PublishedStatements(_) => {}
             }
         }
         Ok(())
@@ -317,7 +324,9 @@ impl LayoutDocument {
                     text.push('\n');
                 }
                 // Destination-dependent captions are excluded from static text search.
-                ElementContent::ObjectLink(_) | ElementContent::PublishedReferences(_) => {}
+                ElementContent::ObjectLink(_)
+                | ElementContent::PublishedReferences(_)
+                | ElementContent::PublishedStatements(_) => {}
                 ElementContent::Query(_)
                 | ElementContent::SavedQuery(_)
                 | ElementContent::FamilyTable(_)
@@ -348,6 +357,28 @@ impl LayoutDocument {
             }
         }
         links
+    }
+
+    /// Only explicitly public components generate reader search dependencies.
+    pub(crate) fn public_dynamic_dependencies(&self) -> Vec<(ElementId, ObjectRef, &'static str)> {
+        let mut result = Vec::new();
+        let mut pending = vec![&self.root];
+        while let Some(element) = pending.pop() {
+            if !can_view(Scope::Public, element.audience) {
+                continue;
+            }
+            match &element.content {
+                ElementContent::Stack(children)
+                | ElementContent::Panel(children)
+                | ElementContent::Template { children, .. }
+                | ElementContent::CustomTemplate { children, .. }
+                | ElementContent::Grid { children, .. } => pending.extend(children.iter().rev()),
+                ElementContent::PublishedReferences(target) => result.push((element.id, *target, "references")),
+                ElementContent::PublishedStatements(target) => result.push((element.id, *target, "statements")),
+                _ => {}
+            }
+        }
+        result
     }
 
     pub fn reparent(&mut self, id: ElementId, target: ElementId) -> Result<(), Error> {
@@ -502,6 +533,16 @@ fn project(
                 return Ok(None);
             }
             DisplayContent::ObjectLink(link.clone())
+        }
+        ElementContent::PublishedStatements(target) => {
+            if budget.queries == MAX_QUERIES {
+                return Err(Error::QueryBudgetExceeded);
+            }
+            budget.queries += 1;
+            let mut statements = store.published_statements(view, *target)?;
+            let truncated = statements.len() > 50;
+            statements.truncate(50);
+            DisplayContent::StatementRows { statements, truncated }
         }
         ElementContent::PublishedReferences(target) => {
             if budget.queries == MAX_QUERIES {

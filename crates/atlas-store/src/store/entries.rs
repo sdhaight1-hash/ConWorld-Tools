@@ -262,6 +262,33 @@ impl Store {
         )
     }
 
+    /// Release only explicitly public event statements, no claim IDs, citations
+    /// or counts of hidden records. A withdrawn target page revokes access.
+    pub(crate) fn published_statements(
+        &self,
+        view: ViewContext,
+        target: ObjectRef,
+    ) -> Result<Vec<String>, Error> {
+        if target.world != view.world {
+            return Err(Error::WrongWorld);
+        }
+        let world = load_world(&self.conn, view.world)?;
+        if view.branch != world.main {
+            return Err(Error::CapabilityDenied);
+        }
+        if view.revision != world.revision {
+            if view.scope == Scope::Author {
+                return Ok(Vec::new());
+            }
+            return Err(Error::InvalidRevision);
+        }
+        let public = ViewContext { scope: Scope::Public, ..view };
+        if !self.entry_link_target_visible(public, target)? {
+            return Ok(Vec::new());
+        }
+        Ok(self.evidence_at_inner(target, public)?.into_iter().map(|row| row.statement).collect())
+    }
+
     /// Find literal, case-insensitive text within a single authorized entry.
     /// Never search stored layout JSON or the author full-text index.
     pub fn search_entry_text(
@@ -320,6 +347,12 @@ impl Store {
                     JOIN public_page_search_documents t ON t.world_id=c.world_id
                         AND t.entry_id=c.target_id
                     WHERE c.world_id=?1 AND entry_caption_fts MATCH ?2
+                    UNION ALL
+                    SELECT d.entry_id,0 AS text_hit FROM public_dynamic_dependencies d
+                    JOIN public_page_search_documents s ON s.world_id=d.world_id
+                        AND s.entry_id=d.entry_id AND s.revision=d.revision
+                    JOIN public_page_search_documents t ON t.world_id=d.world_id AND t.entry_id=d.target_id
+                    WHERE d.world_id=?1
                  )
                  SELECT entry_id,MAX(text_hit) FROM candidates GROUP BY entry_id ORDER BY entry_id"
             } else {
@@ -457,6 +490,8 @@ fn find_text_blocks(page: DisplayElement, needle: &str, limit: usize) -> EntryTe
             }
             DisplayContent::Text(text) => text,
             DisplayContent::ObjectLink(link) => link.label,
+            DisplayContent::ReferenceRows { links, .. } => links.into_iter().map(|link| link.label).collect::<Vec<_>>().join("\n"),
+            DisplayContent::StatementRows { statements, .. } => statements.join("\n"),
             _ => continue,
         };
         if text.to_lowercase().contains(needle) {
@@ -478,6 +513,10 @@ fn replace_public_page_index(
     published: bool,
     revision: i64,
 ) -> Result<(), Error> {
+    conn.execute(
+        "DELETE FROM public_dynamic_dependencies WHERE world_id=?1 AND entry_id=?2",
+        params![document.entry.world.0.as_bytes(),document.entry.id.0.as_bytes()],
+    )?;
     conn.execute(
         "DELETE FROM entry_caption_candidates WHERE world_id=?1 AND entry_id=?2",
         params![
@@ -503,6 +542,14 @@ fn replace_public_page_index(
                 text
             ],
         )?;
+        for (element, target, kind) in document.public_dynamic_dependencies() {
+            conn.execute(
+                "INSERT INTO public_dynamic_dependencies(world_id,entry_id,revision,element_id,target_id,kind)
+                 VALUES(?1,?2,?3,?4,?5,?6)",
+                params![document.entry.world.0.as_bytes(),document.entry.id.0.as_bytes(),
+                    revision,element.0.as_bytes(),target.id.0.as_bytes(),kind],
+            )?;
+        }
         // This is an internal candidate index, never a publication corpus.
         // Target release/day checks are performed on every search, not on source save.
         for (element, link) in document.visible_links(Scope::Public) {
@@ -525,6 +572,7 @@ fn replace_public_page_index(
 }
 
 pub(super) fn rebuild_public_page_index(conn: &Connection) -> Result<(), Error> {
+    conn.execute("DELETE FROM public_dynamic_dependencies", [])?;
     conn.execute("DELETE FROM entry_caption_candidates", [])?;
     conn.execute("DELETE FROM public_page_search_documents", [])?;
     let mut stmt = conn.prepare(

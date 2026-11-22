@@ -223,7 +223,7 @@ export function editCanvasTree(host: HTMLElement, original: Block, worldId: stri
       pin.textContent = "Template: " + node.content.Template.key + " · version " + node.content.Template.version;
       controls.append(pin);
     }
-    const liveFocus = node.content.NetworkTable ?? node.content.ImpactTable ?? node.content.PublishedReferences;
+    const liveFocus = node.content.NetworkTable ?? node.content.ImpactTable ?? node.content.PublishedReferences ?? node.content.PublishedStatements;
     if (liveFocus) {
       const target = document.createElement("input");
       target.value = liveFocus.id;
@@ -233,7 +233,7 @@ export function editCanvasTree(host: HTMLElement, original: Block, worldId: stri
       field("Reference subject identity", target);
       const description = document.createElement("p");
       description.textContent = node.content.NetworkTable ? "Private sourced historical facts." : node.content.ImpactTable ? "Confirmed persisted event impact. Author only." :
-        "Only current released backlinks, never private registry data.";
+        node.content.PublishedStatements ? "Public event statements only, requires released event page." : "Only current released backlinks, never private registry data.";
       controls.append(description);
     }
     if (node.content.FamilyTable) {
@@ -372,7 +372,7 @@ export function editCanvasTree(host: HTMLElement, original: Block, worldId: stri
         }));
       }
       const history = document.createElement("select");
-      for (const [value, label] of [["person_events", "Person event history"], ["family", "Accepted family links"], ["network", "Sourced historical network"], ["impact", "Confirmed event impact"], ["published_refs", "Published references"], ["actors", "Event actors"],
+      for (const [value, label] of [["person_events", "Person event history"], ["family", "Accepted family links"], ["network", "Sourced historical network"], ["impact", "Confirmed event impact"], ["published_refs", "Published references"], ["published_statements", "Released event statements"], ["actors", "Event actors"],
         ["witnesses", "Event witnesses"], ["victims", "Event victims"], ["stakeholders", "Event stakeholders"]]) {
         history.add(new Option(label, value));
       }

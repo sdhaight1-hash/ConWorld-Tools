@@ -4,7 +4,7 @@ export type ObjectRef = { world: string; id: string };
 export type ObjectLink = { target: ObjectRef; label: string };
 export type PublicDisplay = { content: { Text?: string; Stack?: PublicDisplay[]; Panel?: PublicDisplay[];
   Grid?: { columns: number; children: PublicDisplay[] }; ObjectLink?: ObjectLink;
-  ReferenceRows?: { links: ObjectLink[]; truncated: boolean } } };
+  StatementRows?: { statements: string[]; truncated: boolean }; ReferenceRows?: { links: ObjectLink[]; truncated: boolean } } };
 
 // Both reader and author preview render only the projected children, in layout order.
 export function layoutContainer(parent: HTMLElement, kind: "panel" | "grid", columns = 1) {
@@ -58,6 +58,16 @@ export function publicReader(host: HTMLElement, worldId: string, day: number,
           parent.append(p);
         }
         if (node.content.ObjectLink) linkButton(node.content.ObjectLink.label, node.content.ObjectLink.target, parent);
+        if (node.content.StatementRows) {
+          const group = layoutContainer(parent, "panel");
+          const title = document.createElement("p");
+          title.textContent = "Released historical statements" + (node.content.StatementRows.truncated ? " · limited results" : "");
+          group.append(title);
+          for (const statement of node.content.StatementRows.statements) {
+            const row = document.createElement("p"); row.textContent = statement; group.append(row);
+          }
+          if (!node.content.StatementRows.statements.length) group.append("No released statements.");
+        }
         if (node.content.ReferenceRows) {
           const group = layoutContainer(parent, "panel");
           const title = document.createElement("p");
