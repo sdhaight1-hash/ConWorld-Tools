@@ -51,3 +51,7 @@ Schema 39 extends canonical network facts with CultureLanguage (Culture -> Langu
 ## Stable classification references and fact backlinks
 
 AE-02 now includes Classification alongside Network and Parentage as a discriminated fact family. Exact point and list reads share the same classification payload decoder and endpoint visibility checks. Author-only fact backlinks traverse existing network endpoints/source, parentage endpoints, and classification subject/descriptor/source in one historical transaction with an explicit work bound. Withdrawn and invisible candidates never appear in results; no new fact copies. Tests exercise source/descriptor backlinks, exact UUID and branch withdrawal. Annotation authoring remains separate and no public projection is implied.
+
+## Archive, indexing and Canvas replay
+
+Schema 40 adds source/descriptor backlink indexes. Archive inspection and migrations check classification endpoint kinds, pinned Tag payload and chronological author revisions, beyond FK integrity. The classification lifecycle regression now persists a typed saved query, binds it through existing Canvas author controls, checks an empty public projection, and backs up/restores the same IDs, facts and page output on a separate path. Fixed the CI-reported rustfmt differences in the preceding two slices. Verification pending at the new head; no new scope or duplicate storage.

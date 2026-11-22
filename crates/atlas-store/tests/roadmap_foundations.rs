@@ -3029,7 +3029,8 @@ fn classifications_preserve_pins_and_branch_local_withdrawals() -> Result<(), Er
         network::IdentityKind,
         semantic::{ClassificationInput, ConceptProfile, DefinitionPin},
     };
-    let mut store = Store::open(":memory:")?;
+    let dir = tempfile::tempdir()?;
+    let mut store = Store::open(dir.path().join("source.sqlite"))?;
     let world = seed(&mut store)?;
     let mut author = view(&world, 13);
     let concept = store.create_identity(
@@ -3238,6 +3239,83 @@ fn classifications_preserve_pins_and_branch_local_withdrawals() -> Result<(), Er
             .id,
         assignment
     );
+    use atlas_store::{
+        archive::restore_archive,
+        layout::SavedQueryBinding,
+        query::{ParameterBinding, ParameterValue, SaveNamedLabelQuery},
+    };
+    let mut main = ViewContext {
+        branch: world.main,
+        ..after
+    };
+    let saved = store.save_named_parameterized_query(SaveNamedLabelQuery {
+        world_id: world.id,
+        expected: main.revision,
+        query_id: None,
+        name: "Languages",
+        spec: &profile_query,
+        command_id: Uuid::new_v4(),
+        scope: Scope::Author,
+    })?;
+    main.revision = saved.recorded_at;
+    let binding = SavedQueryBinding {
+        world: world.id,
+        query_id: saved.id,
+        definition_revision: saved.recorded_at.0,
+        bindings: vec![ParameterBinding {
+            name: "concept_profile_1".into(),
+            value: ParameterValue::ConceptProfile {
+                value: ConceptProfile::Language,
+            },
+        }],
+    };
+    assert_eq!(
+        store
+            .execute_query(&binding.resolve(&store, main)?, main)?
+            .rows[0]
+            .object,
+        concept
+    );
+    let layout = LayoutDocument {
+        schema_version: LAYOUT_SCHEMA_VERSION,
+        entry: concept,
+        root: LayoutElement {
+            id: ElementId(Uuid::new_v4()),
+            audience: ClaimAudience::Public,
+            content: ElementContent::Stack(vec![LayoutElement {
+                id: ElementId(Uuid::new_v4()),
+                audience: ClaimAudience::Author,
+                content: ElementContent::SavedQuery(binding),
+            }]),
+        },
+    };
+    main.revision = store.save_entry_layout(main, &layout, true, Uuid::new_v4())?;
+    let public = ViewContext {
+        scope: Scope::Public,
+        ..main
+    };
+    assert_eq!(
+        store.display_entry(public, concept)?.unwrap().content,
+        DisplayContent::Stack(vec![])
+    );
+    let backup = dir.path().join("backup.sqlite");
+    let restored = dir.path().join("restored.sqlite");
+    store.backup_to(&backup, Scope::Author)?;
+    restore_archive(&backup, &restored, Scope::Author)?;
+    let reopened = Store::open(&restored)?;
+    assert_eq!(
+        reopened.classifications(main, Some(concept), None)?,
+        store.classifications(main, Some(concept), None)?
+    );
+    assert_eq!(
+        reopened.semantic_fact_backlinks(concept, main)?,
+        store.semantic_fact_backlinks(concept, main)?
+    );
+    assert_eq!(
+        reopened.display_entry(public, concept)?,
+        store.display_entry(public, concept)?
+    );
+    assert!(reopened.resolve_semantic_fact(fact_ref, after)?.is_none());
     store.verify_foreign_keys(Scope::Author)?;
     Ok(())
 }

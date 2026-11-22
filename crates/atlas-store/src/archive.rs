@@ -49,6 +49,9 @@ pub fn inspect_archive(path: impl AsRef<Path>, scope: Scope) -> Result<ArchiveMa
     if schema >= 36 {
         crate::store::media::verify_media_hashes(&tx)?;
     }
+    if schema >= 38 {
+        crate::store::classification::verify_classification_integrity(&tx)?;
+    }
     let mut statement = tx.prepare(
         "SELECT w.id, w.name, COALESCE(MAX(r.revision), 0)
          FROM worlds w LEFT JOIN author_revisions r ON r.world_id = w.id

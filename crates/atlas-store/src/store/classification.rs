@@ -45,7 +45,9 @@ pub(super) fn has_profile(
     let source = row.get::<_, [u8; 16]>(0)?;
     let descriptor = row.get::<_, [u8; 16]>(1)?;
     if rows.next()?.is_some() {
-        return Err(Error::Integrity("overlapping active classifications".into()));
+        return Err(Error::Integrity(
+            "overlapping active classifications".into(),
+        ));
     }
     for bytes in [source, descriptor] {
         let object = ObjectRef {
@@ -304,4 +306,32 @@ pub(super) fn read_classification(
         recorded_at: AuthorRevision(row.get(10)?),
         source_branch: BranchId(Uuid::from_bytes(row.get(11)?)),
     }))
+}
+
+/// Additional archive validation beyond foreign keys: references must retain
+/// compatible canonical kinds and refer to a Tag definition from prior history.
+pub(crate) fn verify_classification_integrity(conn: &Connection) -> Result<(), Error> {
+    let invalid: bool = conn.query_row(
+        "SELECT EXISTS(
+            SELECT 1 FROM concept_classifications c
+            JOIN objects subject ON subject.world_id=c.world_id AND subject.id=c.subject_id
+            JOIN objects source ON source.world_id=c.world_id AND source.id=c.source_id
+            LEFT JOIN definition_versions d ON d.world_id=c.world_id
+                AND d.definition_id=c.descriptor_id AND d.branch_id=c.descriptor_branch
+                AND d.state_revision=c.descriptor_state_revision AND d.revision=c.descriptor_revision
+            WHERE subject.kind<>'concept' OR source.kind<>'source'
+                OR d.category IS NULL OR d.category<>'tag'
+                OR c.descriptor_revision>=c.recorded_revision
+        ) OR EXISTS(
+            SELECT 1 FROM classification_withdrawals w
+            JOIN concept_classifications c ON c.world_id=w.world_id AND c.id=w.fact_id
+            WHERE w.revision<=c.recorded_revision
+        )",
+        [],
+        |row| row.get(0),
+    )?;
+    if invalid {
+        return Err(Error::Integrity("invalid historical classification".into()));
+    }
+    Ok(())
 }
