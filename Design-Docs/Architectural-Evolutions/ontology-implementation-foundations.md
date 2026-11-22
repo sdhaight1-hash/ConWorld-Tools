@@ -23,3 +23,7 @@ Tests added for reference family discrimination, serialization, scope and wrong-
 ## AE-02 historical point reads
 
 Prior reference-vocabulary commit `9086041` passed Windows and Ubuntu build/test and desktop verification. This slice adds author-only point resolution of network and parentage facts through the existing historical metadata CTE, with original source branch, author revision, rationale and typed payload. No migration or duplicate fact table. The existing branch-local regression now checks original, withdrawn, sibling and parent fact lookups, family mismatch and public denial. New checks await CI; scoped publication and annotation/backlink integration are still open. No visual changes.
+
+## Definition-pin validation foundation
+
+AE-03 adds validation of exact existing Definition versions within a historical author view. Wrong kind, stale version and unauthorized reads fail closed. This is deliberately not descriptor persistence or historical classification assignment; pinned historical replay must supply the original view. The Concept registry migration overlaps spatial PR #67's schema 37 and remains to be reconciled. Regression tests cover correction and prior-revision replay. CI pending; no visual changes.

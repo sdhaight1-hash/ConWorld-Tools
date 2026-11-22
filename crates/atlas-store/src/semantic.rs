@@ -100,6 +100,35 @@ impl Store {
     }
 }
 
+/// A governed descriptor pins the exact historical definition, not its label.
+/// This is an author-side reference check, not a persisted classification.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DefinitionPin {
+    pub version: crate::VersionRef,
+}
+
+impl Store {
+    /// Check that a pinned definition is still the selected historical version.
+    /// Stale pins fail closed; callers must not silently reinterpret old data.
+    pub fn validate_definition_pin(
+        &self,
+        pin: DefinitionPin,
+        view: ViewContext,
+    ) -> Result<Version, Error> {
+        let reference = SemanticRef::Object(pin.version.object);
+        let version = self
+            .resolve_semantic_object(reference, view)?
+            .ok_or(Error::NotFound)?;
+        if !matches!(&version.record.data, crate::ObjectData::Definition { .. }) {
+            return Err(Error::WrongKind);
+        }
+        if version.reference() != pin.version {
+            return Err(Error::InvalidInput("definition version pin"));
+        }
+        Ok(version)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

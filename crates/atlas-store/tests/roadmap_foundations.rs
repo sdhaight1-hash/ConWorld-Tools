@@ -2918,3 +2918,73 @@ fn chromosome_painter_keeps_contiguous_toy_homologues_and_deterministic_seed() -
     ));
     Ok(())
 }
+
+#[test]
+fn semantic_definition_pin_rejects_stale_and_incompatible_versions() -> Result<(), Error> {
+    use atlas_store::semantic::DefinitionPin;
+    let mut store = Store::open(":memory:")?;
+    let world = seed(&mut store)?;
+    let mut author = view(&world, 13);
+    let definition = ObjectRef::new(world.id);
+    let record = |label: &str| Record {
+        label: label.into(),
+        valid: ValidInterval::default(),
+        data: ObjectData::Definition {
+            definition: Definition::Tag,
+            description: "Governed vocabulary".into(),
+        },
+        source: None,
+    };
+    let command = |expected, change| Command {
+        world: world.id,
+        branch: world.main,
+        expected,
+        id: Uuid::new_v4(),
+        author: "Fixture".into(),
+        rationale: "Definition version validation".into(),
+        scope: Scope::Author,
+        changes: vec![change],
+    };
+    author.revision = store.apply(&command(
+        author.revision,
+        Change::Create(definition, record("Culture")),
+    ))?;
+    let old = author;
+    let pin = DefinitionPin {
+        version: store.get_object(definition, old)?.unwrap().reference(),
+    };
+    assert_eq!(
+        store.validate_definition_pin(pin, old)?.record.label,
+        "Culture"
+    );
+    let person = DefinitionPin {
+        version: store.get_object(id(&world, 1), old)?.unwrap().reference(),
+    };
+    assert!(matches!(
+        store.validate_definition_pin(person, old),
+        Err(Error::WrongKind)
+    ));
+    assert!(matches!(
+        store.validate_definition_pin(
+            pin,
+            ViewContext {
+                scope: Scope::Public,
+                ..old
+            }
+        ),
+        Err(Error::CapabilityDenied)
+    ));
+    author.revision = store.apply(&command(
+        author.revision,
+        Change::Correct(definition, record("Cultural tradition")),
+    ))?;
+    assert!(matches!(
+        store.validate_definition_pin(pin, author),
+        Err(Error::InvalidInput("definition version pin"))
+    ));
+    assert_eq!(
+        store.validate_definition_pin(pin, old)?.record.label,
+        "Culture"
+    );
+    Ok(())
+}
