@@ -46,4 +46,4 @@ The example URL is a **format illustration, not a usable citation**. Before open
 
 ## Study index
 
-_No completed studies are listed in this directory at the time this index was established. Add verified study links here as work is performed._
+- [NestedLocations — Hierarchical, Spatial and Historical Place Modeling](nested-locations.md) — **In Review**, [research #65](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/65). Recommends typed temporal adjacency, optional geometry, bounded queries, scoped maps and cross-phase integration; includes reproducible isolated SQLite tests. Architecture acceptance remains pending.
