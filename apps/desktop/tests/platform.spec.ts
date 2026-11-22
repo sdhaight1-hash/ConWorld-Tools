@@ -1927,11 +1927,11 @@ test("Canvas tree nests and moves stable components without widening inherited a
   await expect(inspector.getByRole("heading", { name: "Canvas tree" })).toBeVisible();
   await inspector.getByRole("button", { name: "Text · Secret testimony" }).click();
   await inspector.getByLabel("Move into container").selectOption("public-grid");
-  await inspector.getByRole("button", { name: "Move component" }).click();
+  await inspector.getByRole("button", { name: "Move component", exact: true }).click();
   await expect(inspector.getByLabel("Component audience")).toHaveValue("Author");
   await inspector.getByRole("button", { name: "SavedQuery · binding" }).click();
   await inspector.getByLabel("Move into container").selectOption("public-grid");
-  await inspector.getByRole("button", { name: "Move component" }).click();
+  await inspector.getByRole("button", { name: "Move component", exact: true }).click();
   await inspector.getByRole("button", { name: "Grid · public-g" }).click();
   await inspector.getByLabel("New component kind").selectOption("Panel");
   await inspector.getByRole("button", { name: "Add child" }).click();
