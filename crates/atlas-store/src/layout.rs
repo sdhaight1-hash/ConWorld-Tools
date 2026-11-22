@@ -44,6 +44,11 @@ pub enum ElementContent {
         version: u16,
         children: Vec<LayoutElement>,
     },
+    CustomTemplate {
+        template_id: Uuid,
+        definition_revision: i64,
+        children: Vec<LayoutElement>,
+    },
     Text(String),
     Query(QuerySpec),
     SavedQuery(SavedQueryBinding),
@@ -74,6 +79,14 @@ pub enum TemplateKind {
 pub struct ObjectLink {
     pub target: ObjectRef,
     pub label: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct CustomTemplateSummary {
+    pub id: Uuid,
+    pub name: String,
+    pub source: ObjectRef,
+    pub revision: i64,
 }
 
 #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -190,6 +203,9 @@ impl LayoutDocument {
                 return Err(Error::WrongWorld);
             }
             match &element.content {
+                ElementContent::CustomTemplate { definition_revision, .. } if *definition_revision <= 0 => {
+                    return Err(Error::InvalidInput("custom template revision"));
+                }
                 ElementContent::Template { version, .. } if *version != 1 => {
                     return Err(Error::InvalidInput("layout template version"));
                 }
@@ -199,6 +215,7 @@ impl LayoutDocument {
                 ElementContent::Stack(children)
                 | ElementContent::Panel(children)
                 | ElementContent::Template { children, .. }
+                | ElementContent::CustomTemplate { children, .. }
                 | ElementContent::Grid { children, .. } => {
                     if children.len() + pending.len() + visited.len() > MAX_ELEMENTS {
                         return Err(Error::QueryBudgetExceeded);
@@ -258,6 +275,7 @@ impl LayoutDocument {
                 ElementContent::Stack(children)
                 | ElementContent::Panel(children)
                 | ElementContent::Template { children, .. }
+                | ElementContent::CustomTemplate { children, .. }
                 | ElementContent::Grid { children, .. } => {
                     pending.extend(children.iter().map(|child| (child, audience)))
                 }
@@ -287,6 +305,7 @@ impl LayoutDocument {
                 ElementContent::Stack(children)
                 | ElementContent::Panel(children)
                 | ElementContent::Template { children, .. }
+                | ElementContent::CustomTemplate { children, .. }
                 | ElementContent::Grid { children, .. } => pending.extend(children.iter().rev()),
                 ElementContent::Text(block) => {
                     // SQLite tokenization may stop at NUL; normalize it only in
@@ -319,6 +338,7 @@ impl LayoutDocument {
                 ElementContent::Stack(children)
                 | ElementContent::Panel(children)
                 | ElementContent::Template { children, .. }
+                | ElementContent::CustomTemplate { children, .. }
                 | ElementContent::Grid { children, .. } => pending.extend(children.iter().rev()),
                 ElementContent::ObjectLink(link) => links.push((element.id, link)),
                 _ => {}
@@ -372,6 +392,7 @@ fn take_child(
         ElementContent::Stack(children)
         | ElementContent::Panel(children)
         | ElementContent::Template { children, .. }
+        | ElementContent::CustomTemplate { children, .. }
         | ElementContent::Grid { children, .. } => children,
         _ => return None,
     };
@@ -390,6 +411,7 @@ fn find_container(element: &mut LayoutElement, id: ElementId) -> Option<&mut Vec
         ElementContent::Stack(children)
         | ElementContent::Panel(children)
         | ElementContent::Template { children, .. }
+        | ElementContent::CustomTemplate { children, .. }
         | ElementContent::Grid { children, .. } => children,
         _ => return None,
     };
@@ -428,6 +450,7 @@ fn project(
         ElementContent::Stack(children)
         | ElementContent::Panel(children)
         | ElementContent::Template { children, .. }
+        | ElementContent::CustomTemplate { children, .. }
         | ElementContent::Grid { children, .. } => {
             let mut projected = Vec::new();
             for child in children {
@@ -437,6 +460,12 @@ fn project(
             }
             match &element.content {
                 ElementContent::Panel(_) => DisplayContent::Panel(projected),
+                ElementContent::CustomTemplate { template_id, definition_revision, .. } => {
+                    if view.scope == Scope::Author {
+                        store.require_custom_template(view, *template_id, *definition_revision)?;
+                    }
+                    DisplayContent::Panel(projected)
+                }
                 ElementContent::Template { version, .. } => {
                     if *version != 1 {
                         return Err(Error::InvalidInput("layout template version"));

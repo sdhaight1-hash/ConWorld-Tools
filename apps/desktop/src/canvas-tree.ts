@@ -6,7 +6,7 @@ import { templates, instantiateTemplate, historicalComponent } from "./canvas-te
 // This is a draft-only editor. The Rust compiler/store validates the entire tree
 // before save and owns publication; no new persistence or authority lives here.
 function children(block: Block): Block[] | undefined {
-  return block.content.Stack ?? block.content.Panel ?? block.content.Grid?.children ?? block.content.Template?.children;
+  return block.content.Stack ?? block.content.Panel ?? block.content.Grid?.children ?? block.content.Template?.children ?? block.content.CustomTemplate?.children;
 }
 
 function kind(block: Block): string {
@@ -22,9 +22,12 @@ function restrict(audience: string, enclosing: string): string {
 type Row = { block: Block; parent?: Row; depth: number; effective: string };
 
 export function editCanvasTree(host: HTMLElement, original: Block, worldId: string,
-  entryId: string, revision: number, editable: boolean, changed: () => void) {
+  entryId: string, day: number, revision: number, editable: boolean, changed: () => void) {
   let root = structuredClone(original);
   let selected = root.id;
+  let customTemplates: { id: string; name: string; revision: number }[] = [];
+  const context = { world_id: worldId, day, revision };
+  let dragged: string | undefined;
   let last = structuredClone(root);
   const undo: Block[] = [];
   const redo: Block[] = [];
@@ -103,6 +106,30 @@ export function editCanvasTree(host: HTMLElement, original: Block, worldId: stri
     render();
   }
 
+  function contains(ancestor: Block, id: string): boolean {
+    return ancestor.id === id || (children(ancestor)?.some(child => contains(child, id)) ?? false);
+  }
+  function height(block: Block): number {
+    return Math.max(0, ...(children(block) ?? []).map(child => 1 + height(child)));
+  }
+  function size(block: Block): number {
+    return 1 + (children(block) ?? []).reduce((total, child) => total + size(child), 0);
+  }
+  function move(source: string, destination: string) {
+    if (!editable) return;
+    const all = rows();
+    const item = all.find(row => row.block.id === source);
+    const target = all.find(row => row.block.id === destination);
+    if (!item?.parent || !target || !children(target.block) || target === item.parent ||
+        contains(item.block, target.block.id) || target.depth + 1 + height(item.block) > 16) return;
+    const siblings = children(item.parent.block)!;
+    item.block.audience = restrict(item.block.audience, item.parent.effective);
+    siblings.splice(siblings.indexOf(item.block), 1);
+    children(target.block)!.push(item.block);
+    selected = item.block.id;
+    commit("Moved component; identity and binding preserved.");
+  }
+
   function render() {
     const all = rows();
     const row = all.find(row => row.block.id === selected) ?? all[0];
@@ -139,6 +166,15 @@ export function editCanvasTree(host: HTMLElement, original: Block, worldId: stri
       line.style.marginInlineStart = Math.min(item.depth, 8) * 0.6 + "rem";
       line.setAttribute("aria-pressed", String(item.block.id === selected));
       line.title = item.block.id;
+      if (editable) {
+        line.draggable = !!item.parent;
+        line.ondragstart = event => { dragged = item.block.id; event.dataTransfer?.setData("text/plain", item.block.id); };
+        line.ondragend = () => { dragged = undefined; };
+        if (children(item.block)) {
+          line.ondragover = event => { if (dragged) event.preventDefault(); };
+          line.ondrop = event => { event.preventDefault(); if (dragged) move(dragged, item.block.id); dragged = undefined; };
+        }
+      }
       tree.append(line);
     }
 
@@ -176,6 +212,11 @@ export function editCanvasTree(host: HTMLElement, original: Block, worldId: stri
       columns.disabled = !editable;
       columns.addEventListener("change", () => { node.content.Grid!.columns = Number(columns.value); recordChange(); });
       field("Grid columns", columns);
+    }
+    if (node.content.CustomTemplate) {
+      const pin = document.createElement("p");
+      pin.textContent = "Custom template revision " + node.content.CustomTemplate.definition_revision + " · " + node.content.CustomTemplate.template_id;
+      controls.append(pin);
     }
     if (node.content.Template) {
       const pin = document.createElement("p");
@@ -304,6 +345,31 @@ export function editCanvasTree(host: HTMLElement, original: Block, worldId: stri
         selected = template.id;
         commit("Inserted version-pinned template; existing components unchanged.");
       }, all.length > 494 || row.depth > 12));
+      controls.append(button("Load custom templates", async () => {
+        try {
+          customTemplates = await invoke<typeof customTemplates>("workspace_custom_templates", { request: context });
+          if (host.isConnected) render();
+        } catch (error) { message.textContent = String(error); }
+      }));
+      if (customTemplates.length) {
+        const choice = document.createElement("select");
+        for (const item of customTemplates) choice.add(new Option(item.name + " · revision " + item.revision, item.id));
+        field("Custom template", choice);
+        controls.append(button("Insert custom template", async () => {
+          const item = customTemplates.find(item => item.id === choice.value);
+          if (!item) return;
+          const before = last;
+          try {
+            const instance = await invoke<Block>("workspace_instantiate_custom_template", { request: context,
+              templateId: item.id, definitionRevision: item.revision, entryId });
+            if (!host.isConnected || last !== before) return;
+            if (rows().length + size(instance) > 512 || row.depth + 1 + height(instance) > 16) {
+              message.textContent = "Template exceeds the layout budget."; return;
+            }
+            slot.push(instance); selected = instance.id; commit("Inserted pinned custom template.");
+          } catch (error) { message.textContent = String(error); }
+        }));
+      }
       const history = document.createElement("select");
       for (const [value, label] of [["person_events", "Person event history"], ["family", "Accepted family links"], ["network", "Sourced historical network"], ["impact", "Confirmed event impact"], ["published_refs", "Published references"], ["actors", "Event actors"],
         ["witnesses", "Event witnesses"], ["victims", "Event victims"], ["stakeholders", "Event stakeholders"]]) {
@@ -329,12 +395,6 @@ export function editCanvasTree(host: HTMLElement, original: Block, worldId: stri
         commit("Moved component down.");
       }, index === siblings.length - 1),
     );
-    function contains(ancestor: Block, id: string): boolean {
-      return ancestor.id === id || (children(ancestor)?.some(child => contains(child, id)) ?? false);
-    }
-    function height(block: Block): number {
-      return Math.max(0, ...(children(block) ?? []).map(child => 1 + height(child)));
-    }
     const targets = all.filter(target => children(target.block) && target !== row.parent &&
       !contains(node, target.block.id) && target.depth + 1 + height(node) <= 16);
     const destination = document.createElement("select");
@@ -343,11 +403,7 @@ export function editCanvasTree(host: HTMLElement, original: Block, worldId: stri
     controls.append(button("Move component", () => {
       const target = targets.find(target => target.block.id === destination.value);
       if (!target) return;
-      // Intersect source ancestry before detaching, matching Rust reparent().
-      node.audience = restrict(node.audience, row.parent!.effective);
-      siblings.splice(index, 1);
-      children(target.block)!.push(node);
-      commit("Moved component; identity and binding preserved.");
+      move(node.id, target.block.id);
     }, targets.length === 0));
     controls.append(button("Remove component", () => {
       if ((children(node)?.length ?? 0) > 0) {
