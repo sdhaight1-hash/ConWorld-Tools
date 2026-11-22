@@ -4255,6 +4255,12 @@ fn site_area_preserves_unknown_zero_units_corrections_and_archive() -> Result<()
         reopened.site_area(later, place)?,
         store.site_area(later, place)?
     );
+    for (reference, context) in [(predecessor, prior), (reference, layout_view)] {
+        assert_eq!(
+            reopened.resolve_semantic_fact(reference, context)?,
+            store.resolve_semantic_fact(reference, context)?
+        );
+    }
     assert_eq!(
         reopened.site_area(branch, place)?,
         store.site_area(branch, place)?

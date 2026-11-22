@@ -2314,7 +2314,13 @@ test("classification authoring and evidence backlinks use historical author comm
             source_id: "folio", starts_at: 0, ends_before: null, recorded_at: 5,
           }];
           if (command === "workspace_semantic_fact_backlinks") return [fact];
-          if (command === "workspace_semantic_fact") return fact;
+          if (command === "workspace_semantic_fact") {
+            if ((args.reference as { family: string }).family === "site_area") {
+              return { ...fact, reference: { world: "archive", family: "site_area", id: "area" },
+                subject: { world: "archive", id: "workshop" }, description: "Site area: 12 ha", corrects: "prior-area" };
+            }
+            return fact;
+          }
           if (command === "workspace_semantic_fact_annotations") return [{
             id: "note", claim: { world: "archive", id: "claim" }, recorded_at: 6,
           }];
@@ -2344,9 +2350,17 @@ test("classification authoring and evidence backlinks use historical author comm
   await expect(studio.locator("[data-semantic-detail]")).toContainText("evidence folio");
   await expect(studio.locator("[data-semantic-detail]")).toContainText("descriptor tag @ revision 3 (state 2, branch main)");
   await expect(studio.locator("[data-semantic-detail]")).toContainText("recorded on branch main");
+  await expect(studio.locator("[data-semantic-detail]")).not.toContainText("corrects fact");
+  await studio.getByLabel("Fact family", { exact: true }).selectOption("site_area");
+  await studio.getByLabel("Stable fact identity").fill("area");
+  await studio.getByRole("button", { name: "Resolve fact", exact: true }).click();
+  await expect(studio.locator("[data-semantic-detail]")).toContainText("corrects fact prior-area");
   if (process.env.ATLAS_CAPTURE_PHASE3 === "1") {
     const timestamp = new Date().toISOString().slice(0, 19).replace("T", "_").replaceAll(":", "-") + "Z";
-    await studio.locator("[data-semantic-detail]").screenshot({ path: "../../Development-Screenshots/" + timestamp + "_phase-03_query_mock-native-semantic-provenance_01.png", animations: "disabled" });
+    await studio.locator("[data-semantic-detail]").screenshot({
+      path: "../../Development-Screenshots/" + timestamp + "_phase-03_semantic_mock-native-annotation-provenance_01.png",
+      animations: "disabled",
+    });
   }
   await studio.getByRole("button", { name: "Select fact for annotation" }).click();
   await expect(studio.getByLabel("Annotation fact UUID")).toHaveValue("classification");
