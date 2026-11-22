@@ -32,6 +32,7 @@ struct Edge {
 enum PlatformSmoke {
     None,
     Scene,
+    Ontology,
     Renderer { require_gpu: bool },
 }
 
@@ -40,6 +41,7 @@ struct PlatformScene {
     target: &'static str,
     smoke: bool,
     renderer_smoke: bool,
+    ontology_smoke: bool,
     scene: Scene,
 }
 
@@ -50,6 +52,7 @@ struct SmokeObservation {
     history_verified: bool,
     webgpu: WebGpuStatus,
     benchmark: Option<BenchmarkObservation>,
+    ontology_verified: Option<bool>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -109,6 +112,7 @@ fn load_scene(mode: PlatformSmoke) -> Result<PlatformScene, &'static str> {
         target: std::env::consts::OS,
         smoke: !matches!(mode, PlatformSmoke::None),
         renderer_smoke: matches!(mode, PlatformSmoke::Renderer { .. }),
+        ontology_smoke: matches!(mode, PlatformSmoke::Ontology),
         scene,
     })
 }
@@ -131,6 +135,7 @@ fn complete_platform_smoke(
                 && observation.canvas2d_verified
                 && observation.history_verified
         }
+        PlatformSmoke::Ontology => observation.ontology_verified == Some(true),
         PlatformSmoke::Renderer { require_gpu } => observation
             .benchmark
             .as_ref()
@@ -174,7 +179,9 @@ fn main() {
         return;
     }
     let has_flag = |name| std::env::args_os().any(|arg| arg == name);
-    let smoke = if has_flag("--renderer-smoke") {
+    let smoke = if has_flag("--ontology-smoke") {
+        PlatformSmoke::Ontology
+    } else if has_flag("--renderer-smoke") {
         PlatformSmoke::Renderer {
             require_gpu: has_flag("--require-gpu"),
         }
@@ -188,7 +195,11 @@ fn main() {
     tauri::Builder::default()
         .manage(smoke)
         .manage(history)
-        .setup(|app| {
+        .setup(move |app| {
+            if matches!(smoke, PlatformSmoke::Ontology) {
+                app.manage(workspace::AuthorWorkspace::ontology_smoke_fixture()?);
+                return Ok(());
+            }
             let directory = app.path().app_data_dir()?;
             std::fs::create_dir_all(&directory)?;
             app.manage(workspace::AuthorWorkspace::open(

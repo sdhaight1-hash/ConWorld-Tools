@@ -485,6 +485,81 @@ fn commit(store: &mut Store, world: &World, changes: Vec<Change>) -> Result<(), 
 }
 
 impl AuthorWorkspace {
+    /// Explicit smoke-only fixture; never writes to a user's normal database.
+    pub fn ontology_smoke_fixture() -> Result<Self, atlas_store::Error> {
+        let workspace = Self::open(":memory:")?;
+        {
+            let mut store = workspace.store.lock().expect("new workspace lock");
+            let world = store.create_world("Ontology verification", Scope::Author)?;
+            let records = [
+                (
+                    1,
+                    "Field register",
+                    ObjectData::Source {
+                        citation: "Survey folio 3".into(),
+                    },
+                ),
+                (
+                    2,
+                    "Cultural vocabulary",
+                    ObjectData::Definition {
+                        definition: Definition::Tag,
+                        description: "Cultural vocabulary".into(),
+                    },
+                ),
+                (
+                    3,
+                    "Aetheric drive",
+                    ObjectData::Definition {
+                        definition: Definition::Tag,
+                        description: "World-specific technology category".into(),
+                    },
+                ),
+                (
+                    4,
+                    "Recorded site area",
+                    ObjectData::Definition {
+                        definition: Definition::Tag,
+                        description: "Source-backed survey".into(),
+                    },
+                ),
+                (10, "Estuary culture", ObjectData::Concept),
+                (11, "Estuary speech", ObjectData::Concept),
+                (12, "Amber", ObjectData::Concept),
+                (13, "Drive One", ObjectData::Concept),
+                (14, "Drive Two", ObjectData::Concept),
+                (15, "Workshop", ObjectData::Place),
+            ];
+            store.apply(&Command {
+                world: world.id,
+                branch: world.main,
+                expected: world.revision,
+                id: Uuid::new_v4(),
+                author: "Native test".into(),
+                rationale: "Seed isolated authoring task fixtures".into(),
+                scope: Scope::Author,
+                changes: records
+                    .into_iter()
+                    .map(|(id, label, data)| {
+                        Change::Create(
+                            ObjectRef {
+                                world: world.id,
+                                id: ObjectId(Uuid::from_u128(id)),
+                            },
+                            Record {
+                                label: label.into(),
+                                data,
+                                source: None,
+                                valid: ValidInterval::default(),
+                            },
+                        )
+                    })
+                    .collect(),
+            })?;
+        }
+        Ok(workspace)
+    }
+
     pub fn open(path: impl AsRef<Path>) -> Result<Self, atlas_store::Error> {
         Ok(Self {
             store: Mutex::new(Store::open(path)?),

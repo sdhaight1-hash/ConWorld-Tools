@@ -67,6 +67,7 @@ jobs:
         run: |
           ./apps/desktop/scripts/windows-platform-smoke.ps1 -Binary ./target/debug/atlas-desktop.exe
           ./apps/desktop/scripts/windows-platform-smoke.ps1 -Binary ./target/debug/atlas-desktop.exe -RendererBenchmark
+          ./apps/desktop/scripts/windows-platform-smoke.ps1 -Binary ./target/debug/atlas-desktop.exe -Ontology
       - name: Browser fallback smoke tests
         if: runner.os == 'Linux'
         working-directory: apps/desktop

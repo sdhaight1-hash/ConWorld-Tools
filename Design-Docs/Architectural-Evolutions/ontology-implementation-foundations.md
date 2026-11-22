@@ -87,3 +87,7 @@ Schema 37 was assigned independently by #67 and #73 before release. Store open a
 ## Schema-36 migration and failure rollback regression
 
 Added a representative reconstructed schema-36 fixture using the original 0032 registry DDL and 0035 network DDL while preserving seeded world, person, source, family-house, membership and accepted-parentage records. Tests inspect the old archive, restore to a separate destination, compare exact historical fact UUIDs/payloads and person version, verify no classification backfill, and demonstrate that a deliberately orphaned object fails migration without changing the old schema version or creating the new tables. This is a reconstructed fixture, not a separately executed old binary or a production archive; exact-head CI remains required.
+
+## Isolated native desktop ontology smoke
+
+The combined candidate adds opt-in --ontology-smoke to the existing native Windows WebView smoke workflow. Its independent in-memory world uses fixed source, descriptor, Concept and Place fixtures, never the author's normal database. It exercises real author studio form submissions and Rust IPC for culture/language, two technology Concepts sharing a world-specific descriptor and material identity, known zero, same-interval correction, separate dated unknown, historical replay, typed query and source backlink rendering. Success is reported by the existing native smoke report; failure is a nonzero exit. This is automated interaction (not a human timing study). Actual CI result and chronological native screenshots remain unverified.

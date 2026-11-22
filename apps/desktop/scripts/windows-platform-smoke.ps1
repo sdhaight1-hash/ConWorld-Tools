@@ -1,13 +1,16 @@
 param(
     [Parameter(Mandatory = $true)][string] $Binary,
     [switch] $RendererBenchmark,
+    [switch] $Ontology,
     [switch] $RequireGpu
 )
 
 $ErrorActionPreference = "Stop"
 $exe = (Resolve-Path $Binary).Path
 if ($RequireGpu -and !$RendererBenchmark) { throw "-RequireGpu needs -RendererBenchmark." }
+if ($Ontology -and $RendererBenchmark) { throw "Choose one smoke mode." }
 $arguments = @("--platform-smoke")
+if ($Ontology) { $arguments = @("--ontology-smoke") }
 if ($RendererBenchmark) {
     $arguments = @("--renderer-smoke")
     if ($RequireGpu) { $arguments += "--require-gpu" }
@@ -53,6 +56,8 @@ try {
     }
     if ($RendererBenchmark) {
         if (!$report.observation.benchmark) { throw "Expected a native renderer benchmark report." }
+    } elseif ($Ontology) {
+        if (!$report.observation.ontology_verified) { throw "Native ontology authoring verification failed." }
     } elseif (!$report.observation.scene_verified -or !$report.observation.canvas2d_verified -or
               !$report.observation.history_verified) {
         throw "Windows scene, Canvas2D or history verification failed."
