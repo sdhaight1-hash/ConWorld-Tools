@@ -34,11 +34,13 @@ type SearchResult = { revision: number; truncated: boolean; next_cursor?: string
 type Predicate = { op: "contains" | "exact" | "exact_alias" | "full_text" | "claim_full_text"; text: string } |
   { op: "object_kind"; kind: string } |
   { op: "classified_as"; profile: string } |
+  { op: "classified_by"; descriptor_id: string } |
   { op: "has_source"; source_id: string } |
   { op: "and" | "or"; filters: Predicate[] } |
   { op: "not"; filter: Predicate };
 export type ParameterValue = { type: "text" | "object_kind" | "concept_profile"; value: string } |
-  { type: "source"; world_id: string; source_id: string };
+  { type: "source"; world_id: string; source_id: string } |
+  { type: "descriptor"; world_id: string; descriptor_id: string };
 type QueryParameter = { name: string; default: ParameterValue };
 export type SavedQuery = { id: string; name: string; mode: "contains" | "exact" | "alias" | "fulltext" | "claimtext" | "composite";
   term: string; predicate?: Predicate | null; limit: number; recorded_at: number; parameters?: QueryParameter[] };
@@ -1118,9 +1120,9 @@ export async function showAuthorWorkspace(
         }
       } else {
         control = document.createElement("input");
-        control.maxLength = parameter.default.type === "source" ? 36 : 800;
+        control.maxLength = parameter.default.type === "source" || parameter.default.type === "descriptor" ? 36 : 800;
       }
-      control.value = parameter.default.type === "source" ? parameter.default.source_id : parameter.default.value;
+      control.value = parameter.default.type === "source" ? parameter.default.source_id : parameter.default.type === "descriptor" ? parameter.default.descriptor_id : parameter.default.value;
       parameterInputs.set(parameter.name, control);
       label.append(control);
       parameterFields.append(label);
@@ -1148,6 +1150,7 @@ export async function showAuthorWorkspace(
         const value = parameterInputs.get(parameter.name)?.value ?? "";
         return { name: parameter.name, value: parameter.default.type === "source"
           ? { type: "source", world_id: snapshot!.world.id, source_id: value }
+          : parameter.default.type === "descriptor" ? { type: "descriptor", world_id: snapshot!.world.id, descriptor_id: value }
           : { type: parameter.default.type, value } };
       });
       const request = {
@@ -1230,6 +1233,7 @@ export async function showAuthorWorkspace(
     const claimPhrase = value(compositeForm, "claim_phrase").trim();
     const kind = value(compositeForm, "kind");
     const profile = value(compositeForm, "profile");
+    const descriptor = value(compositeForm, "descriptor").trim();
     const source = value(compositeForm, "source").trim();
     if (text) filters.push({ op: "contains", text });
     if (alias) filters.push({ op: "exact_alias", text: alias });
@@ -1237,6 +1241,7 @@ export async function showAuthorWorkspace(
     if (claimPhrase) filters.push({ op: "claim_full_text", text: claimPhrase });
     if (kind) filters.push({ op: "object_kind", kind });
     if (profile) filters.push({ op: "classified_as", profile });
+    if (descriptor) filters.push({ op: "classified_by", descriptor_id: descriptor });
     if (source) filters.push({ op: "has_source", source_id: source });
     if (!filters.length) return null;
     let predicate: Predicate = filters.length === 1 ? filters[0] : {

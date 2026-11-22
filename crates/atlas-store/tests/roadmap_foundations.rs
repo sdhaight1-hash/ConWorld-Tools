@@ -3099,9 +3099,14 @@ fn classifications_preserve_pins_and_branch_local_withdrawals() -> Result<(), Er
     ));
     let before = author;
     let profile_query = query(QueryFilter::ClassifiedAs(ConceptProfile::Language));
+    let descriptor_query = query(QueryFilter::ClassifiedBy(definition));
     assert!(store.execute_query(&profile_query, before)?.rows.is_empty());
     let assignment = store.record_classification(author, input, Uuid::new_v4())?;
     author.revision = AuthorRevision(4);
+    assert_eq!(
+        store.execute_query(&descriptor_query, author)?.rows[0].object,
+        concept
+    );
     let fact_ref = atlas_store::semantic::FactRef {
         world: world.id,
         family: atlas_store::semantic::FactFamily::Classification,
@@ -3216,6 +3221,7 @@ fn classifications_preserve_pins_and_branch_local_withdrawals() -> Result<(), Er
         ..inherited
     };
     assert!(store.execute_query(&profile_query, after)?.rows.is_empty());
+    assert!(store.execute_query(&descriptor_query, after)?.rows.is_empty());
     assert!(store.resolve_semantic_fact(fact_ref, after)?.is_none());
     assert!(store.semantic_fact_backlinks(concept, after)?.is_empty());
     assert!(

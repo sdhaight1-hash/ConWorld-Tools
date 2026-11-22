@@ -1138,6 +1138,7 @@ impl Store {
             QueryFilter::ExactAlias(_)
             | QueryFilter::Kind(_)
             | QueryFilter::ClassifiedAs(_)
+            | QueryFilter::ClassifiedBy(_)
             | QueryFilter::HasSource(_)
             | QueryFilter::And(_)
             | QueryFilter::Or(_)

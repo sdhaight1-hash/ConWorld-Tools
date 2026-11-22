@@ -36,6 +36,7 @@ pub enum QueryFilter {
     ClaimFullTextPhrase(String),
     Kind(ObjectKindFilter),
     ClassifiedAs(ConceptProfile),
+    ClassifiedBy(ObjectRef),
     HasSource(ObjectRef),
     And(Vec<QueryFilter>),
     Or(Vec<QueryFilter>),
@@ -126,6 +127,7 @@ pub enum PredicateInput {
     ClaimFullText { text: String },
     ObjectKind { kind: ObjectKindFilter },
     ClassifiedAs { profile: ConceptProfile },
+    ClassifiedBy { descriptor_id: String },
     HasSource { source_id: String },
     And { filters: Vec<PredicateInput> },
     Or { filters: Vec<PredicateInput> },
@@ -153,6 +155,13 @@ impl PredicateInput {
             Self::ClaimFullText { text } => QueryFilter::ClaimFullTextPhrase(text),
             Self::ObjectKind { kind } => QueryFilter::Kind(kind),
             Self::ClassifiedAs { profile } => QueryFilter::ClassifiedAs(profile),
+            Self::ClassifiedBy { descriptor_id } => QueryFilter::ClassifiedBy(ObjectRef {
+                world,
+                id: crate::ObjectId(
+                    Uuid::parse_str(&descriptor_id)
+                        .map_err(|_| Error::InvalidInput("predicate descriptor ID"))?,
+                ),
+            }),
             Self::HasSource { source_id } => QueryFilter::HasSource(ObjectRef {
                 world,
                 id: crate::ObjectId(
@@ -197,6 +206,9 @@ impl PredicateInput {
             QueryFilter::ClaimFullTextPhrase(text) => Self::ClaimFullText { text: text.clone() },
             QueryFilter::Kind(kind) => Self::ObjectKind { kind: *kind },
             QueryFilter::ClassifiedAs(profile) => Self::ClassifiedAs { profile: *profile },
+            QueryFilter::ClassifiedBy(descriptor) => Self::ClassifiedBy {
+                descriptor_id: descriptor.id.0.to_string(),
+            },
             QueryFilter::HasSource(source) => Self::HasSource {
                 source_id: source.id.0.to_string(),
             },
@@ -258,6 +270,7 @@ pub enum ParameterValue {
     Text { value: String },
     ObjectKind { value: ObjectKindFilter },
     ConceptProfile { value: ConceptProfile },
+    Descriptor { world_id: String, descriptor_id: String },
     Source { world_id: String, source_id: String },
 }
 
@@ -317,6 +330,13 @@ fn visit_parameter_leaves(
             "concept_profile",
             ParameterValue::ConceptProfile { value: *profile },
         ),
+        QueryFilter::ClassifiedBy(descriptor) => (
+            "descriptor",
+            ParameterValue::Descriptor {
+                world_id: descriptor.world.0.to_string(),
+                descriptor_id: descriptor.id.0.to_string(),
+            },
+        ),
         QueryFilter::HasSource(source) => (
             "source",
             ParameterValue::Source {
@@ -348,6 +368,21 @@ fn visit_parameter_leaves(
         (QueryFilter::Kind(kind), ParameterValue::ObjectKind { value }) => *kind = value,
         (QueryFilter::ClassifiedAs(profile), ParameterValue::ConceptProfile { value }) => {
             *profile = value;
+        }
+        (
+            QueryFilter::ClassifiedBy(descriptor),
+            ParameterValue::Descriptor {
+                world_id,
+                descriptor_id,
+            },
+        ) => {
+            if Uuid::parse_str(&world_id).ok() != Some(descriptor.world.0) {
+                return Err(Error::WrongWorld);
+            }
+            descriptor.id = crate::ObjectId(
+                Uuid::parse_str(&descriptor_id)
+                    .map_err(|_| Error::InvalidInput("parameter descriptor ID"))?,
+            );
         }
         (
             QueryFilter::HasSource(source),
@@ -609,6 +644,7 @@ impl Store {
             &spec.filter,
             QueryFilter::Kind(_)
                 | QueryFilter::ClassifiedAs(_)
+                | QueryFilter::ClassifiedBy(_)
                 | QueryFilter::HasSource(_)
                 | QueryFilter::And(_)
                 | QueryFilter::Or(_)
@@ -685,6 +721,7 @@ impl Store {
             }
             QueryFilter::Kind(_)
             | QueryFilter::ClassifiedAs(_)
+                | QueryFilter::ClassifiedBy(_)
             | QueryFilter::HasSource(_)
             | QueryFilter::And(_)
             | QueryFilter::Or(_)
@@ -750,6 +787,11 @@ pub(crate) fn validate_predicate(
             search_label(label)?;
         }
         QueryFilter::Kind(_) | QueryFilter::ClassifiedAs(_) => {}
+        QueryFilter::ClassifiedBy(descriptor) => {
+            if descriptor.world != world {
+                return Err(Error::WrongWorld);
+            }
+        }
         QueryFilter::HasSource(source) => {
             if source.world != world {
                 return Err(Error::WrongWorld);
@@ -798,6 +840,7 @@ struct PredicatePlan<'a> {
     rows: HashMap<ObjectRef, Version>,
     sources: HashSet<ObjectRef>,
     profiles: HashMap<ConceptProfile, HashSet<ObjectRef>>,
+    descriptors: HashMap<ObjectRef, HashSet<ObjectRef>>,
     matched: usize,
 }
 
@@ -834,6 +877,27 @@ impl<'a> PredicatePlan<'a> {
                     self.rows.insert(row.object, row);
                 }
                 self.indexed.insert(key, ids.clone());
+                Ok(Some(ids))
+            }
+            QueryFilter::ClassifiedBy(descriptor) => {
+                if let Some(ids) = self.descriptors.get(descriptor) {
+                    return Ok(Some(ids.clone()));
+                }
+                let assignments = store.classifications_by_descriptor(view, *descriptor)?;
+                self.matched += assignments.len();
+                if self.matched > INDEX_BUDGET {
+                    return Err(Error::QueryBudgetExceeded);
+                }
+                let mut ids = HashSet::new();
+                for assignment in assignments {
+                    store.check_query_control()?;
+                    let object = assignment.input.subject;
+                    if let Some(row) = store.get_object(object, view)? {
+                        ids.insert(object);
+                        self.rows.insert(object, row);
+                    }
+                }
+                self.descriptors.insert(*descriptor, ids.clone());
                 Ok(Some(ids))
             }
             QueryFilter::ClassifiedAs(profile) => {
@@ -909,6 +973,10 @@ fn predicate_matches(filter: &QueryFilter, version: &Version, plan: &PredicatePl
             version.record.label.to_lowercase() == text.trim().to_lowercase()
         }
         QueryFilter::Kind(kind) => ObjectKindFilter::from(&version.record.data) == *kind,
+        QueryFilter::ClassifiedBy(descriptor) => plan
+            .descriptors
+            .get(descriptor)
+            .is_some_and(|ids| ids.contains(&version.object)),
         QueryFilter::ClassifiedAs(profile) => plan
             .profiles
             .get(profile)

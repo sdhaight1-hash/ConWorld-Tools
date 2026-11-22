@@ -212,6 +212,63 @@ impl Store {
         Ok(())
     }
 
+    /// Search a stable descriptor identity, keeping every result's original version pin.
+    pub fn classifications_by_descriptor(
+        &self,
+        view: ViewContext,
+        descriptor: ObjectRef,
+    ) -> Result<Vec<Classification>, Error> {
+        require_author(view.scope)?;
+        if descriptor.world != view.world {
+            return Err(Error::WrongWorld);
+        }
+        self.check_query_control()?;
+        let tx = self.conn.unchecked_transaction()?;
+        metadata_world(&tx, view, false)?;
+        let Some(version) =
+            resolve_object(&tx, descriptor, view.branch, view.revision, view.day)?
+        else {
+            return Ok(Vec::new());
+        };
+        if !matches!(
+            version.record.data,
+            ObjectData::Definition {
+                definition: Definition::Tag,
+                ..
+            }
+        ) {
+            return Err(Error::WrongKind);
+        }
+        let mut statement = tx.prepare(&format!(
+            "{METADATA_CTE} {ACTIVE}
+             SELECT id,subject_id,profile,descriptor_id,descriptor_branch,descriptor_state_revision,
+                    descriptor_revision,source_id,starts_at,ends_before,recorded_revision,branch_id
+             FROM active_classification
+             WHERE descriptor_id=?5 AND starts_at<=?4 AND (ends_before IS NULL OR ends_before>?4)
+             ORDER BY id LIMIT 2001"
+        ))?;
+        let mut rows = statement.query(params![
+            view.world.0.as_bytes(),
+            view.branch.0.as_bytes(),
+            view.revision.0,
+            view.day.0,
+            descriptor.id.0.as_bytes()
+        ])?;
+        let mut result = Vec::new();
+        let mut scanned = 0;
+        while let Some(row) = rows.next()? {
+            self.check_query_control()?;
+            scanned += 1;
+            if scanned > 2000 {
+                return Err(Error::QueryBudgetExceeded);
+            }
+            if let Some(assignment) = read_classification(&tx, view, row)? {
+                result.push(assignment);
+            }
+        }
+        Ok(result)
+    }
+
     /// Exact subject lookup or bounded profile discovery. No reader projection.
     pub fn classifications(
         &self,

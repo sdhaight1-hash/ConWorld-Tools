@@ -59,3 +59,7 @@ Schema 40 adds source/descriptor backlink indexes. Archive inspection and migrat
 ## Desktop fact navigation and capability reconciliation
 
 Registered the classification and semantic reference commands in the Tauri handler, generated app manifest and main-window capability together (fixing the earlier launch-config CI failure). The existing author network studio now supports evidence/identity backlinks and exact family/UUID resolution, preserving recorded author rationale and source. Branch changes clear results; no public reader projection. Added Playwright frontend command-contract coverage; it is mock-native, not genuine desktop runtime evidence. CI remains required.
+
+## Descriptor identity discovery
+
+Verified baseline cd7b917: all six Windows/Ubuntu CI checks passed. Added descriptor-ID classification predicates to the shared query planner, saved query wire shape and runtime parameter contract; existing assignments retain their historical version pins even when the definition label changes. Author-only descriptor lookup uses the normalized index and the same visibility/budget rules as profile lookup. Desktop combined-query controls expose the stable descriptor ID. This is metadata categorization, not a new arbitrary field editor.
