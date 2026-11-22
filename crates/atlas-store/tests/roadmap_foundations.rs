@@ -3101,6 +3101,24 @@ fn classifications_preserve_pins_and_branch_local_withdrawals() -> Result<(), Er
     assert!(store.execute_query(&profile_query, before)?.rows.is_empty());
     let assignment = store.record_classification(author, input, Uuid::new_v4())?;
     author.revision = AuthorRevision(4);
+    let fact_ref = atlas_store::semantic::FactRef {
+        world: world.id,
+        family: atlas_store::semantic::FactFamily::Classification,
+        id: assignment,
+    };
+    let fact = store.resolve_semantic_fact(fact_ref, author)?.unwrap();
+    assert_eq!(
+        fact.data,
+        atlas_store::semantic::SemanticFactData::Classification(input)
+    );
+    for target in [concept, definition, id(&world, 9)] {
+        assert!(
+            store
+                .semantic_fact_backlinks(target, author)?
+                .contains(&fact)
+        );
+    }
+    assert!(store.resolve_semantic_fact(fact_ref, before)?.is_none());
     assert_eq!(
         store.execute_query(&profile_query, author)?.rows[0].object,
         concept
@@ -3197,6 +3215,8 @@ fn classifications_preserve_pins_and_branch_local_withdrawals() -> Result<(), Er
         ..inherited
     };
     assert!(store.execute_query(&profile_query, after)?.rows.is_empty());
+    assert!(store.resolve_semantic_fact(fact_ref, after)?.is_none());
+    assert!(store.semantic_fact_backlinks(concept, after)?.is_empty());
     assert!(
         store
             .classifications(after, Some(concept), None)?

@@ -2,7 +2,7 @@
 use super::*;
 use crate::semantic::{Classification, ClassificationInput, ConceptProfile, DefinitionPin};
 
-const ACTIVE: &str = "
+pub(super) const ACTIVE: &str = "
 , active_classification AS (
     SELECT p.*,r.branch_id FROM concept_classifications p
     JOIN author_revisions r ON r.world_id=p.world_id AND r.revision=p.recorded_revision
@@ -252,48 +252,56 @@ impl Store {
         ])?;
         let mut result = Vec::new();
         let mut scanned = 0;
-        let object = |bytes: [u8; 16]| ObjectRef {
-            world: view.world,
-            id: ObjectId(Uuid::from_bytes(bytes)),
-        };
-        let visible =
-            |endpoint| resolve_object(&tx, endpoint, view.branch, view.revision, view.day);
         while let Some(row) = rows.next()? {
             self.check_query_control()?;
             scanned += 1;
             if scanned > 2000 {
                 return Err(Error::QueryBudgetExceeded);
             }
-            let subject = object(row.get(1)?);
-            let source = object(row.get(7)?);
-            let descriptor = object(row.get(3)?);
-            if visible(subject)?.is_none()
-                || visible(source)?.is_none()
-                || visible(descriptor)?.is_none()
-            {
-                continue;
+            if let Some(assignment) = read_classification(&tx, view, row)? {
+                result.push(assignment);
             }
-            result.push(Classification {
-                id: Uuid::from_bytes(row.get(0)?),
-                input: ClassificationInput {
-                    subject,
-                    profile: ConceptProfile::parse(&row.get::<_, String>(2)?)?,
-                    descriptor: DefinitionPin {
-                        version: VersionRef {
-                            object: descriptor,
-                            branch: BranchId(Uuid::from_bytes(row.get(4)?)),
-                            state_revision: AuthorRevision(row.get(5)?),
-                            recorded_at: AuthorRevision(row.get(6)?),
-                        },
-                    },
-                    source,
-                    starts_at: WorldDay(row.get(8)?),
-                    ends_before: row.get::<_, Option<i64>>(9)?.map(WorldDay),
-                },
-                recorded_at: AuthorRevision(row.get(10)?),
-                source_branch: BranchId(Uuid::from_bytes(row.get(11)?)),
-            });
         }
         Ok(result)
     }
+}
+
+/// Shared payload decoding and historical endpoint checks for point and list reads.
+pub(super) fn read_classification(
+    conn: &Connection,
+    view: ViewContext,
+    row: &rusqlite::Row<'_>,
+) -> Result<Option<Classification>, Error> {
+    let object = |bytes: [u8; 16]| ObjectRef {
+        world: view.world,
+        id: ObjectId(Uuid::from_bytes(bytes)),
+    };
+    let subject = object(row.get(1)?);
+    let source = object(row.get(7)?);
+    let descriptor = object(row.get(3)?);
+    for endpoint in [subject, source, descriptor] {
+        if resolve_object(conn, endpoint, view.branch, view.revision, view.day)?.is_none() {
+            return Ok(None);
+        }
+    }
+    Ok(Some(Classification {
+        id: Uuid::from_bytes(row.get(0)?),
+        input: ClassificationInput {
+            subject,
+            profile: ConceptProfile::parse(&row.get::<_, String>(2)?)?,
+            descriptor: DefinitionPin {
+                version: VersionRef {
+                    object: descriptor,
+                    branch: BranchId(Uuid::from_bytes(row.get(4)?)),
+                    state_revision: AuthorRevision(row.get(5)?),
+                    recorded_at: AuthorRevision(row.get(6)?),
+                },
+            },
+            source,
+            starts_at: WorldDay(row.get(8)?),
+            ends_before: row.get::<_, Option<i64>>(9)?.map(WorldDay),
+        },
+        recorded_at: AuthorRevision(row.get(10)?),
+        source_branch: BranchId(Uuid::from_bytes(row.get(11)?)),
+    }))
 }

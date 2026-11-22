@@ -9,6 +9,7 @@ use uuid::Uuid;
 pub enum FactFamily {
     Network,
     Parentage,
+    Classification,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
@@ -50,6 +51,7 @@ impl SemanticRef {
 pub enum SemanticFactData {
     Network(crate::network::NetworkInput),
     Parentage(crate::genealogy::Parentage),
+    Classification(ClassificationInput),
 }
 
 /// The original author revision and branch are retained even on inherited reads.
