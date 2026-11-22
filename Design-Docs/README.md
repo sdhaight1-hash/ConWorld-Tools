@@ -70,6 +70,8 @@ See the [Phase Zero verification log](Phase-0-Verification.md) for the desktop a
 
 ## Review notes (non-normative)
 
+- [World Bible-first UX direction — 2026-11-22](World-Bible-UX-Direction-2026-11-22.md): consolidated owner discussion, audit mapping and isolated working concept; preserves the three underlying representations with contextual tools instead of mandatory separate studios.
+
 - [Article and entry UX concepts — 2026-11-22](Article-and-Entry-UX-Concepts-2026-11-22.md): owner-requested discussion record covering responsive article composition, visual archetypes, reusable elements, Write/Design/Bind modes, styling, collections and reader interactions; proposed sequencing and acceptance scenarios, not a normative change.
 
 - [Entry ontology review — 2026-11-22](Entry-Ontology-Review-2026-11-22.md): actual registry parity, existing-scope gaps and proposed worldbuilding taxonomy; recommendations only, no feature scope or production changes.
