@@ -1,6 +1,8 @@
 //! Source-backed site measurements; containment and geometry remain independent.
 use super::*;
-use crate::semantic::{AreaReading, AreaTest, AreaUnit, DefinitionPin, SiteAreaFact, SiteAreaInput};
+use crate::semantic::{
+    AreaReading, AreaTest, AreaUnit, DefinitionPin, SiteAreaFact, SiteAreaInput,
+};
 
 pub(super) const ACTIVE: &str = "
 , active_site_area AS (
@@ -84,10 +86,20 @@ impl Store {
             }
         }
         let duplicate: bool = tx.query_row(
-            &format!("{METADATA_CTE} {ACTIVE} SELECT EXISTS(SELECT 1 FROM active_site_area
+            &format!(
+                "{METADATA_CTE} {ACTIVE} SELECT EXISTS(SELECT 1 FROM active_site_area
                 WHERE place_id=?5 AND (?6 IS NULL OR starts_at<?6)
-                AND (ends_before IS NULL OR ends_before>?4) AND (?7 IS NULL OR id<>?7))"),
-            params![view.world.0.as_bytes(),view.branch.0.as_bytes(),view.revision.0,input.starts_at.0,input.place.id.0.as_bytes(),input.ends_before.map(|day| day.0),corrects.map(|id| *id.as_bytes())],
+                AND (ends_before IS NULL OR ends_before>?4) AND (?7 IS NULL OR id<>?7))"
+            ),
+            params![
+                view.world.0.as_bytes(),
+                view.branch.0.as_bytes(),
+                view.revision.0,
+                input.starts_at.0,
+                input.place.id.0.as_bytes(),
+                input.ends_before.map(|day| day.0),
+                corrects.map(|id| *id.as_bytes())
+            ],
             |row| row.get(0),
         )?;
         if duplicate {
@@ -104,7 +116,12 @@ impl Store {
         if let Some(old) = corrects {
             tx.execute(
                 "INSERT INTO site_area_withdrawals VALUES(?1,?2,?3,?4)",
-                params![view.world.0.as_bytes(), view.branch.0.as_bytes(), old.as_bytes(), revision],
+                params![
+                    view.world.0.as_bytes(),
+                    view.branch.0.as_bytes(),
+                    old.as_bytes(),
+                    revision
+                ],
             )?;
         }
         let id = Uuid::new_v4();
@@ -216,13 +233,9 @@ impl Store {
                 if !seen.insert(fact.input.place) {
                     return Err(Error::Integrity("overlapping site area".into()));
                 }
-                if let Some(version) = resolve_object(
-                    &tx,
-                    fact.input.place,
-                    view.branch,
-                    view.revision,
-                    view.day,
-                )? {
+                if let Some(version) =
+                    resolve_object(&tx, fact.input.place, view.branch, view.revision, view.day)?
+                {
                     result.push(version);
                 }
             }
@@ -248,7 +261,10 @@ pub(super) fn read_site_area(
             return Ok(None);
         }
     }
-    let reading = match (row.get::<_, Option<i64>>(7)?, row.get::<_, Option<String>>(8)?) {
+    let reading = match (
+        row.get::<_, Option<i64>>(7)?,
+        row.get::<_, Option<String>>(8)?,
+    ) {
         (None, None) => AreaReading::Unknown,
         (Some(amount), Some(unit)) if amount >= 0 => AreaReading::Known {
             amount,

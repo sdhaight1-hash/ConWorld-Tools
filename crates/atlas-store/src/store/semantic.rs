@@ -106,7 +106,9 @@ impl Store {
                  FROM active_parentage p JOIN author_revisions r
                  ON r.world_id=p.world_id AND r.revision=p.recorded_revision"
             }
-            FactFamily::Classification | FactFamily::SiteArea => unreachable!("handled by typed fact resolver"),
+            FactFamily::Classification | FactFamily::SiteArea => {
+                unreachable!("handled by typed fact resolver")
+            }
         };
         let mut statement = conn.prepare(&format!(
             "{METADATA_CTE} {select}
@@ -176,7 +178,9 @@ impl Store {
                     accepted: true,
                 })
             }
-            FactFamily::Classification | FactFamily::SiteArea => unreachable!("handled by typed fact resolver"),
+            FactFamily::Classification | FactFamily::SiteArea => {
+                unreachable!("handled by typed fact resolver")
+            }
         };
         let result = ResolvedFact {
             reference,

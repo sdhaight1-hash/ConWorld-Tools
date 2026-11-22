@@ -3585,7 +3585,9 @@ fn site_area_preserves_unknown_zero_units_corrections_and_archive() -> Result<()
     use atlas_store::{
         archive::restore_archive,
         network::IdentityKind,
-        semantic::{AreaReading, AreaTest, AreaUnit, DefinitionPin, FactFamily, FactRef, SiteAreaInput},
+        semantic::{
+            AreaReading, AreaTest, AreaUnit, DefinitionPin, FactFamily, FactRef, SiteAreaInput,
+        },
     };
     let dir = tempfile::tempdir()?;
     let mut store = Store::open(dir.path().join("source.sqlite"))?;
@@ -3697,10 +3699,7 @@ fn site_area_preserves_unknown_zero_units_corrections_and_archive() -> Result<()
         amount: 120000,
         unit: AreaUnit::SquareMetre,
     }));
-    assert_eq!(
-        store.execute_query(&squared, author)?.rows[0].object,
-        place
-    );
+    assert_eq!(store.execute_query(&squared, author)?.rows[0].object, place);
     let reference = FactRef {
         world: world.id,
         family: FactFamily::SiteArea,
