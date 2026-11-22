@@ -2499,6 +2499,7 @@ impl NetworkContext {
 pub struct SemanticCandidate {
     id: String,
     label: String,
+    kind: ObjectKindFilter,
 }
 
 #[derive(Serialize)]
@@ -2510,6 +2511,9 @@ pub struct SemanticCandidates {
 fn semantic_selection_filter(kind: &str, phrase: String) -> Result<QueryFilter, String> {
     use atlas_store::semantic::ConceptProfile;
 
+    if kind == "entry" {
+        return Ok(QueryFilter::LabelContains(phrase));
+    }
     let profile = match kind {
         "culture" => Some(ConceptProfile::Culture),
         "language" => Some(ConceptProfile::Language),
@@ -2590,6 +2594,7 @@ pub async fn workspace_semantic_candidates(
             }
             rows.push(SemanticCandidate {
                 id: version.object.id.0.to_string(),
+                kind: ObjectKindFilter::from(&version.record.data),
                 label: version.record.label,
             });
         }
@@ -3387,6 +3392,10 @@ mod tests {
                 QueryFilter::Kind(ObjectKindFilter::Concept),
                 QueryFilter::FullTextPhrase("Estuary".into()),
             ])
+        );
+        assert_eq!(
+            semantic_selection_filter("entry", "Io".into()).unwrap(),
+            QueryFilter::LabelContains("Io".into())
         );
         assert!(semantic_selection_filter("unsupported", "Estuary".into()).is_err());
     }

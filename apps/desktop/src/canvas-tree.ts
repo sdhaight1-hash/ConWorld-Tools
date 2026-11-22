@@ -1,3 +1,4 @@
+import { appendReferencePicker } from "./reference-picker";
 import { objectKinds } from "./object-kinds";
 import { invoke } from "@tauri-apps/api/core";
 import type { Block, Binding } from "./entry-editor";
@@ -233,6 +234,7 @@ export function editCanvasTree(host: HTMLElement, original: Block, worldId: stri
       target.readOnly = !editable;
       target.addEventListener("input", () => { link.target.id = target.value.trim(); recordChange(); });
       field("Component link target", target);
+      if (editable) appendReferencePicker(controls, target, context, "entry", "component link target");
       const caption = document.createElement("input");
       caption.value = link.label;
       caption.required = true;
@@ -333,6 +335,11 @@ export function editCanvasTree(host: HTMLElement, original: Block, worldId: stri
           recordChange();
         });
         field("Query parameter " + parameter.name, input);
+        if (editable && input instanceof HTMLInputElement &&
+            (parameter.default.type === "source" || parameter.default.type === "descriptor")) {
+          appendReferencePicker(controls, input, context, parameter.default.type === "source" ? "source" : "tag",
+            "query parameter " + parameter.name);
+        }
       }
     }
     if (queryError) {

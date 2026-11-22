@@ -2588,3 +2588,78 @@ test("entry draft blocks view changes, retains a failed save and can be explicit
   await graph.locator("#nodes button[data-node=beatrice]").click();
   await expect(inspector.getByRole("button", { name: "Open character page" })).toBeVisible();
 });
+
+
+test("Canvas reference picker uses the pinned ontology search, preserves captions and ignores late results", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "reference-world", name: "Reference selection", revision: 4 };
+    const people = [{ id: "alice", label: "Alice" }];
+    const calls: { command: string; args: unknown }[] = [];
+    let finishOld: (() => void) | undefined;
+    Object.assign(window, { isTauri: true, __referenceCalls: calls, __finishOldReference: () => finishOld?.(), __TAURI_INTERNALS__: {
+      invoke: async (command: string, args: { day?: number; phrase?: string }) => {
+        if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+        if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+        if (command === "workspace_worlds") return [world];
+        if (command === "workspace_saved_queries") return [];
+        if (command === "workspace_snapshot") return { world, day: args.day ?? 0, view_revision: world.revision, people, relationships: [], events: [] };
+        if (command === "workspace_entry_layout") return null;
+        if (command === "workspace_cancel_query") { calls.push({ command, args }); return null; }
+        if (command === "workspace_semantic_candidates") {
+          calls.push({ command, args });
+          if (args.phrase === "Old") {
+            await new Promise<void>(resolve => { finishOld = resolve; });
+            return { rows: [{ id: "old", label: "Obsolete", kind: "concept" }], truncated: false };
+          }
+          return { rows: [{ id: "concept-one", label: "Amber", kind: "concept" },
+            { id: "place-two", label: "Amber", kind: "place" }], truncated: false };
+        }
+        if (command === "workspace_save_layout") {
+          calls.push({ command, args }); world.revision++; return null;
+        }
+        throw new Error("Unexpected mock command: " + command);
+      },
+    } });
+  });
+  await page.goto("/");
+  const graph = page.getByRole("region", { name: "Saved world graph" });
+  const inspector = graph.getByRole("complementary", { name: "Node inspector" });
+  await inspector.getByRole("button", { name: "Open character page" }).click();
+  await inspector.getByRole("textbox", { name: "Page text", exact: true }).fill("Amber research");
+  await inspector.getByRole("button", { name: "Add entry link" }).click();
+  await inspector.getByLabel("Link caption").fill("A carefully authored caption");
+  await inspector.getByText("Find link target", { exact: true }).click();
+  const picker = inspector.locator("[data-reference-picker]");
+  await picker.getByRole("searchbox", { name: "Search link target" }).fill("Old");
+  await picker.getByRole("button", { name: "Search references" }).click();
+  await expect(picker.getByText("Searching the selected author view…")).toBeVisible();
+  await picker.getByRole("searchbox", { name: "Search link target" }).fill("Amber");
+  await picker.getByRole("button", { name: "Search references" }).click();
+  await expect(picker.getByRole("button", { name: "Amber · concept · concept-one" })).toBeVisible();
+  await page.evaluate(() => (window as unknown as { __finishOldReference: () => void }).__finishOldReference());
+  await expect(picker.getByRole("button", { name: "Amber · place · place-two" })).toBeVisible();
+  await expect(picker.getByText("Obsolete", { exact: false })).toHaveCount(0);
+  if (process.env.ATLAS_CAPTURE_PHASE3 === "1") {
+    const timestamp = new Date().toISOString().slice(0, 19).replace("T", "_").replaceAll(":", "-") + "Z";
+    await inspector.screenshot({ path: "../../Development-Screenshots/" + timestamp + "_phase-04_canvas_mock-native-reference-picker_01.png", animations: "disabled" });
+  }
+  await picker.getByRole("button", { name: "Amber · concept · concept-one" }).click();
+  await expect(inspector.getByLabel("Link target identity")).toHaveValue("concept-one");
+  await expect(inspector.getByLabel("Link caption")).toHaveValue("A carefully authored caption");
+  await expect(inspector.getByLabel("Link target identity")).toBeFocused();
+  const calls = () => page.evaluate(() => (window as unknown as { __referenceCalls: { command: string; args: unknown }[] }).__referenceCalls);
+  const before = await calls();
+  expect(before.filter(call => call.command === "workspace_save_layout")).toHaveLength(0);
+  expect(before.filter(call => call.command === "workspace_semantic_candidates")).toMatchObject([
+    { args: { request: { world_id: "reference-world", day: 0, revision: 4 }, kind: "entry", phrase: "Old" } },
+    { args: { request: { world_id: "reference-world", day: 0, revision: 4 }, kind: "entry", phrase: "Amber" } },
+  ]);
+  expect(before.filter(call => call.command === "workspace_cancel_query")).toHaveLength(1);
+  await inspector.getByRole("button", { name: "Save page" }).click();
+  await expect(page.locator("#author-world-info")).toContainText("Author revision 5 / 5");
+  expect((await calls()).filter(call => call.command === "workspace_save_layout")).toMatchObject([
+    { args: { document: { root: { content: { Stack: [
+      expect.anything(), expect.anything(), { content: { ObjectLink: { target: { world: "reference-world", id: "concept-one" }, label: "A carefully authored caption" } } },
+    ] } } } } },
+  ]);
+});

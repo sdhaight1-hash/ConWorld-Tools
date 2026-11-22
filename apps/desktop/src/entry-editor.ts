@@ -1,3 +1,4 @@
+import { appendReferencePicker } from "./reference-picker";
 import { objectKinds } from "./object-kinds";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -90,7 +91,8 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
   for (const event of ["input", "change"]) {
     form.addEventListener(event, e => {
       const target = e.target;
-      if (target instanceof Element && (target.closest("[data-simple-fields]") || target === published)) draftChanged();
+      if (target instanceof Element && !target.closest("[data-reference-picker]") &&
+          (target.closest("[data-simple-fields]") || target === published)) draftChanged();
     });
   }
   discard.addEventListener("click", () => {
@@ -362,6 +364,7 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
         label.append(element);
         row.append(label);
       }
+      if (editable) appendReferencePicker(row, target, { world_id: worldId, day, revision }, "entry", "link target");
       const remove = document.createElement("button");
       remove.type = "button";
       remove.textContent = "Remove entry link";
@@ -422,6 +425,11 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
         control.value = selected.type === "source" ? selected.source_id : selected.type === "descriptor" ? selected.descriptor_id : selected.value;
         label.append(control);
         parameterHost.append(label);
+        if (editable && control instanceof HTMLInputElement &&
+            (parameter.default.type === "source" || parameter.default.type === "descriptor")) {
+          appendReferencePicker(parameterHost, control, { world_id: worldId, day, revision },
+            parameter.default.type === "source" ? "source" : "tag", parameter.name.replaceAll("_", " "));
+        }
         parameterInputs.set(parameter.name, control);
       }
     }

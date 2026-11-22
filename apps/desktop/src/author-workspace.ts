@@ -1,3 +1,4 @@
+import { appendReferencePicker } from "./reference-picker";
 import { canLeaveEntryDrafts } from "./entry-drafts";
 import { objectKinds } from "./object-kinds";
 import { openFamilyHistory } from "./family-history";
@@ -1143,6 +1144,12 @@ export async function showAuthorWorkspace(
       parameterInputs.set(parameter.name, control);
       label.append(control);
       parameterFields.append(label);
+      if (snapshot && control instanceof HTMLInputElement &&
+          (parameter.default.type === "source" || parameter.default.type === "descriptor")) {
+        appendReferencePicker(parameterFields, control, {
+          world_id: snapshot.world.id, day: snapshot.day, revision: snapshot.view_revision,
+        }, parameter.default.type === "source" ? "source" : "tag", parameter.name.replaceAll("_", " "));
+      }
     }
   }
 
