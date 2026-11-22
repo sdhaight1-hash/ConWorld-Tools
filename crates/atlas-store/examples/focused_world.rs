@@ -91,7 +91,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             source: object(2),
             kind: atlas_store::network::NetworkKind::Membership,
             role: "member".into(),
-            starts_at: 0,
+            starts_at: view.day.0,
             ends_before: None,
         },
         Uuid::new_v4(),
