@@ -10,6 +10,7 @@ pub mod inheritance;
 pub mod layout;
 pub mod network;
 pub mod query;
+pub mod semantic;
 mod store;
 
 use std::path::PathBuf;
