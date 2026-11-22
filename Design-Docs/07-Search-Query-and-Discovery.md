@@ -121,3 +121,7 @@ Example author query: "descendants of House Vale who belonged to the merchant gu
 ## 9. Spatial query extensions
 
 [13](13-Spatial-and-Nested-Location-Model.md) defines WithinPlace, LocatedIn, SpatialRelationTo, contextual PlaceName and scoped MapFeatures projection as extensions of the existing versioned QuerySpec and saved-query bindings. Typed/lens-specific bounded adjacency; intersect effective intervals along historical paths, retain uncertainty, filter hidden paths before traversal/aggregation/map derivation. Viewport is not privilege. Stable IDs/cursors, authorized labels and explicit incomplete geometry. Derived spatial indexes/caches rebuildable; invalidate prior/new ancestor, geometry, frame, recipe and policy dependencies. R*Tree is optional candidate lookup, never exact truth.
+
+## Research #69 disposition (scope clarification)
+
+[Reviewed Transform study](Research-Studies/maltego-inspired-transforms.md) and [closure record](ADRs/phase-3-contextual-exploration-review.md) clarify the existing Node exploration/query entry points in sections 1, 3 and 7: selection-bound contextual actions may reuse validated query/domain services, subject to existing phase gates. No separate executable engine, independent canonical graph, new feature scope or reader privilege. Reusable typed multi-stage recipe definitions and dedicated lore workbench are deferred pending distinct author value and explicit New Feature approval. This note adds no original roadmap obligation or production acceptance gate.

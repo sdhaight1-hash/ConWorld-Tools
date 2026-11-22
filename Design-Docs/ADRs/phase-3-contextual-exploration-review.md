@@ -1,0 +1,22 @@
+# Research #69 — Contextual world exploration: closure review
+
+**Status:** Reviewed research disposition; scope clarification only, not a new feature approval or production implementation.  
+**Source:** [Research #69](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/69), [comparative study](../Research-Studies/maltego-inspired-transforms.md), [exact research fixture](../Research-Studies/transform-prototype/check.py). Owner instructed completion of research criteria after the study presentation. No explicit approval of a new Transform feature was given.
+
+## Decision
+
+Keep one Rust-authoritative world model and query/service engine (D-001, D-007, D-009, D-012, D-013). Maltego's entity-driven operation discovery and Webb-Database's typed operation/edge provenance and bounded recipes are useful patterns, not product dependencies. Retain **existing-scope contextual Explore actions** as a possible UI delivery approach to existing #4/#5 query/discovery obligations. Reusing a context-bound existing query is not a new roadmap feature. Defer reusable versioned recipes, saved recipe history and wider lore ingestion/workbench until a specific distinct worldbuilding gap is demonstrated. Do not conflate source-inspected Webb features with already implemented Atlas behavior.
+
+## Minimal delivery candidate within existing scope
+
+After baseline desktop regression and applicable domain gates are verified, choose one author-only node action for an already implemented typed query (for example selected person → participant events with explicit role optional). Resolve stable ObjectRef in pinned world/branch/day/revision and author capability; call existing QuerySpec/domain service with shared QueryControl, show authorized results and evidence, preserve identity, open result in existing Node focus/list. Never fabricate a semantic edge from rows; use original sourced facts only when the service can return them. No write, extra persistence, schema migration, external network, dynamic scripts or reader exposure. Repeat execution merges presentation identity, not claims. Changing view discards or reexecutes result. Compare to the ordinary query and existing saved query path. Add family/organization/source actions only where corresponding verified service supports semantics, not as new domain commitments. Pair comparison belongs to existing genealogy/path semantics where already specified.
+
+## Review evidence and stop criteria
+
+The cited source comparison, five historical/visibility terminal parity cases, repeatability, provenance, candidate separation, bounded partial/cancel and typed rejection tests support feasibility. Exact prototype hash was verified and run again at closure with all assertions passing; study section 11 contains the recorded rerun timings. Sparse chain was slower than terminal-only SQL join and returned different amounts of information; author action counts are analytical, no real usability trial. Not a reason to build an independent engine.
+
+For implementation within #4/#5, verify exact query parity, stable refs and supported original edge direction/source, explicit partial/error, no write and author-only scope; retain existing AT-21/22/23/25/35 and other applicable gates, not new exit criteria. Compare at least three actual author workflows (genealogy, institutional history, source/lore review) when relevant services/UI ready: task completion, selection/configuration/navigation steps, errors, explainability and actual latency; compare existing saved queries fairly. If contextual presets suffice, stop. Only if a reproducible multi-stage workflow gap remains, prepare separately classified New Feature proposal for a small finite typed recipe with aggregate budgets, provenance, version pinning and appropriate authorization. Do not automatically implement it. Reject general scripting/plugin runtime, OSINT/live harvesting and competing databases; preserve worldbuilding first. #68 may supply spatial actions only after applicable SP gates; no change to its scope. #6–#10 own original domain/privacy/performance obligations and are dependencies, not additional work created here.
+
+## Closure
+
+All six research criteria fulfilled; study and index linked, architectural recommendation recorded and #4/#5 handoff tracked. No new feature decision, normative phase change, production code, screenshot or test claim. No native product acceptance gate passed. No changes to Webb-Database, #67 or #68.

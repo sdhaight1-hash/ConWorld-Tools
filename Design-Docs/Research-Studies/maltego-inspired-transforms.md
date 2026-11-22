@@ -1,6 +1,6 @@
 # Maltego-inspired transforms for fictional world exploration
 
-**Status:** In Review — comparative research and isolated experiments completed; owner decision and architecture handoff remain pending.  
+**Status:** Reviewed — research complete; existing-scope handoff recorded, new recipe feature deferred.  
 **Research agent:** Lola; 2026-11-21 local / 2026-11-22 UTC.  
 **Origin:** [Research #69](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/69). Related #4–#10, [accepted spatial feature #68](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/68).  
 **Decision sought:** Does a Transform abstraction improve world creation and historical exploration enough to justify new scope? No production changes, feature approval, roadmap changes or new dependency authorized by this study.
@@ -112,7 +112,7 @@ A: existing queries unchanged, lowest cost but author must know where feature li
 
 ## 9. Integration and proposed verification
 
-No new phase or changing phase exit criteria. Original roadmap #4 query and discovery, #5 graph/Canvas/Display; #6 genealogy, institutions, #7 event/conflict causal effects, #8 access/branch/perspective, #9 population synthetic ancestry, #10 native portability/performance. Feature #68 spatial operators may become actions only after its applicable SP-01–06/08–09/11–12/13–14 gates, no extra scope. Consolidated baseline desktop QueryDeadlineExceeded and #67 remain separate, do not touch production while research. Any feature proposal requires explicit scope approval then separate Features spec. Research close only following owner review of this recommendation.
+No new phase or changing phase exit criteria. Original roadmap #4 query and discovery, #5 graph/Canvas/Display; #6 genealogy, institutions, #7 event/conflict causal effects, #8 access/branch/perspective, #9 population synthetic ancestry, #10 native portability/performance. Feature #68 spatial operators may become actions only after its applicable SP-01–06/08–09/11–12/13–14 gates, no extra scope. Consolidated baseline desktop QueryDeadlineExceeded and #67 remain separate, do not touch production while research. Any feature proposal requires explicit scope approval then separate Features spec. Research closure review and owner instruction are recorded in section 11; new feature scope remains unapproved.
 
 | Proposed research-to-product test | Existing invariants / acceptance |
 |---|---|
@@ -139,4 +139,20 @@ Maltego official documentation accessed 2026-11-21 local / 22 UTC:
 - [R8 TDS](https://docs.maltego.com/support/solutions/articles/15000034015-what-is-a-transform-distribution-server-tds-) (2024-10-08), classic configuration/request relay.
 - Webb W1–W9 and Atlas A1–A9 pinned links inline, retrieved same date, code observed vs test evidence clearly separated. [Charter](../00-Product-Charter.md), [02](../02-System-Architecture.md), [01](../01-Requirements-and-Invariants.md), [07](../07-Search-Query-and-Discovery.md), [09](../09-Acceptance-and-Verification.md), [10](../10-Delivery-Roadmap.md), [12](../12-Decisions-and-Reconciliation.md), [13](../13-Spatial-and-Nested-Location-Model.md), [Features policy](../Features/Features.md).
 
-Deliverable and comparative matrix, three-plus workflows, executable fixture and bounded measurements complete. Recommend existing contextual actions first; consider separate narrowly scoped New Feature: Reusable World Exploration Transform Recipes only after owner reviews the marginal value. Local lore review beyond existing discovery requires separate justified scope, not bundled speculatively. No new feature ticket created, ADR accepted or production modifications. Keep research #69 In Review until owner decision and cross-linked disposition. 
+Deliverable and comparative matrix, three-plus workflows, executable fixture and bounded measurements complete. Recommend existing contextual actions first; consider separate narrowly scoped New Feature: Reusable World Exploration Transform Recipes only after owner reviews the marginal value. Local lore review beyond existing discovery requires separate justified scope, not bundled speculatively. No new feature ticket created, ADR accepted or production modifications. Final review and disposition follow in section 11.
+
+## 11. Final research review and architectural disposition
+
+Owner directed completion of the research criteria following presentation of the comparative study. This is a research closure instruction, not explicit acceptance of a new feature. The architectural disposition is to retain the existing scope and defer any new recipe/workbench scope. See [review record](../ADRs/phase-3-contextual-exploration-review.md).
+
+Reproduced the exact committed check.py (Git blob 8c2d45dade93ea6e9a1507a912ea27f08cd4ef82, SHA-256 f7b52877fff03eb1fa64096e2cb05b19637e7d3ea00149170f19b169fde01c66), Python 3.13.5, SQLite 3.46.1, Linux 6.18.57 x86_64 glibc2.41. Command: python check.py. All fixture assertions passed again. Medians of 15 repetitions per sparse fixture, independently measured, same limitations as section 7:
+
+| Background rows | Four-step projection ms | Terminal-only join ms | Edges / calls |
+|---:|---:|---:|---:|
+| 1,000 | 0.042 | 0.015 | 5 / 4 |
+| 10,000 | 0.044 | 0.015 | 5 / 4 |
+| 50,000 | 0.045 | 0.017 | 5 / 4 |
+
+Closure review: comparative source evidence, three-way matrix, at least three worldbuilding tasks, reproducible isolated typed input/graph/parity/history/candidate/bounds tests, measured limits and existing acceptance mapping, Webb source traces and privacy boundaries, and final recommendation with dependencies and stop criteria are documented. All six research gates fulfilled. No actual native author usability test, full policy noninterference, dense fanout benchmark, two-input implementation or production verification is claimed; these are product tests, not necessary to decide the bounded research question.
+
+Existing #4/#5 own contextual query/discovery entry points already described in 07; domain services under #6–#9 and approved #68 remain dependencies. First minimal slice is an author-only selection-bound preset using an already verified query or domain service, with same scoped results, source-linked navigation and presentation-only expansion. No new semantic schema or workflow persistence. Candidate separate feature for reusable versioned multi-stage recipes is deferred until the baseline actions demonstrate a meaningful repeatable workflow gap; no new ticket, accepted feature requirement or implementation authorization. Independent runtime, real-world enrichment and arbitrary scripting rejected. Fictional lore review remains existing mention/source review unless a distinct future proposal is justified. Context actions remain subject to ordinary phase dependencies and baseline verification. No SP/AT/TR production gate passed by this study.
