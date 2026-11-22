@@ -8,7 +8,9 @@ type Classification = { id: string; profile: string; descriptor_id: string; desc
   ends_before: number | null; recorded_at: number };
 type FactReference = Ref & { family: "network" | "parentage" | "classification" | "site_area" };
 type SemanticFact = { reference: FactReference; subject: Ref; target: Ref | null; source: Ref | null;
-  descriptor: Ref | null; description: string; rationale: string; recorded_at: number; source_branch: string };
+  descriptor: Ref | null; descriptor_revision: number | null; descriptor_state_revision: number | null;
+  descriptor_branch: string | null; corrects: string | null;
+  description: string; rationale: string; recorded_at: number; source_branch: string };
 type AreaReading = { status: "unknown" } | { status: "known"; amount: number; unit: "hectare" | "square_metre" };
 type SiteArea = { id: string; descriptor_id: string; descriptor_revision: number; source_id: string;
   reading: AreaReading; starts_at: number; ends_before: number | null; recorded_at: number; corrects: string | null };
@@ -316,8 +318,10 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
     return fact.description + " · " + fact.reference.family + " / " + fact.reference.id +
       " · subject " + fact.subject.id + (fact.target ? " · target " + fact.target.id : "") +
       (fact.source ? " · evidence " + fact.source.id : "") +
-      (fact.descriptor ? " · descriptor " + fact.descriptor.id : "") +
-      " · revision " + fact.recorded_at + " · " + fact.rationale;
+      (fact.descriptor ? " · descriptor " + fact.descriptor.id + " @ revision " + fact.descriptor_revision +
+        " (state " + fact.descriptor_state_revision + ", branch " + fact.descriptor_branch + ")" : "") +
+      (fact.corrects ? " · corrects fact " + fact.corrects : "") +
+      " · revision " + fact.recorded_at + " · recorded on branch " + fact.source_branch + " · " + fact.rationale;
   }
   async function resolveFact(reference: FactReference) {
     const { ctx, current } = beginInspection("[data-semantic-detail]");

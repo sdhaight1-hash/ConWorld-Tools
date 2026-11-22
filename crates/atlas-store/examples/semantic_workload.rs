@@ -366,6 +366,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         println!("{peak}");
     }
+    // Windows equivalent of the Linux VmHWM sample above. The workload
+    // process is still alive; PowerShell only reads its peak resident bytes.
+    // This is outside all timed query sections and requires no crate or service.
+    #[cfg(target_os = "windows")]
+    {
+        let command = format!("(Get-Process -Id {}).PeakWorkingSet64", std::process::id());
+        let output = std::process::Command::new("powershell.exe")
+            .args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command"])
+            .arg(command)
+            .output()?;
+        if !output.status.success() {
+            return Err("Windows peak working set measurement failed".into());
+        }
+        let peak: u64 = std::str::from_utf8(&output.stdout)?.trim().parse()?;
+        if peak == 0 {
+            return Err("Windows peak working set measurement is zero".into());
+        }
+        println!("windows_peak_working_set_bytes={peak}");
+    }
     store.verify_foreign_keys(Scope::Author)?;
     if persisted {
         let started = Instant::now();

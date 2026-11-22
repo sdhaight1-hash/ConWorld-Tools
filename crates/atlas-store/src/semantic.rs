@@ -83,6 +83,8 @@ pub struct ResolvedFact {
     pub recorded_at: crate::AuthorRevision,
     pub source_branch: crate::BranchId,
     pub rationale: String,
+    /// The stable predecessor of a corrected fact, if its family supports correction.
+    pub corrects: Option<Uuid>,
     pub data: SemanticFactData,
 }
 
