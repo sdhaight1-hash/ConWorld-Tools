@@ -1058,6 +1058,7 @@ impl AuthorWorkspace {
                     };
                     let kind = match version.record.data {
                         ObjectData::Person => "person",
+                        ObjectData::Place => "place",
                         ObjectData::Organization => "organization",
                         ObjectData::Household => "household",
                         ObjectData::FamilyHouse => "family_house",

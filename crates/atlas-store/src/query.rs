@@ -48,6 +48,14 @@ pub enum QueryFilter {
         participant: ObjectRef,
         role: Option<EventRole>,
     },
+    /// Author-only strict containment in one named hierarchy.
+    WithinPlace {
+        root: ObjectRef,
+        kind: crate::network::NetworkKind,
+        lens: String,
+        include_self: bool,
+        max_depth: u8,
+    },
     RelationshipPath {
         start: ObjectRef,
         kind: String,
@@ -62,6 +70,7 @@ pub enum QueryFilter {
 #[serde(rename_all = "snake_case")]
 pub enum ObjectKindFilter {
     Person,
+    Place,
     Organization,
     Household,
     FamilyHouse,
@@ -624,6 +633,15 @@ impl Store {
                     spec.limit,
                 );
             }
+            QueryFilter::WithinPlace {
+                root,
+                kind,
+                lens,
+                include_self,
+                max_depth,
+            } => {
+                return self.within_place(view, *root, *kind, lens, *include_self, *max_depth, spec.limit);
+            }
             QueryFilter::RelationshipPath { .. } => {
                 return self.indexed_relationship_path_at(view, &spec.filter, spec.limit);
             }
@@ -664,6 +682,7 @@ impl Store {
             QueryFilter::RelationshipPath { .. } => {
                 unreachable!("handled by indexed relationship path")
             }
+            QueryFilter::WithinPlace { .. } => unreachable!("handled by spatial traversal"),
         };
         rows.sort_by(|a, b| {
             a.record
@@ -844,6 +863,7 @@ fn predicate_matches(filter: &QueryFilter, version: &Version, plan: &PredicatePl
         QueryFilter::Kind(kind) => matches!(
             (&version.record.data, kind),
             (ObjectData::Person, ObjectKindFilter::Person)
+                | (ObjectData::Place, ObjectKindFilter::Place)
                 | (ObjectData::Organization, ObjectKindFilter::Organization)
                 | (ObjectData::Household, ObjectKindFilter::Household)
                 | (ObjectData::FamilyHouse, ObjectKindFilter::FamilyHouse)
