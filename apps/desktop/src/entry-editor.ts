@@ -2,11 +2,13 @@ import { invoke } from "@tauri-apps/api/core";
 
 import type { ParameterValue, SavedQuery } from "./author-workspace";
 import { publicReader, layoutContainer, type ObjectLink, type Backlinks } from "./public-reader";
+import { editCanvasTree } from "./canvas-tree";
 
-type Binding = { world: string; query_id: string; definition_revision: number;
+export type Binding = { world: string; query_id: string; definition_revision: number;
   bindings: { name: string; value: ParameterValue }[] };
-type Block = { id: string; audience: string; content: { Text?: string; Stack?: Block[]; Panel?: Block[];
-  Grid?: { columns: number; children: Block[] }; SavedQuery?: Binding; ObjectLink?: ObjectLink } };
+export type Block = { id: string; audience: string; content: { Text?: string; Stack?: Block[]; Panel?: Block[];
+  Grid?: { columns: number; children: Block[] }; Template?: { key: string; version: number; children: Block[] };
+  SavedQuery?: Binding; ObjectLink?: ObjectLink; Query?: unknown; FamilyTable?: { world: string; id: string } } };
 type Document = { schema_version: number; entry: { world: string; id: string }; root: Block };
 type Display = { content: { Text?: string; Stack?: Display[]; Panel?: Display[];
   Grid?: { columns: number; children: Display[] }; ObjectLink?: ObjectLink;
@@ -20,6 +22,8 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
   const host = document.createElement("section");
   panel.append(host);
   host.innerHTML = `<h3 data-entry-heading></h3><p data-entry-identity class="hint"></p><form class="editor-form"><fieldset disabled>
+    <button type="button" data-open-tree>Open Canvas tree</button>
+    <fieldset data-simple-fields>
     <label>Page arrangement <select name="arrangement">
       <option value="stack">Stack</option><option value="panel">Panel</option>
       <option value="2">Two-column grid</option><option value="3">Three-column grid</option>
@@ -32,6 +36,7 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
     <h4>Entry links</h4><div data-entry-links></div>
     <button type="button" data-add-link>Add entry link</button>
     <p class="hint">A public link appears only when its target page is released. Private links remain author-only.</p>
+    </fieldset><div data-tree-host hidden></div>
     <label><input type="checkbox" name="published"> Publish page text</label>
     <button>Save page</button></fieldset></form>
     <button type="button" data-author-preview-button disabled>Preview author layout</button>
@@ -128,6 +133,107 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
     const block = (audience: string): Block => ({ id: crypto.randomUUID(), audience, content: { Text: "" } });
     const layout: Document = saved?.[0] ?? { schema_version: 1, entry: { world: worldId, id: entryId },
       root: { id: crypto.randomUUID(), audience: "Public", content: { Stack: [block("Public"), block("Author")] } } };
+    if (!host.isConnected) return;
+    published.checked = saved?.[1] ?? false;
+    const treeButton = host.querySelector<HTMLButtonElement>("[data-open-tree]")!;
+    const simpleFields = host.querySelector<HTMLFieldSetElement>("[data-simple-fields]")!;
+    const treeHost = host.querySelector<HTMLElement>("[data-tree-host]")!;
+    let currentDraft = () => layout;
+    function activateTree(document: Document) {
+      clearAuthorPreview();
+      simpleFields.disabled = true;
+      simpleFields.hidden = true;
+      treeButton.hidden = true;
+      treeHost.hidden = false;
+      const tree = editCanvasTree(treeHost, document.root, worldId, entryId, revision, editable, clearAuthorPreview);
+      currentDraft = () => ({ ...document, root: tree.root() });
+    }
+    function installEditorActions() {
+      authorPreview.disabled = false;
+      authorPreview.addEventListener("click", async () => {
+        if (editable && !form.reportValidity()) return;
+        clearAuthorPreview();
+        const sequence = authorSequence;
+        const requestId = crypto.randomUUID();
+        activeAuthor = requestId;
+        authorResult.textContent = "Compiling private author preview…";
+        try {
+          const display = await invoke<Display | null>("workspace_preview_author_layout",
+            { worldId, day, revision, document: currentDraft(), requestId });
+          if (sequence !== authorSequence || !host.isConnected) return;
+          authorResult.replaceChildren();
+          function render(node: Display, parent = authorResult) {
+            if (node.content.Text !== undefined) {
+              const p = document.createElement("p");
+              p.textContent = node.content.Text;
+              parent.append(p);
+            }
+            if (node.content.ObjectLink) {
+              const link = node.content.ObjectLink;
+              const button = document.createElement("button");
+              button.type = "button";
+              button.textContent = link.label;
+              button.disabled = !openAuthor || link.target.world !== worldId;
+              button.addEventListener("click", () => openAuthor?.(link.target.id));
+              parent.append(button);
+            }
+            if (node.content.QueryRows) {
+              const table = document.createElement("table");
+              const caption = table.createCaption();
+              caption.textContent = "Private query table" + (node.content.QueryRows.truncated ? " · limited results" : "");
+              const header = table.createTHead().insertRow();
+              for (const title of ["Name", "Stable identity"]) {
+                const th = document.createElement("th");
+                th.scope = "col";
+                th.textContent = title;
+                header.append(th);
+              }
+              const tbody = table.createTBody();
+              for (const [object, label] of node.content.QueryRows.records) {
+                const row = tbody.insertRow();
+                row.insertCell().textContent = label;
+                row.insertCell().textContent = object.id;
+              }
+              if (!tbody.rows.length) {
+                const cell = tbody.insertRow().insertCell();
+                cell.colSpan = 2;
+                cell.textContent = "No matching records.";
+              }
+              parent.append(table);
+            }
+            node.content.Stack?.forEach(child => render(child, parent));
+            if (node.content.Panel) {
+              const container = layoutContainer(parent, "panel");
+              node.content.Panel.forEach(child => render(child, container));
+            }
+            if (node.content.Grid) {
+              const container = layoutContainer(parent, "grid", node.content.Grid.columns);
+              node.content.Grid.children.forEach(child => render(child, container));
+            }
+          }
+          if (display) render(display);
+        } catch (error) {
+          if (sequence === authorSequence && host.isConnected) authorResult.textContent = String(error);
+        } finally {
+          if (sequence === authorSequence) activeAuthor = undefined;
+        }
+      });
+      fields.disabled = !editable;
+      form.addEventListener("submit", async event => {
+        event.preventDefault();
+        if (fields.disabled) return;
+        const document = currentDraft();
+        ++request;
+        result.replaceChildren();
+        clearAuthorPreview();
+        fields.disabled = true;
+        authorPreview.disabled = true;
+        try {
+          await invoke("workspace_save_layout", { worldId, day, expectedRevision: revision, document, published: published.checked });
+          if (host.isConnected) await afterSave();
+        } catch (error) { result.textContent = String(error); fields.disabled = !editable; authorPreview.disabled = false; }
+      });
+    }
     const arrangement = form.elements.namedItem("arrangement") as HTMLSelectElement;
     const rootChildren = layout.root.content.Stack;
     const wrapper = rootChildren?.length === 1 && rootChildren[0].audience === "Public" &&
@@ -144,7 +250,8 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
         savedQueries.length > 1 || extras.some(block => block.content.SavedQuery
           ? block.audience !== "Author"
           : !block.content.ObjectLink || !["Public", "Author"].includes(block.audience))) {
-      result.textContent = "This layout uses components outside the entry page editor.";
+      activateTree(layout);
+      installEditorActions();
       return;
     }
     body.value = children[0].content.Text;
@@ -205,7 +312,8 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
       const pinned = historical.find(query => query.id === original.query_id &&
         query.recorded_at === original.definition_revision);
       if (!pinned) {
-        result.textContent = "The pinned saved query is unavailable. Layout left unchanged.";
+        activateTree(layout);
+        installEditorActions();
         return;
       }
       definitions.push(pinned);
@@ -274,89 +382,11 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
       }];
       return { ...layout, root: { ...layout.root, content: { Stack: arranged } } };
     }
-    authorPreview.disabled = false;
-    authorPreview.addEventListener("click", async () => {
-      if (editable && !form.reportValidity()) return;
-      clearAuthorPreview();
-      const sequence = authorSequence;
-      const requestId = crypto.randomUUID();
-      activeAuthor = requestId;
-      authorResult.textContent = "Compiling private author preview…";
-      try {
-        const display = await invoke<Display | null>("workspace_preview_author_layout",
-          { worldId, day, revision, document: draft(), requestId });
-        if (sequence !== authorSequence || !host.isConnected) return;
-        authorResult.replaceChildren();
-        function render(node: Display, parent = authorResult) {
-          if (node.content.Text !== undefined) {
-            const p = document.createElement("p");
-            p.textContent = node.content.Text;
-            parent.append(p);
-          }
-          if (node.content.ObjectLink) {
-            const link = node.content.ObjectLink;
-            const button = document.createElement("button");
-            button.type = "button";
-            button.textContent = link.label;
-            button.disabled = !openAuthor || link.target.world !== worldId;
-            button.addEventListener("click", () => openAuthor?.(link.target.id));
-            parent.append(button);
-          }
-          if (node.content.QueryRows) {
-            const table = document.createElement("table");
-            const caption = table.createCaption();
-            caption.textContent = "Private query table" + (node.content.QueryRows.truncated ? " · limited results" : "");
-            const header = table.createTHead().insertRow();
-            for (const title of ["Name", "Stable identity"]) {
-              const th = document.createElement("th");
-              th.scope = "col";
-              th.textContent = title;
-              header.append(th);
-            }
-            const tbody = table.createTBody();
-            for (const [object, label] of node.content.QueryRows.records) {
-              const row = tbody.insertRow();
-              row.insertCell().textContent = label;
-              row.insertCell().textContent = object.id;
-            }
-            if (!tbody.rows.length) {
-              const cell = tbody.insertRow().insertCell();
-              cell.colSpan = 2;
-              cell.textContent = "No matching records.";
-            }
-            parent.append(table);
-          }
-          node.content.Stack?.forEach(child => render(child, parent));
-          if (node.content.Panel) {
-            const container = layoutContainer(parent, "panel");
-            node.content.Panel.forEach(child => render(child, container));
-          }
-          if (node.content.Grid) {
-            const container = layoutContainer(parent, "grid", node.content.Grid.columns);
-            node.content.Grid.children.forEach(child => render(child, container));
-          }
-        }
-        if (display) render(display);
-      } catch (error) {
-        if (sequence === authorSequence && host.isConnected) authorResult.textContent = String(error);
-      } finally {
-        if (sequence === authorSequence) activeAuthor = undefined;
-      }
+    currentDraft = draft;
+    treeButton.addEventListener("click", () => {
+      if (!form.reportValidity()) return;
+      activateTree(currentDraft());
     });
-    fields.disabled = !editable;
-    form.addEventListener("submit", async event => {
-      event.preventDefault();
-      if (fields.disabled) return;
-      const document = draft();
-      ++request;
-      result.replaceChildren();
-      clearAuthorPreview();
-      fields.disabled = true;
-      authorPreview.disabled = true;
-      try {
-        await invoke("workspace_save_layout", { worldId, day, expectedRevision: revision, document, published: published.checked });
-        if (host.isConnected) await afterSave();
-      } catch (error) { result.textContent = String(error); fields.disabled = !editable; authorPreview.disabled = false; }
-    });
+    installEditorActions();
   } catch (error) { result.textContent = String(error); }
 }

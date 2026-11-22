@@ -1619,3 +1619,180 @@ fn grid_and_panel_preserve_visibility_search_backlinks_and_moved_bindings() -> R
     );
     Ok(())
 }
+
+#[test]
+fn versioned_template_keeps_queries_private_and_persists_independent_instances() -> Result<(), Error>
+{
+    use atlas_store::layout::TemplateKind;
+
+    let mut store = Store::open(":memory:")?;
+    let world = seed(&mut store)?;
+    let mut author = view(&world, 13);
+    let block = |audience, content| LayoutElement {
+        id: ElementId(Uuid::new_v4()),
+        audience,
+        content,
+    };
+    let template = block(
+        ClaimAudience::Author,
+        ElementContent::Template {
+            key: TemplateKind::Character,
+            version: 1,
+            children: vec![
+                block(
+                    ClaimAudience::Public,
+                    ElementContent::Text("Private template biography".into()),
+                ),
+                block(
+                    ClaimAudience::Public,
+                    ElementContent::Query(query(QueryFilter::ExactLabel("Alice Vale".into()))),
+                ),
+            ],
+        },
+    );
+    let mut document = LayoutDocument {
+        schema_version: LAYOUT_SCHEMA_VERSION,
+        entry: id(&world, 1),
+        root: block(ClaimAudience::Public, ElementContent::Stack(vec![template])),
+    };
+    let mut invalid = document.clone();
+    if let ElementContent::Stack(children) = &mut invalid.root.content
+        && let ElementContent::Template { version, .. } = &mut children[0].content
+    {
+        *version = 2;
+    }
+    assert!(matches!(invalid.validate(), Err(Error::InvalidInput(_))));
+    if let ElementContent::Stack(children) = &mut invalid.root.content
+        && let ElementContent::Template { version, .. } = &mut children[0].content
+    {
+        *version = 1;
+        children[0].audience = ClaimAudience::Public;
+    }
+    assert!(matches!(
+        store.save_entry_layout(author, &invalid, true, Uuid::new_v4()),
+        Err(Error::CapabilityDenied)
+    ));
+    author.revision = store.save_entry_layout(author, &document, true, Uuid::new_v4())?;
+    let public = ViewContext {
+        scope: Scope::Public,
+        ..author
+    };
+    let page = store.display_entry(public, document.entry)?.unwrap();
+    assert_eq!(page.content, DisplayContent::Stack(vec![]));
+    assert_eq!(
+        store.entry_layout(author, document.entry)?,
+        Some((document.clone(), true))
+    );
+    let prior = author;
+    if let ElementContent::Stack(children) = &mut document.root.content
+        && let ElementContent::Template { children, .. } = &mut children[0].content
+    {
+        children[0].content = ElementContent::Text("Revised private biography".into());
+    }
+    author.revision = store.save_entry_layout(author, &document, true, Uuid::new_v4())?;
+    assert_ne!(
+        store.entry_layout(prior, document.entry)?,
+        store.entry_layout(author, document.entry)?
+    );
+    Ok(())
+}
+
+#[test]
+fn family_canvas_component_uses_accepted_parentage_at_selected_day_and_revision()
+-> Result<(), Error> {
+    use atlas_store::genealogy::RecordParentage;
+
+    let mut store = Store::open(":memory:")?;
+    let world = seed(&mut store)?;
+    let person = id(&world, 2);
+    let mut author = view(&world, 0);
+    let link_id = store.record_parentage(
+        author,
+        RecordParentage {
+            parent: id(&world, 1),
+            child: person,
+            kind: ParentageKind::Biological,
+            starts_at: WorldDay(10),
+            ends_before: Some(WorldDay(20)),
+            command_id: Uuid::new_v4(),
+            rationale: "Accepted household register",
+        },
+    )?;
+    author.revision = AuthorRevision(2);
+    let block = |audience, content| LayoutElement {
+        id: ElementId(Uuid::new_v4()),
+        audience,
+        content,
+    };
+    let document = LayoutDocument {
+        schema_version: LAYOUT_SCHEMA_VERSION,
+        entry: person,
+        root: block(
+            ClaimAudience::Public,
+            ElementContent::Stack(vec![block(
+                ClaimAudience::Author,
+                ElementContent::FamilyTable(person),
+            )]),
+        ),
+    };
+    let at = |revision, day| ViewContext {
+        revision,
+        day: WorldDay(day),
+        ..author
+    };
+    let before = document.compile(&store, at(author.revision, 9))?.unwrap();
+    let DisplayContent::Stack(before) = before.content else {
+        panic!("expected stack")
+    };
+    assert_eq!(
+        before[0].content,
+        DisplayContent::QueryRows {
+            records: vec![],
+            truncated: false,
+        }
+    );
+    let revision = store.save_entry_layout(author, &document, true, Uuid::new_v4())?;
+    let page = store.display_entry(at(revision, 10), person)?.unwrap();
+    let DisplayContent::Stack(rows) = page.content else {
+        panic!("expected stack")
+    };
+    assert_eq!(
+        rows[0].content,
+        DisplayContent::QueryRows {
+            records: vec![(id(&world, 1), "Alice Vale · biological parent".into())],
+            truncated: false,
+        }
+    );
+    let public = ViewContext {
+        scope: Scope::Public,
+        ..at(revision, 10)
+    };
+    assert_eq!(
+        store.display_entry(public, person)?.unwrap().content,
+        DisplayContent::Stack(vec![])
+    );
+    store.withdraw_parentage(
+        at(revision, 10),
+        person,
+        link_id,
+        Uuid::new_v4(),
+        "Register corrected",
+    )?;
+    let corrected = AuthorRevision(revision.0 + 1);
+    let after = store.display_entry(at(corrected, 10), person)?.unwrap();
+    let DisplayContent::Stack(rows) = after.content else {
+        panic!("expected stack")
+    };
+    assert_eq!(
+        rows[0].content,
+        DisplayContent::QueryRows {
+            records: vec![],
+            truncated: false,
+        }
+    );
+    assert_ne!(
+        store.display_entry(at(revision, 10), person)?,
+        store.display_entry(at(corrected, 10), person)?
+    );
+    Ok(())
+}

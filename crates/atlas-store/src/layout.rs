@@ -39,10 +39,31 @@ pub enum ElementContent {
         columns: u8,
         children: Vec<LayoutElement>,
     },
+    Template {
+        key: TemplateKind,
+        version: u16,
+        children: Vec<LayoutElement>,
+    },
     Text(String),
     Query(QuerySpec),
     SavedQuery(SavedQueryBinding),
+    FamilyTable(ObjectRef),
     ObjectLink(ObjectLink),
+}
+
+/// Built-in immutable starting layouts. Instantiation copies presentation only.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TemplateKind {
+    Blank,
+    Character,
+    Family,
+    Organization,
+    Event,
+    Conflict,
+    Location,
+    Genealogy,
+    Source,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -162,11 +183,15 @@ impl LayoutDocument {
                 return Err(Error::WrongWorld);
             }
             match &element.content {
+                ElementContent::Template { version, .. } if *version != 1 => {
+                    return Err(Error::InvalidInput("layout template version"));
+                }
                 ElementContent::Grid { columns, .. } if !(1..=4).contains(columns) => {
                     return Err(Error::InvalidInput("layout grid columns"));
                 }
                 ElementContent::Stack(children)
                 | ElementContent::Panel(children)
+                | ElementContent::Template { children, .. }
                 | ElementContent::Grid { children, .. } => {
                     if children.len() + pending.len() + visited.len() > MAX_ELEMENTS {
                         return Err(Error::QueryBudgetExceeded);
@@ -182,6 +207,11 @@ impl LayoutDocument {
                     }
                     if link.label.trim().is_empty() || link.label.len() > 800 {
                         return Err(Error::InvalidInput("layout link label"));
+                    }
+                }
+                ElementContent::FamilyTable(person) => {
+                    if person.world != self.entry.world {
+                        return Err(Error::WrongWorld);
                     }
                 }
                 ElementContent::SavedQuery(binding) => {
@@ -208,11 +238,14 @@ impl LayoutDocument {
                 continue;
             }
             match &element.content {
-                ElementContent::Query(_) | ElementContent::SavedQuery(_) => {
+                ElementContent::Query(_)
+                | ElementContent::SavedQuery(_)
+                | ElementContent::FamilyTable(_) => {
                     return Err(Error::CapabilityDenied);
                 }
                 ElementContent::Stack(children)
                 | ElementContent::Panel(children)
+                | ElementContent::Template { children, .. }
                 | ElementContent::Grid { children, .. } => {
                     pending.extend(children.iter().map(|child| (child, audience)))
                 }
@@ -239,6 +272,7 @@ impl LayoutDocument {
             match &element.content {
                 ElementContent::Stack(children)
                 | ElementContent::Panel(children)
+                | ElementContent::Template { children, .. }
                 | ElementContent::Grid { children, .. } => pending.extend(children.iter().rev()),
                 ElementContent::Text(block) => {
                     // SQLite tokenization may stop at NUL; normalize it only in
@@ -248,7 +282,9 @@ impl LayoutDocument {
                 }
                 // Destination-dependent captions are excluded from static text search.
                 ElementContent::ObjectLink(_) => {}
-                ElementContent::Query(_) | ElementContent::SavedQuery(_) => {
+                ElementContent::Query(_)
+                | ElementContent::SavedQuery(_)
+                | ElementContent::FamilyTable(_) => {
                     return Err(Error::CapabilityDenied);
                 }
             }
@@ -266,6 +302,7 @@ impl LayoutDocument {
             match &element.content {
                 ElementContent::Stack(children)
                 | ElementContent::Panel(children)
+                | ElementContent::Template { children, .. }
                 | ElementContent::Grid { children, .. } => pending.extend(children.iter().rev()),
                 ElementContent::ObjectLink(link) => links.push((element.id, link)),
                 _ => {}
@@ -318,6 +355,7 @@ fn take_child(
     let children = match &mut element.content {
         ElementContent::Stack(children)
         | ElementContent::Panel(children)
+        | ElementContent::Template { children, .. }
         | ElementContent::Grid { children, .. } => children,
         _ => return None,
     };
@@ -335,6 +373,7 @@ fn find_container(element: &mut LayoutElement, id: ElementId) -> Option<&mut Vec
     let children = match &mut element.content {
         ElementContent::Stack(children)
         | ElementContent::Panel(children)
+        | ElementContent::Template { children, .. }
         | ElementContent::Grid { children, .. } => children,
         _ => return None,
     };
@@ -372,6 +411,7 @@ fn project(
     let content = match &element.content {
         ElementContent::Stack(children)
         | ElementContent::Panel(children)
+        | ElementContent::Template { children, .. }
         | ElementContent::Grid { children, .. } => {
             let mut projected = Vec::new();
             for child in children {
@@ -381,6 +421,12 @@ fn project(
             }
             match &element.content {
                 ElementContent::Panel(_) => DisplayContent::Panel(projected),
+                ElementContent::Template { version, .. } => {
+                    if *version != 1 {
+                        return Err(Error::InvalidInput("layout template version"));
+                    }
+                    DisplayContent::Panel(projected)
+                }
                 ElementContent::Grid { columns, .. } => {
                     if !(1..=4).contains(columns) {
                         return Err(Error::InvalidInput("layout grid columns"));
@@ -405,7 +451,9 @@ fn project(
             }
             DisplayContent::ObjectLink(link.clone())
         }
-        ElementContent::Query(_) | ElementContent::SavedQuery(_) => {
+        ElementContent::Query(_)
+        | ElementContent::SavedQuery(_)
+        | ElementContent::FamilyTable(_) => {
             if view.scope != Scope::Author {
                 return Err(Error::CapabilityDenied);
             }
@@ -413,6 +461,34 @@ fn project(
                 return Err(Error::QueryBudgetExceeded);
             }
             budget.queries += 1;
+            if let ElementContent::FamilyTable(person) = &element.content {
+                let links = store.family_links(view, *person)?;
+                let truncated = links.len() > 50;
+                let records = links
+                    .into_iter()
+                    .take(50)
+                    .map(|link| {
+                        let (relative, direction) = if link.parent == *person {
+                            (link.child, "child")
+                        } else {
+                            (link.parent, "parent")
+                        };
+                        let kind = match link.kind {
+                            crate::genealogy::ParentageKind::Biological => "biological",
+                            crate::genealogy::ParentageKind::Adoptive => "adoptive",
+                            crate::genealogy::ParentageKind::Legal => "legal",
+                        };
+                        (
+                            relative,
+                            format!("{} · {kind} {direction}", link.relative_label),
+                        )
+                    })
+                    .collect();
+                return Ok(Some(DisplayElement {
+                    id: element.id,
+                    content: DisplayContent::QueryRows { records, truncated },
+                }));
+            }
             let result = match &element.content {
                 ElementContent::Query(query) => store.execute_query(query, view)?,
                 ElementContent::SavedQuery(binding) => {
