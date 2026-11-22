@@ -2422,7 +2422,9 @@ pub fn workspace_custom_templates(
     request: NetworkContext,
 ) -> Result<Vec<atlas_store::layout::CustomTemplateSummary>, String> {
     let store = workspace.lock()?;
-    store.custom_templates(request.resolve(&store)?).map_err(|e|e.to_string())
+    store
+        .custom_templates(request.resolve(&store)?)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -2435,8 +2437,15 @@ pub fn workspace_save_custom_template(
 ) -> Result<atlas_store::layout::CustomTemplateSummary, String> {
     let mut store = workspace.lock()?;
     let context = request.resolve(&store)?;
-    store.save_custom_template(context,template_id.as_deref().map(id).transpose()?,
-        reference(context.world,&source_id)?,&name,Uuid::new_v4()).map_err(|e|e.to_string())
+    store
+        .save_custom_template(
+            context,
+            template_id.as_deref().map(id).transpose()?,
+            reference(context.world, &source_id)?,
+            &name,
+            Uuid::new_v4(),
+        )
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -2449,8 +2458,14 @@ pub fn workspace_instantiate_custom_template(
 ) -> Result<atlas_store::layout::LayoutElement, String> {
     let store = workspace.lock()?;
     let context = request.resolve(&store)?;
-    store.instantiate_custom_template(context,id(&template_id)?,definition_revision,
-        reference(context.world,&entry_id)?).map_err(|e|e.to_string())
+    store
+        .instantiate_custom_template(
+            context,
+            id(&template_id)?,
+            definition_revision,
+            reference(context.world, &entry_id)?,
+        )
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

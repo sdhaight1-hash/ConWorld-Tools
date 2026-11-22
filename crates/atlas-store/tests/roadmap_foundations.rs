@@ -2050,10 +2050,17 @@ fn custom_template_pins_and_rebinds_without_copying_canonical_objects() -> Resul
         ),
     };
     author.revision = store.save_entry_layout(author, &page, false, Uuid::new_v4())?;
-    let first = store.save_custom_template(author, None, original, "Family profile", Uuid::new_v4())?;
+    let first =
+        store.save_custom_template(author, None, original, "Family profile", Uuid::new_v4())?;
     author.revision = AuthorRevision(first.revision);
-    let instance = store.instantiate_custom_template(author, first.id, first.revision, destination)?;
-    let ElementContent::CustomTemplate { definition_revision, children, .. } = &instance.content else {
+    let instance =
+        store.instantiate_custom_template(author, first.id, first.revision, destination)?;
+    let ElementContent::CustomTemplate {
+        definition_revision,
+        children,
+        ..
+    } = &instance.content
+    else {
         panic!("expected custom template");
     };
     assert_eq!(*definition_revision, first.revision);
@@ -2061,18 +2068,40 @@ fn custom_template_pins_and_rebinds_without_copying_canonical_objects() -> Resul
     let ElementContent::Stack(children) = &children[0].content else {
         panic!("expected copied root");
     };
-    assert_eq!(children[0].content, ElementContent::FamilyTable(destination));
+    assert_eq!(
+        children[0].content,
+        ElementContent::FamilyTable(destination)
+    );
     let new_page = LayoutDocument {
         schema_version: LAYOUT_SCHEMA_VERSION,
         entry: destination,
         root: block(ClaimAudience::Public, ElementContent::Stack(vec![instance])),
     };
     author.revision = store.save_entry_layout(author, &new_page, false, Uuid::new_v4())?;
-    let updated = store.save_custom_template(author, Some(first.id), destination, "Family profile revised", Uuid::new_v4())?;
+    let updated = store.save_custom_template(
+        author,
+        Some(first.id),
+        destination,
+        "Family profile revised",
+        Uuid::new_v4(),
+    )?;
     author.revision = AuthorRevision(updated.revision);
     assert_eq!(store.custom_templates(author)?[0], updated);
-    assert_eq!(store.entry_layout(author, destination)?, Some((new_page, false)));
-    assert!(store.instantiate_custom_template(author, first.id, first.revision, original).is_ok());
-    assert!(matches!(store.custom_templates(ViewContext{scope:Scope::Public,..author}),Err(Error::CapabilityDenied)));
+    assert_eq!(
+        store.entry_layout(author, destination)?,
+        Some((new_page, false))
+    );
+    assert!(
+        store
+            .instantiate_custom_template(author, first.id, first.revision, original)
+            .is_ok()
+    );
+    assert!(matches!(
+        store.custom_templates(ViewContext {
+            scope: Scope::Public,
+            ..author
+        }),
+        Err(Error::CapabilityDenied)
+    ));
     Ok(())
 }

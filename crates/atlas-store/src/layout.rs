@@ -203,7 +203,10 @@ impl LayoutDocument {
                 return Err(Error::WrongWorld);
             }
             match &element.content {
-                ElementContent::CustomTemplate { definition_revision, .. } if *definition_revision <= 0 => {
+                ElementContent::CustomTemplate {
+                    definition_revision,
+                    ..
+                } if *definition_revision <= 0 => {
                     return Err(Error::InvalidInput("custom template revision"));
                 }
                 ElementContent::Template { version, .. } if *version != 1 => {
@@ -460,7 +463,11 @@ fn project(
             }
             match &element.content {
                 ElementContent::Panel(_) => DisplayContent::Panel(projected),
-                ElementContent::CustomTemplate { template_id, definition_revision, .. } => {
+                ElementContent::CustomTemplate {
+                    template_id,
+                    definition_revision,
+                    ..
+                } => {
                     if view.scope == Scope::Author {
                         store.require_custom_template(view, *template_id, *definition_revision)?;
                     }
