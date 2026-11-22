@@ -4151,8 +4151,7 @@ fn site_area_preserves_unknown_zero_units_corrections_and_archive() -> Result<()
         assert!(!truncated);
         records.clone()
     };
-    let preview_control =
-        atlas_store::query::QueryControl::new(std::time::Duration::from_secs(5))?;
+    let preview_control = atlas_store::query::QueryControl::new(std::time::Duration::from_secs(5))?;
     let preview = store
         .preview_author_layout(layout_view, &document, &preview_control)?
         .unwrap();
