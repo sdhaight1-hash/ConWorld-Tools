@@ -75,6 +75,9 @@ impl Store {
         if descriptor.reference() != pin {
             return Err(Error::InvalidInput("definition version pin"));
         }
+        if super::classification::descriptor_retired(&tx, effective, pin.object)? {
+            return Err(Error::InvalidInput("retired semantic descriptor"));
+        }
         if let Some(old) = corrects {
             let previous: Option<(i64, Option<i64>)> = tx.query_row(
                 &format!("{METADATA_CTE} {ACTIVE} SELECT starts_at,ends_before FROM active_site_area WHERE id=?5 AND place_id=?6"),

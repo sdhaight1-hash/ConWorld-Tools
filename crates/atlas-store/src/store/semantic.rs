@@ -20,7 +20,7 @@ impl Store {
         self.resolve_semantic_fact_in(&tx, reference, view)
     }
 
-    fn resolve_semantic_fact_in(
+    pub(super) fn resolve_semantic_fact_in(
         &self,
         conn: &Connection,
         reference: FactRef,

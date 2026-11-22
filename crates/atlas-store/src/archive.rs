@@ -56,6 +56,9 @@ pub fn inspect_archive(path: impl AsRef<Path>, scope: Scope) -> Result<ArchiveMa
     if schema >= 42 {
         crate::store::site_area::verify_site_area_integrity(&tx)?;
     }
+    if schema >= 43 {
+        crate::store::annotation::verify_annotation_integrity(&tx)?;
+    }
     let mut statement = tx.prepare(
         "SELECT w.id, w.name, COALESCE(MAX(r.revision), 0)
          FROM worlds w LEFT JOIN author_revisions r ON r.world_id = w.id

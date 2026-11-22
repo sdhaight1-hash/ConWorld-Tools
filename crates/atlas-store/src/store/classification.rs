@@ -61,7 +61,89 @@ pub(super) fn has_profile(
     Ok(true)
 }
 
+/// Check a lineage-local retirement at the selected fictional date.
+pub(super) fn descriptor_retired(
+    conn: &Connection,
+    view: ViewContext,
+    descriptor: ObjectRef,
+) -> Result<bool, Error> {
+    conn.query_row(
+        &format!(
+            "{METADATA_CTE} SELECT EXISTS(
+             SELECT 1 FROM descriptor_retirements d
+             JOIN author_revisions r ON r.world_id=d.world_id AND r.revision=d.recorded_revision
+             JOIN eligible l ON l.branch_id=r.branch_id
+             WHERE d.world_id=?1 AND d.descriptor_id=?5 AND d.recorded_revision<=l.rev
+             AND d.starts_at<=l.cutoff)"
+        ),
+        params![
+            view.world.0.as_bytes(),
+            view.branch.0.as_bytes(),
+            view.revision.0,
+            view.day.0,
+            descriptor.id.0.as_bytes()
+        ],
+        |row| row.get(0),
+    )
+    .map_err(Into::into)
+}
+
 impl Store {
+    /// Retire a descriptor for new assignments. Existing pinned facts are untouched.
+    pub fn retire_semantic_descriptor(
+        &mut self,
+        view: ViewContext,
+        pin: DefinitionPin,
+        command: Uuid,
+    ) -> Result<(), Error> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let world = metadata_world(&tx, view, true)?;
+        let descriptor = require_visible(
+            &tx,
+            view.world,
+            pin.version.object,
+            view.branch,
+            view.revision.0,
+            view.day,
+        )?;
+        if !matches!(
+            descriptor.record.data,
+            ObjectData::Definition {
+                definition: Definition::Tag,
+                ..
+            }
+        ) {
+            return Err(Error::WrongKind);
+        }
+        if descriptor.reference() != pin.version {
+            return Err(Error::InvalidInput("definition version pin"));
+        }
+        if descriptor_retired(&tx, view, descriptor.object)? {
+            return Err(Error::InvalidInput("retired semantic descriptor"));
+        }
+        let revision = append_revision(
+            &tx,
+            &world,
+            view.branch,
+            view.revision,
+            command,
+            ("Local author", "Retire semantic descriptor"),
+        )?;
+        tx.execute(
+            "INSERT INTO descriptor_retirements VALUES(?1,?2,?3,?4)",
+            params![
+                view.world.0.as_bytes(),
+                descriptor.object.id.0.as_bytes(),
+                view.day.0,
+                revision
+            ],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn record_classification(
         &mut self,
         view: ViewContext,
@@ -116,6 +198,16 @@ impl Store {
         }
         if definition.reference() != pin {
             return Err(Error::InvalidInput("definition version pin"));
+        }
+        if descriptor_retired(
+            &tx,
+            ViewContext {
+                day: input.starts_at,
+                ..view
+            },
+            pin.object,
+        )? {
+            return Err(Error::InvalidInput("retired semantic descriptor"));
         }
         let duplicate: bool = tx.query_row(
             &format!(

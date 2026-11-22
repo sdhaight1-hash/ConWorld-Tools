@@ -47,6 +47,26 @@ impl SemanticRef {
     }
 }
 
+impl FactFamily {
+    pub(crate) fn key(self) -> &'static str {
+        match self {
+            Self::Network => "network",
+            Self::Parentage => "parentage",
+            Self::Classification => "classification",
+            Self::SiteArea => "site_area",
+        }
+    }
+}
+
+/// An annotation is a reference to an existing sourced Claim, not a second statement.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct FactAnnotation {
+    pub id: Uuid,
+    pub fact: FactRef,
+    pub claim: ObjectRef,
+    pub recorded_at: crate::AuthorRevision,
+}
+
 /// Canonical fact data, never a second persisted copy.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SemanticFactData {
