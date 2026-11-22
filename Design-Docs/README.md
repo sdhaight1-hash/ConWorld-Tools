@@ -64,6 +64,8 @@ The ten original issues link to their relevant design contracts and acceptance g
 
 - [Repository-wide engineering audit — 2026-11-21](Repository-Audit-2026-11-21.md): pinned main and staged baselines, source/CI review, screenshot compliance, findings and prioritized next work.
 
+- [Repository-wide engineering audit — 2026-11-22](Repository-Audit-2026-11-22.md): frozen main/schema-44 candidate, all phases, IPC/test/media inventory, risk assessment, verified CI and next development order. Dated review, not normative.
+
 See the [Phase Zero verification log](Phase-0-Verification.md) for the desktop and renderer evidence, and the [Phase One foundation](Phase-Foundation.md) for the persistence slice. Earlier v0.1–v0.4 files were source material. Their requirements were consolidated and traced in [12](12-Decisions-and-Reconciliation.md).
 
 **First demonstrable milestone:** author two characters, establish a friendship, create a betrayal event with actor/claim/source, apply an explicit relationship effect, and switch the historic date and viewer perspective. Confirm semantic graph, Canvas component, public Display, and search agree about what is visible and why.
