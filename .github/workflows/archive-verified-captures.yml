@@ -1,0 +1,46 @@
+name: Archive verified development captures (one-shot)
+
+on:
+  push:
+    branches: [work/archive-verified-captures]
+    paths: ['.github/workflows/archive-verified-captures.yml']
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Copy exact prior CI captures without altering bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, io, pathlib, subprocess, zipfile
+          captures = [[14730657026,"2026-11-21_23-49-10Z_phase-04_links_mock-native-reader-backlinks_01.png"],[14732527690,"2026-11-22_00-50-15Z_phase-04_canvas_mock-native-source-entry_01.png"],[14732028010,"2026-11-22_00-52-28Z_phase-04_canvas_mock-native-panel_01.png"],[14732487740,"2026-11-22_00-59-18Z_phase-04_canvas_mock-native-tree_01.png"],[14733021566,"2026-11-22_00-59-19Z_phase-04_canvas_mock-native-template-query_01.png"],[14733380880,"2026-11-22_01-06-45Z_phase-05_network_mock-native-institution-ghost_01.png"],[14734296337,"2026-11-22_01-40-17Z_phase-04_canvas_mock-native-custom-template_01.png"]]
+          root = pathlib.Path("Development-Screenshots")
+          manifest = ["# Archived verified Chromium mock-native captures", "", "Byte-for-byte copies from prior successful CI artifacts; no native-runtime claim.", "", "| Artifact ID | Filename | SHA-256 |", "|---|---|---|"]
+          for artifact, filename in captures:
+              raw = subprocess.check_output(["gh", "api", f"repos/sdhaight1-hash/ConWorld-Tools/actions/artifacts/{artifact}/zip"])
+              with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+                  choices = [member for member in archive.infolist() if pathlib.PurePosixPath(member.filename).name == filename and not member.is_dir()]
+                  if len(choices) != 1 or choices[0].file_size > 10_000_000:
+                      raise RuntimeError(f"Unexpected archive content: {artifact}")
+                  data = archive.read(choices[0])
+              if not data.startswith(b"\x89PNG\r\n\x1a\n"):
+                  raise RuntimeError("Not a PNG")
+              (root / filename).write_bytes(data)
+              manifest.append(f"| {artifact} | {filename} | {hashlib.sha256(data).hexdigest()} |")
+          (root / "Verified-Capture-Hashes.md").write_text("\n".join(manifest) + "\n", encoding="utf-8")
+          PY
+      - name: Commit capture archive to its dedicated branch and remove one-shot workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Development-Screenshots
+          git rm .github/workflows/archive-verified-captures.yml
+          git commit -m "Archive verified screenshots and record source artifact hashes"
+          git push origin HEAD:work/archive-verified-captures
