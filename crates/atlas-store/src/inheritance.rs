@@ -349,14 +349,22 @@ impl crate::Store {
         let mut chromosomes = Vec::new();
         let mut total = 0;
         for chromosome in 1..=count {
-            let chromosome_seed = mix(seed ^ (u64::from(chromosome) << 32) ^ u64::from(CHROMOSOME_MODEL_VERSION));
+            let chromosome_seed =
+                mix(seed ^ (u64::from(chromosome) << 32) ^ u64::from(CHROMOSOME_MODEL_VERSION));
             let genome = self.founder_genome(view, subject, chromosome_seed)?;
             total += genome.homologues.iter().map(Vec::len).sum::<usize>();
             if total > 8192 {
                 return Err(Error::QueryBudgetExceeded);
             }
-            chromosomes.push(ToyChromosome { chromosome, homologues: genome.homologues });
+            chromosomes.push(ToyChromosome {
+                chromosome,
+                homologues: genome.homologues,
+            });
         }
-        Ok(ChromosomePainter { model: CHROMOSOME_MODEL_VERSION, length: MODEL_LENGTH, chromosomes })
+        Ok(ChromosomePainter {
+            model: CHROMOSOME_MODEL_VERSION,
+            length: MODEL_LENGTH,
+            chromosomes,
+        })
     }
 }

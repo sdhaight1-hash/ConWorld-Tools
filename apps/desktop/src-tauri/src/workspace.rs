@@ -2649,7 +2649,9 @@ pub fn workspace_chromosome_painter(
 ) -> Result<atlas_store::inheritance::ChromosomePainter, String> {
     let store = workspace.lock()?;
     let (context, person) = request.resolve(&store)?;
-    store.chromosome_painter(context, person, u64::from(seed), count).map_err(|e| e.to_string())
+    store
+        .chromosome_painter(context, person, u64::from(seed), count)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
