@@ -4869,3 +4869,152 @@ fn classification_descriptor_pages_deduplicate_and_pin_cursor_context() -> Resul
     ));
     Ok(())
 }
+
+
+#[test]
+fn unrelated_facts_do_not_exhaust_focused_impact_or_redirect_budget() -> Result<(), Error> {
+    use atlas_store::network::{NetworkInput, NetworkKind};
+
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("focused-network.sqlite");
+    let mut store = Store::open(&path)?;
+    let world = seed(&mut store)?;
+    let mut author = view(&world, 13);
+    let make = |subject, target, kind| NetworkInput {
+        subject: id(&world, subject),
+        target: id(&world, target),
+        source: id(&world, 9),
+        kind,
+        role: "fixture".into(),
+        starts_at: 13,
+        ends_before: None,
+    };
+    for input in [
+        make(6, 7, NetworkKind::ConfirmedCause),
+        make(6, 8, NetworkKind::AllegedCause),
+        make(12, 1, NetworkKind::IdentityRedirect),
+    ] {
+        store.record_network_fact(author, &input, Uuid::new_v4())?;
+        author.revision.0 += 1;
+    }
+    let before = author;
+    let change = |number, data| {
+        Change::Create(
+            id(&world, number),
+            Record {
+                label: format!("Fixture {number}"),
+                data,
+                valid: ValidInterval::default(),
+                source: None,
+            },
+        )
+    };
+    for start in (10000_u128..14001).step_by(1000) {
+        author.revision = store.apply(&Command {
+            world: world.id,
+            branch: world.main,
+            expected: author.revision,
+            id: Uuid::new_v4(),
+            author: "Fixture".into(),
+            rationale: "Unrelated event batch".into(),
+            scope: Scope::Author,
+            changes: (start..(start + 1000).min(14001))
+                .map(|number| {
+                    change(
+                        number,
+                        ObjectData::HistoricalEvent {
+                            occurrence: EventDate::Exact(WorldDay(13)),
+                        },
+                    )
+                })
+                .collect(),
+        })?;
+    }
+    author.revision = store.apply(&Command {
+        world: world.id,
+        branch: world.main,
+        expected: author.revision,
+        id: Uuid::new_v4(),
+        author: "Fixture".into(),
+        rationale: "Unrelated institution batch".into(),
+        scope: Scope::Author,
+        changes: (20000_u128..20501)
+            .map(|number| change(number, ObjectData::Organization))
+            .collect(),
+    })?;
+    drop(store);
+    // Seed a relationally valid large graph without thousands of global DAG
+    // checks in fixture setup. All endpoints and recorded revisions exist.
+    let mut conn = rusqlite::Connection::open(&path)?;
+    conn.pragma_update(None, "foreign_keys", true)?;
+    let tx = conn.transaction()?;
+    {
+        let mut insert = tx.prepare(
+            "INSERT INTO network_facts
+             (world_id,id,subject_id,target_id,source_id,kind,role,starts_at,recorded_revision)
+             VALUES(?1,?2,?3,?4,?5,?6,'fixture',13,?7)",
+        )?;
+        for (subject, targets, kind) in [
+            (8, 10000_u128..14001, "confirmed_cause"),
+            (12, 20000_u128..20501, "membership"),
+        ] {
+            for target in targets {
+                insert.execute(rusqlite::params![
+                    world.id.0.as_bytes(),
+                    Uuid::new_v4().as_bytes(),
+                    id(&world, subject).id.0.as_bytes(),
+                    id(&world, target).id.0.as_bytes(),
+                    id(&world, 9).id.0.as_bytes(),
+                    kind,
+                    author.revision.0,
+                ])?;
+            }
+        }
+    }
+    tx.commit()?;
+    drop(conn);
+    let store = Store::open(&path)?;
+    store.verify_foreign_keys(Scope::Author)?;
+    for context in [before, author] {
+        let impact = store.persisted_impact(context, id(&world, 6), 2, 10)?;
+        assert_eq!(impact.events, vec![id(&world, 7)]);
+        assert!(!impact.truncated);
+        assert!(
+            store
+                .persisted_impact(context, id(&world, 7), 2, 10)?
+                .events
+                .is_empty()
+        );
+        assert!(
+            store
+                .persisted_impact(context, id(&world, 6), 2, 1)?
+                .truncated
+        );
+        assert_eq!(
+            store.canonical_identity(context, id(&world, 12))?,
+            vec![id(&world, 12), id(&world, 1)]
+        );
+    }
+    assert!(matches!(
+        store.network_facts(author, id(&world, 12)),
+        Err(Error::QueryBudgetExceeded)
+    ));
+    assert!(matches!(
+        store.persisted_impact(author, id(&world, 8), 2, 10),
+        Err(Error::QueryBudgetExceeded)
+    ));
+    assert_eq!(store.network_facts(author, id(&world, 20000))?.len(), 1);
+    let public = ViewContext {
+        scope: Scope::Public,
+        ..author
+    };
+    assert!(matches!(
+        store.persisted_impact(public, id(&world, 6), 2, 10),
+        Err(Error::CapabilityDenied)
+    ));
+    assert!(matches!(
+        store.canonical_identity(public, id(&world, 12)),
+        Err(Error::CapabilityDenied)
+    ));
+    Ok(())
+}
