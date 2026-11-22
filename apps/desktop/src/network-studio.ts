@@ -37,7 +37,7 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
     <form data-fact class="editor-form"><fieldset><legend>Record sourced network fact</legend>
       <label>Subject identity <input name="subject" required></label><label>Target identity <input name="target" required></label>
       <label>Evidence source identity <input name="source" required></label>
-      <label>Fact type <select name="kind"><option value="membership">Membership</option><option value="marriage">Marriage</option><option value="succession">Institutional succession</option><option value="confirmed_cause">Confirmed cause</option><option value="alleged_cause">Alleged cause</option><option value="conflict_position">Faction conflict stance</option><option value="office_holding">Office holding</option><option value="office_of">Office in institution</option><option value="title_holding">Title holding</option><option value="title_of">Title of institution</option><option value="ownership">Ownership</option><option value="issue_of">Issue in conflict</option><option value="phase_of">Phase in conflict</option><option value="rule_of">Succession rule of title</option><option value="population_member">Founder population affiliation</option><option value="heir_designation">Designated heir</option><option value="identity_redirect">Reviewed same identity redirect</option><option value="alliance">Faction alliance</option><option value="settlement">Faction settlement</option></select></label>
+      <label>Fact type <select name="kind"><option value="membership">Membership</option><option value="marriage">Marriage</option><option value="succession">Institutional succession</option><option value="confirmed_cause">Confirmed cause</option><option value="alleged_cause">Alleged cause</option><option value="conflict_position">Faction conflict stance</option><option value="office_holding">Office holding</option><option value="office_of">Office in institution</option><option value="title_holding">Title holding</option><option value="title_of">Title of institution</option><option value="ownership">Ownership</option><option value="issue_of">Issue in conflict</option><option value="phase_of">Phase in conflict</option><option value="rule_of">Succession rule of title</option><option value="population_member">Founder population affiliation</option><option value="heir_designation">Designated heir</option><option value="identity_redirect">Reviewed same identity redirect</option><option value="alliance">Faction alliance</option><option value="settlement">Faction settlement</option><option value="culture_language">Culture documented language</option><option value="working_material">Technology working material</option></select></label>
       <label>Role or causal rationale <input name="role" required maxlength="800"></label>
       <label>Starts at day <input name="start" type="number" required></label><label>Ends before day <input name="end" type="number"></label>
       <button>Record network fact</button></fieldset></form>
@@ -139,6 +139,14 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
     kind:value(f,"kind"),role:value(f,"role"),starts_at:Number(value(f,"start")),
     ends_before:value(f,"end") ? Number(value(f,"end")) : null,
   } }));
+  (form("[data-fact]").elements.namedItem("kind") as HTMLSelectElement).addEventListener("change", () => {
+    const f = form("[data-fact]");
+    const kind = value(f,"kind");
+    if (kind === "culture_language" || kind === "working_material") {
+      (f.elements.namedItem("role") as HTMLInputElement).value =
+        kind === "culture_language" ? "documented_language" : "working_medium";
+    }
+  });
   function action(label: string, run: () => void) {
     const button = document.createElement("button"); button.type="button";button.textContent=label;
     button.disabled=!editable;button.onclick=run;return button;

@@ -3221,3 +3221,115 @@ fn classifications_preserve_pins_and_branch_local_withdrawals() -> Result<(), Er
     store.verify_foreign_keys(Scope::Author)?;
     Ok(())
 }
+
+#[test]
+fn semantic_network_relations_require_curated_endpoint_profiles() -> Result<(), Error> {
+    use atlas_store::{
+        network::{IdentityKind, NetworkInput, NetworkKind},
+        semantic::{ClassificationInput, ConceptProfile, DefinitionPin, FactFamily, FactRef},
+    };
+    let mut store = Store::open(":memory:")?;
+    let world = seed(&mut store)?;
+    let mut author = view(&world, 13);
+    let culture = store.create_identity(
+        author,
+        IdentityKind::Concept,
+        "Estuary culture",
+        Uuid::new_v4(),
+    )?;
+    author.revision = AuthorRevision(2);
+    let language = store.create_identity(
+        author,
+        IdentityKind::Concept,
+        "Estuary language",
+        Uuid::new_v4(),
+    )?;
+    author.revision = AuthorRevision(3);
+    let descriptor = ObjectRef::new(world.id);
+    author.revision = store.apply(&Command {
+        world: world.id,
+        branch: world.main,
+        expected: author.revision,
+        id: Uuid::new_v4(),
+        author: "Fixture".into(),
+        rationale: "Curated vocabulary".into(),
+        scope: Scope::Author,
+        changes: vec![Change::Create(
+            descriptor,
+            Record {
+                label: "Domain profile".into(),
+                valid: ValidInterval::default(),
+                data: ObjectData::Definition {
+                    definition: Definition::Tag,
+                    description: "Curated metadata".into(),
+                },
+                source: None,
+            },
+        )],
+    })?;
+    let pin = DefinitionPin {
+        version: store.get_object(descriptor, author)?.unwrap().reference(),
+    };
+    let source = id(&world, 9);
+    let relation = NetworkInput {
+        subject: culture,
+        target: language,
+        source,
+        kind: NetworkKind::CultureLanguage,
+        role: "documented_language".into(),
+        starts_at: 13,
+        ends_before: None,
+    };
+    assert!(matches!(
+        store.record_network_fact(author, &relation, Uuid::new_v4()),
+        Err(Error::WrongKind)
+    ));
+    for (subject, profile) in [
+        (culture, ConceptProfile::Culture),
+        (language, ConceptProfile::Language),
+    ] {
+        store.record_classification(
+            author,
+            ClassificationInput {
+                subject,
+                profile,
+                descriptor: pin,
+                source,
+                starts_at: WorldDay(13),
+                ends_before: None,
+            },
+            Uuid::new_v4(),
+        )?;
+        author.revision = AuthorRevision(author.revision.0 + 1);
+    }
+    let wrong = NetworkInput {
+        kind: NetworkKind::WorkingMaterial,
+        role: "working_medium".into(),
+        ..relation.clone()
+    };
+    assert!(matches!(
+        store.record_network_fact(author, &wrong, Uuid::new_v4()),
+        Err(Error::WrongKind)
+    ));
+    let wrong_role = NetworkInput {
+        role: "membership".into(),
+        ..relation.clone()
+    };
+    assert!(matches!(
+        store.record_network_fact(author, &wrong_role, Uuid::new_v4()),
+        Err(Error::InvalidInput("semantic relation role"))
+    ));
+    let before = author;
+    let fact = store.record_network_fact(author, &relation, Uuid::new_v4())?;
+    author.revision = AuthorRevision(author.revision.0 + 1);
+    let reference = FactRef {
+        world: world.id,
+        family: FactFamily::Network,
+        id: fact,
+    };
+    assert!(store.resolve_semantic_fact(reference, before)?.is_none());
+    assert_eq!(store.network_facts(author, culture)?[0].input, relation);
+    assert!(store.resolve_semantic_fact(reference, author)?.is_some());
+    store.verify_foreign_keys(Scope::Author)?;
+    Ok(())
+}

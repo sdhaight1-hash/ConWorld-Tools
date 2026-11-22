@@ -107,6 +107,41 @@ impl Store {
             return Err(Error::WrongKind);
         }
         match input.kind {
+            NetworkKind::CultureLanguage | NetworkKind::WorkingMaterial
+                if subject.record.data == ObjectData::Concept
+                    && target.record.data == ObjectData::Concept =>
+            {
+                use crate::semantic::ConceptProfile;
+                let (subject_profile, target_profile, role) = match input.kind {
+                    NetworkKind::CultureLanguage => (
+                        ConceptProfile::Culture,
+                        ConceptProfile::Language,
+                        "documented_language",
+                    ),
+                    NetworkKind::WorkingMaterial => (
+                        ConceptProfile::Technology,
+                        ConceptProfile::Material,
+                        "working_medium",
+                    ),
+                    _ => unreachable!(),
+                };
+                if input.role != role {
+                    return Err(Error::InvalidInput("semantic relation role"));
+                }
+                if !super::classification::has_profile(
+                    &tx,
+                    effective,
+                    input.subject,
+                    subject_profile,
+                )? || !super::classification::has_profile(
+                    &tx,
+                    effective,
+                    input.target,
+                    target_profile,
+                )? {
+                    return Err(Error::WrongKind);
+                }
+            }
             NetworkKind::HeirDesignation
                 if matches!(subject.record.data, ObjectData::Person)
                     && matches!(target.record.data, ObjectData::Title) => {}

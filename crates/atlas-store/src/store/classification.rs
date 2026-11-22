@@ -17,6 +17,48 @@ const ACTIVE: &str = "
 )
 ";
 
+/// Validate a curated endpoint in the same transaction as a network write.
+/// A classification is evidence-backed metadata, not an inferred relation.
+pub(super) fn has_profile(
+    conn: &Connection,
+    view: ViewContext,
+    subject: ObjectRef,
+    profile: ConceptProfile,
+) -> Result<bool, Error> {
+    let mut statement = conn.prepare(&format!(
+        "{METADATA_CTE} {ACTIVE} SELECT source_id,descriptor_id
+         FROM active_classification WHERE subject_id=?5 AND profile=?6
+         AND starts_at<=?4 AND (ends_before IS NULL OR ends_before>?4)
+         ORDER BY id LIMIT 2"
+    ))?;
+    let mut rows = statement.query(params![
+        view.world.0.as_bytes(),
+        view.branch.0.as_bytes(),
+        view.revision.0,
+        view.day.0,
+        subject.id.0.as_bytes(),
+        profile.key()
+    ])?;
+    let Some(row) = rows.next()? else {
+        return Ok(false);
+    };
+    let source = row.get::<_, [u8; 16]>(0)?;
+    let descriptor = row.get::<_, [u8; 16]>(1)?;
+    if rows.next()?.is_some() {
+        return Err(Error::Integrity("overlapping active classifications".into()));
+    }
+    for bytes in [source, descriptor] {
+        let object = ObjectRef {
+            world: view.world,
+            id: ObjectId(Uuid::from_bytes(bytes)),
+        };
+        if resolve_object(conn, object, view.branch, view.revision, view.day)?.is_none() {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 impl Store {
     pub fn record_classification(
         &mut self,

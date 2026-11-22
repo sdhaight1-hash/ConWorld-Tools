@@ -105,6 +105,8 @@ pub enum NetworkKind {
     IdentityRedirect,
     Alliance,
     Settlement,
+    CultureLanguage,
+    WorkingMaterial,
 }
 
 impl NetworkKind {
@@ -129,6 +131,8 @@ impl NetworkKind {
             Self::IdentityRedirect => "identity_redirect",
             Self::Alliance => "alliance",
             Self::Settlement => "settlement",
+            Self::CultureLanguage => "culture_language",
+            Self::WorkingMaterial => "working_material",
         }
     }
 
@@ -153,6 +157,8 @@ impl NetworkKind {
             "identity_redirect" => Ok(Self::IdentityRedirect),
             "alliance" => Ok(Self::Alliance),
             "settlement" => Ok(Self::Settlement),
+            "culture_language" => Ok(Self::CultureLanguage),
+            "working_material" => Ok(Self::WorkingMaterial),
             _ => Err(crate::Error::WrongKind),
         }
     }

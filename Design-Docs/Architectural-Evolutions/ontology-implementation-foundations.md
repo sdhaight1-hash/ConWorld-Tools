@@ -43,3 +43,7 @@ AE-05: the existing typed query planner now accepts curated profile predicates, 
 ## Native command and studio integration
 
 The existing branch-aware author studio exposes record, inspect and withdraw classification commands, with explicit Concept, Tag Definition, source, profile and dates. Rust resolves the descriptor in the requested historical context, checks the pin inside the write transaction and returns original recorded provenance when inspecting. No raw classification command is registered in the public reader. Branch changes clear stale results, and late responses are discarded. Native GUI verification and screenshots remain outstanding.
+
+## Role-qualified Concept relations
+
+Schema 39 extends canonical network facts with CultureLanguage (Culture -> Language, documented_language) and WorkingMaterial (Technology -> Material, working_medium). Both require source-backed active compatible classifications at the effective start date, checked in the same write transaction. They are independent authored facts, not inferred membership, speech proficiency, manufacturing or simulation. Later classification corrections do not rewrite the existing relation; the recorded author revision permits historical explanation. Existing network UUIDs, withdrawals and validators are retained. Desktop network authoring exposes the two typed relation choices; regression covers wrong profiles, roles and historical semantic lookup. Spatial #67 remains held and must preserve the expanded network vocabulary when reconciled.
