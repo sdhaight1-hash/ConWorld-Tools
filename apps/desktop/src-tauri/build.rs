@@ -37,6 +37,7 @@ fn main() {
             "workspace_ghost_candidates",
             "workspace_resolve_ghost",
             "workspace_founder_matches",
+            "workspace_chromosome_painter",
             "workspace_founder_genome",
             "workspace_metadata_branches",
             "workspace_fork_metadata",

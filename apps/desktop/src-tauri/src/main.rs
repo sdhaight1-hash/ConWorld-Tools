@@ -233,6 +233,7 @@ fn main() {
             workspace::workspace_ghost_candidates,
             workspace::workspace_resolve_ghost,
             workspace::workspace_founder_matches,
+            workspace::workspace_chromosome_painter,
             workspace::workspace_founder_genome,
             workspace::workspace_metadata_branches,
             workspace::workspace_fork_metadata,

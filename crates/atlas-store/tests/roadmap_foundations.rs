@@ -2808,3 +2808,31 @@ fn image_hotspots_authorization_and_asset_archive_roundtrip() -> Result<(), Erro
     assert_eq!(reopened.media_assets(author)?[0], image);
     Ok(())
 }
+
+#[test]
+fn chromosome_painter_keeps_contiguous_toy_homologues_and_deterministic_seed() -> Result<(), Error> {
+    use atlas_store::{genealogy::RecordParentage, inheritance::{CHROMOSOME_MODEL_VERSION, MODEL_LENGTH}};
+    let mut store = Store::open(":memory:")?;
+    let world = seed(&mut store)?;
+    let mut author = view(&world, 13);
+    let person = id(&world, 2);
+    for parent in [1, 12] {
+        store.record_parentage(author, RecordParentage { parent: id(&world,parent), child: person, kind: ParentageKind::Biological, starts_at:WorldDay(0), ends_before:None, command_id:Uuid::new_v4(), rationale:"Accepted biological link" })?;
+        author.revision=AuthorRevision(author.revision.0+1);
+    }
+    let painter=store.chromosome_painter(author,person,72,8)?;
+    assert_eq!(painter.model,CHROMOSOME_MODEL_VERSION);
+    assert_eq!(painter.chromosomes.len(),8);
+    assert_eq!(painter,store.chromosome_painter(author,person,72,8)?);
+    assert_ne!(painter.chromosomes[0].homologues,painter.chromosomes[1].homologues);
+    for chromosome in painter.chromosomes {
+        for homologue in chromosome.homologues {
+            assert_eq!(homologue.first().unwrap().start,0);
+            assert_eq!(homologue.last().unwrap().end,MODEL_LENGTH);
+            assert!(homologue.windows(2).all(|pair|pair[0].end==pair[1].start));
+        }
+    }
+    assert!(store.chromosome_painter(author,person,72,9).is_err());
+    assert!(matches!(store.chromosome_painter(ViewContext{scope:Scope::Public,..author},person,72,8),Err(Error::CapabilityDenied)));
+    Ok(())
+}

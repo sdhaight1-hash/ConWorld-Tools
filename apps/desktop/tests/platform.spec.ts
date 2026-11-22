@@ -2191,3 +2191,70 @@ test("custom template insertion uses exact pin and Canvas drag and undo preserve
     ]}}},
   ]);
 });
+
+test("imported PNG and scoped hotspots edit in Canvas and public projection navigates", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "archive", name: "Archive", revision: 4 };
+    const writes: unknown[] = [];
+    let saved: unknown = null;
+    Object.assign(window, {
+      isTauri: true, __mediaWrites: writes,
+      __TAURI_INTERNALS__: {
+        invoke: async (command: string, args: Record<string, unknown>) => {
+          if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+          if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+          if (command === "workspace_worlds") return [{ ...world }];
+          if (command === "workspace_snapshot") return {world:{...world},day:args.day,view_revision:args.revision??world.revision,people:[{id:"alice",label:"Alice"},{id:"bob",label:"Bob"}],relationships:[],events:[],definitions:[]};
+          if (command === "workspace_saved_queries") return [];
+          if (command === "workspace_media_assets") return [{id:"asset",name:"Archive illustration",width:240,height:120,revision:3}];
+          if (command === "workspace_entry_layout") return saved;
+          if (command === "workspace_save_layout") {writes.push(args.document);saved=[args.document,args.published];world.revision++;return null;}
+          if (command === "workspace_public_entry") {
+            if(args.entryId==="bob")return {content:{Text:"Released companion page"}};
+            const canvas=document.createElement("canvas");canvas.width=240;canvas.height=120;
+            const painter=canvas.getContext("2d")!;
+            painter.fillStyle="#d1bca0";painter.fillRect(0,0,240,120);painter.fillStyle="#496657";painter.fillRect(24,20,70,80);painter.fillStyle="#725840";painter.fillRect(146,20,70,80);
+            return {content:{Image:{width:240,height:120,png_base64:canvas.toDataURL("image/png").split(",")[1],alt:"Guild portrait",hotspots:[{id:"public-hotspot",x:2500,y:5000,link:{target:{world:"archive",id:"bob"},label:"Companion"}}]}}};
+          }
+          if(command==="workspace_public_entry_backlinks")return {matches:[],truncated:false};
+          throw new Error("Unexpected mock command: "+command);
+        },
+      },
+    });
+  });
+  await page.goto("/");
+  const graph=page.getByRole("region",{name:"Saved world graph"});
+  const inspector=graph.getByRole("complementary",{name:"Node inspector"});
+  await graph.locator("#nodes button[data-node=alice]").click();
+  await inspector.getByRole("button",{name:"Open character page"}).click();
+  await inspector.getByRole("textbox",{name:"Page text",exact:true}).fill("Guild biography");
+  await inspector.getByRole("button",{name:"Open Canvas tree"}).click();
+  await inspector.getByLabel("New component kind").selectOption("Image");
+  await inspector.getByRole("button",{name:"Add child"}).click();
+  await inspector.getByRole("button",{name:"Choose imported image"}).click();
+  await inspector.getByLabel("Imported PNG").selectOption("asset");
+  await inspector.getByLabel("Image alternative text").fill("Guild portrait");
+  await inspector.getByLabel("Component audience").selectOption("Public");
+  await inspector.getByRole("button",{name:"Add private hotspot"}).click();
+  await inspector.getByLabel("Hotspot label 1").fill("Companion");
+  await inspector.getByLabel("Hotspot target 1").fill("bob");
+  await inspector.getByLabel("Hotspot x percent 1").fill("25");
+  await inspector.getByLabel("Hotspot audience 1").selectOption("Public");
+  await inspector.getByRole("button",{name:"Add private hotspot"}).click();
+  await inspector.getByLabel("Hotspot label 2").fill("Private associate");
+  await inspector.getByLabel("Hotspot target 2").fill("bob");
+  await inspector.getByLabel("Publish page text").check();
+  await inspector.getByRole("button",{name:"Save page"}).click();
+  const writes=await page.evaluate(()=>(window as unknown as {__mediaWrites:unknown[]}).__mediaWrites);
+  expect(writes).toMatchObject([{root:{content:{Stack:[{content:{Text:"Guild biography"}},{content:{Text:""}},{audience:"Public",content:{Image:{asset:"asset",alt:"Guild portrait",hotspots:[{x:2500,audience:"Public",link:{label:"Companion"}},{audience:"Author",link:{label:"Private associate"}}]}}}]}}}]);
+  await inspector.getByRole("button",{name:"Open character page"}).click();
+  await inspector.getByRole("button",{name:"View current public page"}).click();
+  await expect(inspector.getByRole("img",{name:"Guild portrait"})).toBeVisible();
+  await expect(inspector.getByRole("button",{name:"Private associate",exact:true})).toHaveCount(0);
+  if(process.env.ATLAS_CAPTURE_PHASE3==="1"){
+    const timestamp=new Date().toISOString().slice(0,19).replace("T","_").replaceAll(":","-")+"Z";
+    await inspector.screenshot({path:"../../Development-Screenshots/"+timestamp+"_phase-04_canvas_mock-native-image-hotspots_01.png",animations:"disabled"});
+  }
+  await inspector.locator(".image-hotspot").click();
+  await expect(inspector.getByText("Released companion page")).toBeVisible();
+});

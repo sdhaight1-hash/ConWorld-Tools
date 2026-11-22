@@ -41,6 +41,7 @@
     "allow-workspace-ghost-candidates",
     "allow-workspace-resolve-ghost",
     "allow-workspace-founder-matches",
+    "allow-workspace-chromosome-painter",
     "allow-workspace-founder-genome",
     "allow-workspace-metadata-branches",
     "allow-workspace-fork-metadata",

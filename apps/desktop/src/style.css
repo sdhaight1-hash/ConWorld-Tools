@@ -160,3 +160,6 @@ button:disabled { opacity: 0.55; cursor: default; }
 .entry-image .image-hotspot {position:absolute; transform:translate(-50%,-50%); min-width: 28px; min-height:28px; border-radius: 50%; background:#193746; color:white; border:2px solid white; padding: 2px;}
 .entry-image figcaption {font-size:.85rem; margin-top:.4rem;}
 .image-hotspot-list {font-size:.85rem;}
+.chromosome-track {display:flex; height:14px; overflow:hidden; margin:3px 0; border:1px solid #69828c; border-radius:4px;}
+.chromosome-segment {display:block; flex-shrink:0;}
+.chromosome-key {display:inline-block;width:12px;height:12px;margin-right:6px;border-radius:2px;}
