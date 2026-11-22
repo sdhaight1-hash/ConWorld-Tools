@@ -46,6 +46,8 @@ The example URL is a **format illustration, not a usable citation**. Before open
 
 ## Study index
 
+- [Supplemental cartography label collision index](cartography-label-index/README.md) — previously isolated branch research; eight synthetic paired fixtures, actual single-run outputs, no production performance claim. Preserve #68 label budget and accessibility requirements.
+
 - [World Bible-first research reassessment — 2026-11-22](world-bible-research-reassessment-2026-11-22.md) — **In Review**; retrospective disposition of all five principal studies, retained evidence, revised RQ-01–12 weighting and task/dependency matrix. Original results and accepted feature/evolution gates unchanged.
 
 - [NestedLocations — Hierarchical, Spatial and Historical Place Modeling](nested-locations.md) — **Reviewed**, [research #65](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/65). Recommends typed temporal adjacency, optional geometry, bounded queries, scoped maps and cross-phase integration; includes reproducible isolated SQLite tests. Architecture direction accepted in [ADR-013](../ADRs/cross-phase-spatial-cartography.md); production work remains pending.

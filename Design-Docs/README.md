@@ -43,7 +43,7 @@ The [root ticket policy](../README.md#ai-ticket-creation-policy) defines four go
 - [Roadmap Phase 1 — World Persistence, Temporal Model & Provenance](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/2)
 - [Roadmap Phase 2 — Relationships, Tags & Event-Driven History](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/3)
 - [Roadmap Phase 3 — Universal Search, Queries, Backlinks & Discovery](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/4)
-- [Roadmap Phase 4 — Three-Layer Entries & Composable Canvas](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/5)
+- [Roadmap Phase 4 — World Bible, Semantic Entry Authoring, Composable Canvas & Authorized Display](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/5)
 - [Roadmap Phase 5 — Genealogy, Dynasties, Households & Organizations](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/6)
 - [Roadmap Phase 6 — Event Studio, Actor Agency & Conflict Atlas](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/7)
 - [Roadmap Phase 7 — Evidence, Perspectives, Branches & Privacy](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/8)
@@ -55,6 +55,8 @@ The ten original issues link to their relevant design contracts and acceptance g
 ## Accepted architectural evolutions
 
 [Accepted Architectural Evolution #72](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/72) ([design](Architectural-Evolutions/universal-worldbuilding-ontology-and-governed-semantic-extensibility.md), [ADR-007](ADRs/adr-007-governed-semantic-extensibility.md), [approval](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/72#issuecomment-7074159822)). AE-01–09 production gates remain unpassed; original phase/feature gates unchanged.
+
+[Accepted Architectural Evolution #77](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/77) ([design](Architectural-Evolutions/independent-editorial-draft-and-publication-lifecycle.md), [ADR-014](ADRs/adr-014-independent-editorial-release.md)); A1 and production gates pending. [Accepted Feature #78](Features/configurable-world-management-workspaces-and-dashboards.md) remains conditional on B1.
 
 ## Current repository state
 
@@ -68,7 +70,12 @@ See the [Phase Zero verification log](Phase-0-Verification.md) for the desktop a
 
 **First demonstrable milestone:** author two characters, establish a friendship, create a betrayal event with actor/claim/source, apply an explicit relationship effect, and switch the historic date and viewer perspective. Confirm semantic graph, Canvas component, public Display, and search agree about what is visible and why.
 
+World Bible-first UI framing is reconciled in [06](06-Three-Layer-Entries-and-Canvas.md) and [12](12-Decisions-and-Reconciliation.md); see [integration record](World-Bible-Integration-2026-11-22.md) for candidate status, not a verified main release.
+
 ## Review notes (non-normative)
+
+- [Repository-wide engineering audit — 2026-11-22](Repository-Audit-2026-11-22.md): prior frozen engineering observations; dated, not current CI status.
+- [Historical development-state audit — 2026-11-21](../Development-Audits/2026-11-21-state-of-development.md): archived earlier snapshot.
 
 - [World Bible-first full repository congruence audit — 2026-11-22](../Development-Audits/2026-11-22-world-bible-congruence-audit.md) and [frozen inventory](../Development-Audits/2026-11-22-world-bible-congruence-inventory.md): exact branch/PR/issue/file register, CI status, architecture/document reconciliation, risks and integration plan; non-normative.
 

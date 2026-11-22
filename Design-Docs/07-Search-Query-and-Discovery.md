@@ -2,15 +2,17 @@
 
 **Status:** Normative shared query-service contract; search is a foundation, not a late polish phase.
 
-## 1. One engine, three search experiences
+## 1. One engine, contextual search experiences
 
 **Global search:** names, IDs, aliases, tags, text, sources, media descriptions, organizations, actor roles, conflicts, page content and saved queries; ranking/filters, disambiguation, result provenance and jump-to. Keep current world, branch, date, author revision and perspective.
 
-**Node Studio:** filter objects, edge types, directionality, path/depth and neighbor count; ancestry/common ancestor, event impact, faction intersections and "how are A and B connected?". Discovered names may expand authorized graph neighbors or create *proposals*, never indiscriminately add canon.
+**Entry directory and contextual graph:** filter objects, edge types, directionality, path/depth and neighbor count; ancestry/common ancestor, event impact, faction intersections and "how are A and B connected?". Discovered names may expand authorized graph neighbors or create *proposals*, never indiscriminately add canon.
 
-**Canvas Studio:** search component/primitive palette; picker for objects and media; find within page; query builder with preview/binding; dependency inspector for components, templates and inline references.
+**Entry editor / Canvas:** search component/primitive palette; picker for objects and media; find within page; query builder with preview/binding; dependency inspector for components, templates and inline references.
 
-**Display Studio:** search the **published authorized projection**, including permitted content and linked component data. Query, snippet, facet, result counts, link previews, backtracking paths, HTML exports and image annotations must all obey identical policies.
+**Authorized World Bible reader:** search the **published authorized projection**, including permitted content and linked component data. Query, snippet, facet, result counts, link previews, backtracking paths, HTML exports and image annotations must all obey identical policies.
+
+Distinguish go-to identity (with stable kind-labelled matches and ambiguity), find-in-world (typed queries, facts, sources and proposals), and find-in-article (authorized text and exact stable element anchors). Reuse the same query services and bounded request/cancel controls; a reader's corpus, title, snippet, ranking, backlink and count cannot be derived from hidden author data on the client. Preserve the selection and draft across navigation; use contextual graph exploration and saved queries before #70 recipes and #78 dashboards.
 
 ## 2. Versioned typed query AST
 

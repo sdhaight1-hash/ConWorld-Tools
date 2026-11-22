@@ -6,11 +6,23 @@
 
 Every eligible world object has an **entry identity**; it can acquire three complementary representations:
 
-1. **Node Studio (semantic representation):** typed objects, edges, draft nodes, explicit links, inferred suggestions, graph layouts and relationship exploration. This is authoring of world *meaning*.
-2. **Canvas Studio (compositional representation):** a separate, versioned layout document that arranges written content, image annotations, responsive layout primitives and reusable query-bound components. This is authoring of *presentation*.
-3. **Display Studio (publication representation):** compiled, read-only output for an audience/branch/date/revision/perspective. This is *authorized viewing*.
+1. **Node (semantic representation):** typed objects, edges, draft nodes, explicit links, inferred suggestions, graph layouts and relationship exploration. This is authoring of world *meaning*.
+2. **Canvas (compositional representation):** a separate, versioned layout document that arranges written content, image annotations, responsive layout primitives and reusable query-bound components. This is authoring of *presentation*.
+3. **Display (publication representation):** compiled, read-only output for an audience/branch/date/revision/perspective. This is *authorized viewing*.
 
 An object may exist before it has a Canvas document; an entry without a published page remains discoverable to permitted authors. All three layers refer to stable world ObjectIds; never copy a person into a page-specific JSON shadow database.
+
+### World Bible authoring contract (owner-directed reconciliation, 2026-11-22)
+
+The World Bible is the primary application, not merely its publication destination. The author directory can open any permitted stable identity, including records without pages; the reader directory is compiled from authorized released pages. Read/Edit/Connections/Hierarchy and specialist tools are contextual capabilities; the existing three representations above are not mandatory separate navigation stages. Preserve world, branch, fictional date, recorded revision, perspective, selection, focus and dirty-draft safety across supported operations. Unsupported history or audience capabilities are explicitly unavailable.
+
+Entry type and governed classifications select compatible semantic controls. Tags are independent metadata; neither classification nor tag asserts membership. Article templates select the initial layout and optional components; visual styling controls fonts, colors, spacing, images and presentation. Presets may suggest fields, not create facts, and changing templates/styles never changes identity. Use existing versioned templates and stable ElementIds. No arbitrary schema, predicate, formula or execution runtime is introduced.
+
+A contextual semantic component can explicitly invoke an existing validated native command (e.g. identity, parentage, membership, title holding, location or sourced measurement) or bind an authorized read projection. It is not a new owner of data. A common searchable reference picker identifies target kind and stable ID and restricts predicates/roles to actual supported compatible services. Preserve directional roles, source, dates, revision, claims vs canon, and specialized validation; unknown/unsupported facts remain unavailable or unrecorded rather than fabricated. Removing a layout component only removes presentation; ending, correcting or withdrawing a fact is a separate explicit semantic command. A graph cable and entry control reference the same underlying fact. Suggested bindings do not overwrite authored prose or silently publish hidden results.
+
+Hierarchy views reuse stable objects and typed domain relations (04/05/13); family descent, household membership, institutional hierarchy, physical and administrative containment, ownership and authority retain separate lenses and validators. An entry may appear in multiple views; no universal parent field or transitivity across unrelated predicates. New hierarchy semantics are not approved by this UI change.
+
+Publication remains the compiled authorized projection; reader never receives author-only raw relations, hidden counts, or unreleased titles. Current save/publication coupling remains explicit until #77 A1 and subsequent migration/verification. Author-visible template or semantic editing does not bypass existing privacy and revision contracts. This reconciliation retains every original AT/SP/AE/WT/A/B gate and does not certify implementation.
 
 ## 2. Semantic node types and connection strengths
 
@@ -21,7 +33,7 @@ Separate:
 - **Explicit content references** created from rich text, cards, images and citations.
 - **Discovered candidates** from search, alias or AI, which are proposals, not facts.
 
-Node Studio can auto-expand already-authorized canonical neighbors when budgets permit; it may suggest ghost nodes for unknown mentions. "Promote" is an explicit typed action with review, deduplication and an undoable audit record. No silent creation of kinship, membership or guilt from a name match.
+The contextual graph can auto-expand already-authorized canonical neighbors when budgets permit; it may suggest ghost nodes for unknown mentions. "Promote" is an explicit typed action with review, deduplication and an undoable audit record. No silent creation of kinship, membership or guilt from a name match.
 
 Graph coordinates, pins, grouping, collapsed clusters and colors are view metadata, not historical properties of entities.
 

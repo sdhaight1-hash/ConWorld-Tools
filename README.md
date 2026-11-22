@@ -17,17 +17,19 @@ The central idea is that a world is more than a collection of character profiles
 - **Search, queries, and discovery:** Search names, aliases, keywords, sources, images, historical periods, connections, and graph paths. Find backlinks, identify possible links from text or annotated images, and suggest missing or draft nodes. **Suggested links are not automatically accepted as historical facts.**
 - **Evidence, perspective, and publication:** Distinguish author-established truth from testimony, rumor, interpretation, uncertainty, and what individual characters know. Explore the world as it stood at a chosen date or from a chosen perspective, while keeping unpublished material out of public-facing results.
 
-### Three connected layers for every entry
+### World Bible — three connected representations
 
-The application is designed around **three complementary representations of the same underlying world data**:
+The **World Bible** is the central authoring and exploration interface: a searchable directory, entry reader/editor, and contextual tools for connections, hierarchy, genealogy, geography, history and evidence. Authors may create an identity without an article, then compose it later. The application retains **three complementary representations of the same underlying world data**, not three compulsory workspaces:
 
 | Layer | Purpose |
 | --- | --- |
-| **Node Studio** | Create semantic nodes—characters, relationships, factions, events, conflicts, places, and more—and build, inspect, search, and progressively discover their connections. |
-| **Canvas Studio** | Design attractive, reusable entries using templates, responsive layout primitives (grids, stacks, panels, overlays), rich text, images, and embedded components such as family trees, timelines, maps, or query-driven lists. Choose which elements are eligible for display. |
-| **Display Studio** | Present a polished, navigable, read-only view of the authorized entry, with links, contextual search, and appropriate date/perspective filtering. Hidden author content must not leak through links, search results, image hotspots, or other components. |
+| **Semantic model (nodes and facts)** | Create semantic nodes—characters, relationships, factions, events, conflicts, places, and more—and build, inspect, search, and progressively discover their connections. |
+| **Canvas (article composition)** | Design attractive, reusable entries using templates, responsive layout primitives (grids, stacks, panels, overlays), rich text, images, and embedded components such as family trees, timelines, maps, or query-driven lists. Choose which elements are eligible for display. |
+| **Display (authorized reading)** | Present a polished, navigable, read-only view of the authorized entry, with links, contextual search, and appropriate date/perspective filtering. Hidden author content must not leak through links, search results, image hotspots, or other components. |
 
 **The three layers do not maintain separate copies of character or historical data.** They reference one shared world model. A change to a relationship or organization can therefore appear consistently in its node graph, a Canvas timeline or table, and a published page.
+
+Article type/profile suggests compatible semantic controls and starting components; versioned templates define layout, and visual themes define styling. The entry editor can expose explicit validated semantic commands alongside bound presentation components. A relationship graph remains a contextual specialist tool, not a prerequisite to creating an entry. See the [reconciled entry contract](Design-Docs/06-Three-Layer-Entries-and-Canvas.md) and [decision record](Design-Docs/12-Decisions-and-Reconciliation.md).
 
 ### An example of the intended experience
 
