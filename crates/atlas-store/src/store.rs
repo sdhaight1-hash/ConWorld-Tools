@@ -248,6 +248,7 @@ impl Store {
             tx.execute_batch(include_str!("../migrations/0044.sql"))?;
         }
         if version < SCHEMA_VERSION {
+            verify_semantic_schema_lineage(&tx, SCHEMA_VERSION)?;
             verify_foreign_keys(&tx)?;
             annotation::verify_annotation_integrity(&tx)?;
             site_area::verify_site_area_integrity(&tx)?;
@@ -3012,9 +3013,51 @@ fn apply_change(
     Ok(())
 }
 
-/// Schema 37 was used by two independent unreleased branches.
-/// Reject the spatial variant rather than treating it as ontology history.
+/// Reject incompatible unreleased schema lineage and missing required seek
+/// indexes before admitting a database to the corresponding query planner.
 pub(crate) fn verify_semantic_schema_lineage(conn: &Connection, version: i64) -> Result<(), Error> {
+    if version >= 44 {
+        for (name, table, columns) in [
+            (
+                "semantic_label_seek",
+                "object_versions",
+                &["world_id", "label", "object_id"][..],
+            ),
+            (
+                "classification_subject_profile",
+                "concept_classifications",
+                &[
+                    "world_id",
+                    "subject_id",
+                    "profile",
+                    "starts_at",
+                    "recorded_revision",
+                ][..],
+            ),
+        ] {
+            let exists: bool = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_schema
+                 WHERE type='index' AND name=?1 AND tbl_name=?2)",
+                params![name, table],
+                |row| row.get(0),
+            )?;
+            let mut statement =
+                conn.prepare("SELECT name FROM pragma_index_info(?1) ORDER BY seqno")?;
+            let actual = statement
+                .query_map([name], |row| row.get::<_, Option<String>>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            if !exists
+                || !actual
+                    .iter()
+                    .map(|column| column.as_deref())
+                    .eq(columns.iter().copied().map(Some))
+            {
+                return Err(Error::Integrity(format!(
+                    "missing or incompatible semantic index: {name}"
+                )));
+            }
+        }
+    }
     if !(37..=40).contains(&version) {
         return Ok(());
     }

@@ -15,7 +15,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !matches!(count, 1000 | 10000 | 50000) {
         return Err("choose 1000, 10000 or 50000".into());
     }
-    let mut store = Store::open(":memory:")?;
+    let persisted = std::env::args().nth(2).as_deref() == Some("--persisted");
+    let directory = tempfile::tempdir()?;
+    let database = if persisted {
+        directory.path().join("semantic.sqlite")
+    } else {
+        std::path::PathBuf::from(":memory:")
+    };
+    println!(
+        "storage={} entities={count}",
+        if persisted { "disk" } else { "memory" }
+    );
+    let mut store = Store::open(&database)?;
     let world = store.create_world("Semantic workload", Scope::Author)?;
     let mut view = ViewContext {
         world: world.id,
@@ -265,5 +276,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("{peak}");
     }
     store.verify_foreign_keys(Scope::Author)?;
+    if persisted {
+        let started = Instant::now();
+        let backup = directory.path().join("backup.sqlite");
+        let restored = directory.path().join("restored.sqlite");
+        store.backup_to(&backup, Scope::Author)?;
+        let manifest = atlas_store::archive::restore_archive(&backup, &restored, Scope::Author)?;
+        let reopened = Store::open(&restored)?;
+        assert_eq!(
+            reopened.resolve_semantic_fact(fact, view)?,
+            store.resolve_semantic_fact(fact, view)?
+        );
+        let expected = store.execute_query(&composite, view)?;
+        let actual = reopened.execute_query(&composite, view)?;
+        assert_eq!(actual.rows, expected.rows);
+        assert_eq!(actual.truncated, expected.truncated);
+        println!(
+            "archive_replay_schema={} database_bytes={} backup_bytes={} elapsed_ms={}",
+            manifest.schema,
+            std::fs::metadata(&database)?.len(),
+            std::fs::metadata(&backup)?.len(),
+            started.elapsed().as_millis()
+        );
+    }
     Ok(())
 }

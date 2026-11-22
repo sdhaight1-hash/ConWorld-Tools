@@ -5,6 +5,7 @@ on:
     paths: ['crates/atlas-store/**', 'Cargo.toml', 'Cargo.lock', '.github/workflows/rust.yml']
   pull_request:
     paths: ['crates/atlas-store/**', 'Cargo.toml', 'Cargo.lock', '.github/workflows/rust.yml']
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -16,6 +17,7 @@ permissions:
 jobs:
   verify:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
@@ -26,18 +28,63 @@ jobs:
       - run: cargo +stable clippy -p atlas-store --all-targets --locked -- -D warnings
       - run: cargo +stable test -p atlas-store --locked
       - name: Compare actual author task alternatives A/B/C
-        run: cargo +stable run -p atlas-store --example ontology_author_tasks --locked
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo +stable run -p atlas-store --example ontology_author_tasks --locked | tee "$RUNNER_TEMP/ontology-author-tasks.txt"
+      - name: Archive comparative author task results
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ontology-author-tasks-${{ matrix.os }}
+          path: ${{ runner.temp }}/ontology-author-tasks.txt
+          if-no-files-found: error
+          retention-days: 30
+
+  scale:
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - run: rustup toolchain install stable --profile minimal
       - name: Measure persisted focused workloads (1k, 10k, 50k)
         run: |
           cargo +stable run -p atlas-store --example focused_world --locked --release -- 1000
           cargo +stable run -p atlas-store --example focused_world --locked --release -- 10000
           cargo +stable run -p atlas-store --example focused_world --locked --release -- 50000
+      - name: Measure persisted semantic workload and archive replay (1000)
+        timeout-minutes: 45
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo +stable run -p atlas-store --example semantic_workload --locked --release -- 1000 --persisted | tee "$RUNNER_TEMP/semantic-persisted-1000.txt"
       - name: Measure semantic sparse and dense workloads (1000)
         timeout-minutes: 45
-        run: cargo +stable run -p atlas-store --example semantic_workload --locked --release -- 1000
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo +stable run -p atlas-store --example semantic_workload --locked --release -- 1000 | tee "$RUNNER_TEMP/semantic-1000.txt"
       - name: Measure semantic sparse and dense workloads (10000)
         timeout-minutes: 45
-        run: cargo +stable run -p atlas-store --example semantic_workload --locked --release -- 10000
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo +stable run -p atlas-store --example semantic_workload --locked --release -- 10000 | tee "$RUNNER_TEMP/semantic-10000.txt"
       - name: Measure semantic sparse and dense workloads (50000)
         timeout-minutes: 45
-        run: cargo +stable run -p atlas-store --example semantic_workload --locked --release -- 50000
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo +stable run -p atlas-store --example semantic_workload --locked --release -- 50000 | tee "$RUNNER_TEMP/semantic-50000.txt"
+      - name: Archive semantic workload measurements
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ontology-semantic-workloads-${{ matrix.os }}
+          path: ${{ runner.temp }}/semantic-*.txt
+          if-no-files-found: warn
+          retention-days: 30

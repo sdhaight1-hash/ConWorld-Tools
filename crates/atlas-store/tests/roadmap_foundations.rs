@@ -3937,6 +3937,90 @@ fn site_area_preserves_unknown_zero_units_corrections_and_archive() -> Result<()
         reopened.execute_query(&zero, branch)?.rows,
         store.execute_query(&zero, branch)?.rows
     );
+    assert_eq!(inspect_archive(&backup, Scope::Author)?.schema, 44);
+
+    // Schema 43 contains the full canonical history but no schema-44 indexes.
+    let legacy = dir.path().join("schema43.sqlite");
+    std::fs::copy(&backup, &legacy)?;
+    let connection = rusqlite::Connection::open(&legacy)?;
+    connection.execute_batch(
+        "DROP INDEX semantic_label_seek;
+         DROP INDEX classification_subject_profile;
+         PRAGMA user_version=43;",
+    )?;
+    drop(connection);
+    assert_eq!(inspect_archive(&legacy, Scope::Author)?.schema, 43);
+    let migrated = dir.path().join("migrated44.sqlite");
+    assert_eq!(
+        restore_archive(&legacy, &migrated, Scope::Author)?.schema,
+        44
+    );
+    let migrated_store = Store::open(&migrated)?;
+    for context in [prior, later, inherited, branch, current_main] {
+        assert_eq!(
+            migrated_store.site_area(context, place)?,
+            store.site_area(context, place)?
+        );
+        assert_eq!(
+            migrated_store.execute_query(&zero, context)?.rows,
+            store.execute_query(&zero, context)?.rows
+        );
+    }
+    assert_eq!(inspect_archive(&legacy, Scope::Author)?.schema, 43);
+    // Missing required index in a database claiming schema 44 is not a
+    // legitimate older archive. Reject it rather than publish an unusable copy.
+    let missing_index = dir.path().join("missing-index.sqlite");
+    std::fs::copy(&backup, &missing_index)?;
+    let connection = rusqlite::Connection::open(&missing_index)?;
+    connection.execute_batch("DROP INDEX semantic_label_seek;")?;
+    drop(connection);
+    assert!(matches!(
+        inspect_archive(&missing_index, Scope::Author),
+        Err(Error::Integrity(_))
+    ));
+    assert!(matches!(
+        Store::open(&missing_index),
+        Err(Error::Integrity(_))
+    ));
+    let rejected = dir.path().join("rejected.sqlite");
+    assert!(restore_archive(&missing_index, &rejected, Scope::Author).is_err());
+    assert!(!rejected.exists());
+
+    // A valid FK graph cannot prove a correction actually withdrew its old
+    // assertion at the same revision. Reject this damaged history.
+    let broken = dir.path().join("broken-correction.sqlite");
+    std::fs::copy(&backup, &broken)?;
+    let connection = rusqlite::Connection::open(&broken)?;
+    connection.execute(
+        "DELETE FROM site_area_withdrawals WHERE world_id=?1 AND fact_id=?2",
+        rusqlite::params![world.id.0.as_bytes(), first.as_bytes()],
+    )?;
+    drop(connection);
+    assert!(matches!(
+        inspect_archive(&broken, Scope::Author),
+        Err(Error::Integrity(_))
+    ));
+    assert!(restore_archive(&broken, &rejected, Scope::Author).is_err());
+    assert!(!rejected.exists());
+
+    // The same corrupt legacy archive must fail a schema-44 upgrade atomically.
+    let connection = rusqlite::Connection::open(&broken)?;
+    connection.execute_batch(
+        "DROP INDEX semantic_label_seek;
+         DROP INDEX classification_subject_profile;
+         PRAGMA user_version=43;",
+    )?;
+    drop(connection);
+    assert!(matches!(Store::open(&broken), Err(Error::Integrity(_))));
+    let connection = rusqlite::Connection::open(&broken)?;
+    let schema: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    assert_eq!(schema, 43);
+    let index: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name='semantic_label_seek')",
+        [],
+        |row| row.get(0),
+    )?;
+    assert!(!index);
     Ok(())
 }
 

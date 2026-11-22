@@ -315,6 +315,21 @@ pub(crate) fn verify_site_area_integrity(conn: &Connection) -> Result<(), Error>
             ON old.world_id=a.world_id AND old.id=a.corrects
             WHERE old.place_id<>a.place_id OR old.starts_at<>a.starts_at
                 OR old.ends_before IS NOT a.ends_before OR old.recorded_revision>=a.recorded_revision
+        ) OR EXISTS(
+            SELECT 1 FROM site_area_facts a
+            JOIN author_revisions r ON r.world_id=a.world_id AND r.revision=a.recorded_revision
+            WHERE a.corrects IS NOT NULL AND NOT EXISTS(
+                SELECT 1 FROM site_area_withdrawals w
+                WHERE w.world_id=a.world_id AND w.fact_id=a.corrects
+                    AND w.branch_id=r.branch_id AND w.revision=a.recorded_revision
+            )
+        ) OR EXISTS(
+            SELECT 1 FROM site_area_withdrawals w
+            WHERE NOT EXISTS(
+                SELECT 1 FROM site_area_facts a
+                WHERE a.world_id=w.world_id AND a.corrects=w.fact_id
+                    AND a.recorded_revision=w.revision
+            )
         )",
         [],
         |row| row.get(0),
