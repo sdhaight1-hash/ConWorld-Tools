@@ -1621,7 +1621,8 @@ fn grid_and_panel_preserve_visibility_search_backlinks_and_moved_bindings() -> R
 }
 
 #[test]
-fn versioned_template_keeps_queries_private_and_persists_independent_instances() -> Result<(), Error> {
+fn versioned_template_keeps_queries_private_and_persists_independent_instances() -> Result<(), Error>
+{
     use atlas_store::layout::TemplateKind;
 
     let mut store = Store::open(":memory:")?;
@@ -1652,10 +1653,7 @@ fn versioned_template_keeps_queries_private_and_persists_independent_instances()
     let mut document = LayoutDocument {
         schema_version: LAYOUT_SCHEMA_VERSION,
         entry: id(&world, 1),
-        root: block(
-            ClaimAudience::Public,
-            ElementContent::Stack(vec![template]),
-        ),
+        root: block(ClaimAudience::Public, ElementContent::Stack(vec![template])),
     };
     let mut invalid = document.clone();
     if let ElementContent::Stack(children) = &mut invalid.root.content
