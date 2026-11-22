@@ -1063,6 +1063,13 @@ impl AuthorWorkspace {
                         ObjectData::FamilyHouse => "family_house",
                         ObjectData::Faction => "faction",
                         ObjectData::Conflict => "conflict",
+                        ObjectData::Office => "office",
+                        ObjectData::Title => "title",
+                        ObjectData::Asset => "asset",
+                        ObjectData::Population => "population",
+                        ObjectData::ConflictIssue => "conflict_issue",
+                        ObjectData::ConflictPhase => "conflict_phase",
+                        ObjectData::SuccessionRule => "succession_rule",
                         ObjectData::Definition { .. } => "definition",
                         ObjectData::Relationship { .. } => "relationship",
                         ObjectData::EventInvolvement { .. } => "event_involvement",
@@ -2465,6 +2472,70 @@ pub fn workspace_instantiate_custom_template(
             definition_revision,
             reference(context.world, &entry_id)?,
         )
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn workspace_ghost_candidates(
+    workspace: State<'_, AuthorWorkspace>,
+    request: NetworkContext,
+    claim_id: String,
+) -> Result<Vec<atlas_store::network::GhostCandidate>, String> {
+    let store = workspace.lock()?;
+    let view = request.resolve(&store)?;
+    store
+        .ghost_candidates(view, reference(view.world, &claim_id)?)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn workspace_resolve_ghost(
+    workspace: State<'_, AuthorWorkspace>,
+    request: NetworkContext,
+    proposal_id: String,
+    target_id: String,
+) -> Result<(), String> {
+    let mut store = workspace.lock()?;
+    let view = request.resolve(&store)?;
+    store
+        .resolve_ghost_to_existing(
+            view,
+            id(&proposal_id)?,
+            reference(view.world, &target_id)?,
+            Uuid::new_v4(),
+        )
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn workspace_founder_matches(
+    workspace: State<'_, AuthorWorkspace>,
+    request: FamilyRequest,
+    other_id: String,
+    seed: u32,
+) -> Result<Vec<atlas_store::inheritance::FounderMatch>, String> {
+    let store = workspace.lock()?;
+    let (context, person) = request.resolve(&store)?;
+    store
+        .founder_matches(
+            context,
+            person,
+            reference(context.world, &other_id)?,
+            u64::from(seed),
+        )
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn workspace_founder_genome(
+    workspace: State<'_, AuthorWorkspace>,
+    request: FamilyRequest,
+    seed: u32,
+) -> Result<atlas_store::inheritance::FounderGenome, String> {
+    let store = workspace.lock()?;
+    let (context, person) = request.resolve(&store)?;
+    store
+        .founder_genome(context, person, u64::from(seed))
         .map_err(|e| e.to_string())
 }
 

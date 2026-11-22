@@ -179,7 +179,8 @@ fn fresh_elements(element: &mut LayoutElement, source: ObjectRef, destination: O
         ElementContent::FamilyTable(target)
         | ElementContent::NetworkTable(target)
         | ElementContent::ImpactTable(target)
-        | ElementContent::PublishedReferences(target) => rebind(target),
+        | ElementContent::PublishedReferences(target)
+        | ElementContent::PublishedStatements(target) => rebind(target),
         ElementContent::Query(query) => match &mut query.filter {
             QueryFilter::ParticipantEvents { participant, .. } => rebind(participant),
             QueryFilter::EventRole { event, .. } => rebind(event),

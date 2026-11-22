@@ -24,6 +24,7 @@ export function historicalComponent(kind: string, world: string, id: string): Bl
   if (kind === "network") return block({ NetworkTable: target });
   if (kind === "impact") return block({ ImpactTable: target });
   if (kind === "published_refs") return block({ PublishedReferences: target });
+  if (kind === "published_statements") return block({ PublishedStatements: target });
   const role = ({ actors: "Actor", witnesses: "Witness", victims: "Victim",
     stakeholders: "Stakeholder" } as Record<string, string>)[kind];
   const filter = kind === "person_events" ? { ParticipantEvents: { participant: target, role: null } }

@@ -14,12 +14,12 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
     <p class="hint">Author-only. Stable object IDs come from historical search. Source evidence is required for network facts.</p>
     <form data-identity class="editor-form"><fieldset><legend>Create typed identity</legend>
       <label>Identity label <input name="label" required maxlength="800"></label>
-      <label>Identity type <select name="kind"><option value="organization">Organization</option><option value="household">Household</option><option value="family_house">Family house</option><option value="faction">Faction</option><option value="conflict">Conflict</option><option value="person">Person</option></select></label>
+      <label>Identity type <select name="kind"><option value="organization">Organization</option><option value="household">Household</option><option value="family_house">Family house</option><option value="faction">Faction</option><option value="conflict">Conflict</option><option value="office">Office</option><option value="title">Hereditary or legal title</option><option value="asset">Asset</option><option value="population">Fictional population</option><option value="conflict_issue">Conflict issue</option><option value="conflict_phase">Conflict phase</option><option value="succession_rule">Succession rule</option><option value="person">Person</option></select></label>
       <button>Create identity</button></fieldset></form>
     <form data-fact class="editor-form"><fieldset><legend>Record sourced network fact</legend>
       <label>Subject identity <input name="subject" required></label><label>Target identity <input name="target" required></label>
       <label>Evidence source identity <input name="source" required></label>
-      <label>Fact type <select name="kind"><option value="membership">Membership</option><option value="marriage">Marriage</option><option value="succession">Institutional succession</option><option value="confirmed_cause">Confirmed cause</option><option value="alleged_cause">Alleged cause</option><option value="conflict_position">Faction conflict stance</option></select></label>
+      <label>Fact type <select name="kind"><option value="membership">Membership</option><option value="marriage">Marriage</option><option value="succession">Institutional succession</option><option value="confirmed_cause">Confirmed cause</option><option value="alleged_cause">Alleged cause</option><option value="conflict_position">Faction conflict stance</option><option value="office_holding">Office holding</option><option value="office_of">Office in institution</option><option value="title_holding">Title holding</option><option value="title_of">Title of institution</option><option value="ownership">Ownership</option><option value="issue_of">Issue in conflict</option><option value="phase_of">Phase in conflict</option><option value="rule_of">Succession rule of title</option><option value="population_member">Founder population affiliation</option></select></label>
       <label>Role or causal rationale <input name="role" required maxlength="800"></label>
       <label>Starts at day <input name="start" type="number" required></label><label>Ends before day <input name="end" type="number"></label>
       <button>Record network fact</button></fieldset></form>
@@ -28,8 +28,9 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
       <label>Claim identity <input name="claim" required></label>
       <label>Start UTF-8 byte <input name="start" type="number" min="0" required></label>
       <label>End UTF-8 byte (exclusive) <input name="end" type="number" min="1" required></label>
-      <label>Proposed type <select name="kind"><option value="person">Person</option><option value="organization">Organization</option><option value="household">Household</option><option value="family_house">Family house</option><option value="faction">Faction</option><option value="conflict">Conflict</option></select></label>
+      <label>Proposed type <select name="kind"><option value="person">Person</option><option value="organization">Organization</option><option value="household">Household</option><option value="family_house">Family house</option><option value="faction">Faction</option><option value="conflict">Conflict</option><option value="office">Office</option><option value="title">Hereditary or legal title</option><option value="asset">Asset</option><option value="population">Fictional population</option><option value="conflict_issue">Conflict issue</option><option value="conflict_phase">Conflict phase</option><option value="succession_rule">Succession rule</option></select></label>
       <button>Propose ghost identity</button></fieldset></form>
+    <button type="button" data-candidates>Find possible names in selected claim</button><ul data-candidate-results></ul>
     <button type="button" data-review>Review draft identities</button><ul data-ghosts></ul>
     <form data-template class="editor-form"><fieldset><legend>Save persisted page as custom template</legend>
       <p class="hint">Copies authored presentation, not resolved data. Existing instances never auto-update.</p>
@@ -92,6 +93,25 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
       status.textContent = rows.length + " confirmed downstream events.";
     } catch (error) { if (valid()) status.textContent = String(error); }
   };
+  host.querySelector<HTMLButtonElement>("[data-candidates]")!.onclick = async () => {
+    try {
+      const ghostForm = form("[data-ghost]");
+      const rows = await invoke<{label:string;start_byte:number;end_byte:number;existing:Ref[]}[]>("workspace_ghost_candidates", {request,claimId:value(ghostForm,"claim")});
+      if(!valid())return;
+      const list=host.querySelector("[data-candidate-results]")!;list.replaceChildren();
+      for(const candidate of rows) {
+        const row=document.createElement("li");
+        row.textContent=candidate.label+" · "+candidate.existing.length+" possible existing identities ";
+        row.append(action("Select claim span",()=>{
+          (ghostForm.elements.namedItem("start") as HTMLInputElement).value=String(candidate.start_byte);
+          (ghostForm.elements.namedItem("end") as HTMLInputElement).value=String(candidate.end_byte);
+        }));
+        for(const match of candidate.existing) row.append(" · "+match.id);
+        list.append(row);
+      }
+      status.textContent="Possible names only; no identities or facts have been created.";
+    } catch(error){if(valid())status.textContent=String(error);}
+  };
   submit("[data-ghost]", f=>void write("workspace_propose_ghost",{claimId:value(f,"claim"),startByte:Number(value(f,"start")),
     endByte:Number(value(f,"end")),kind:value(f,"kind")}));
   submit("[data-template]", f => void write("workspace_save_custom_template", { sourceId: value(f,"source"), name:value(f,"name"), templateId:value(f,"id") || null }));
@@ -111,8 +131,15 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
       for(const ghost of ghosts){
         const row=document.createElement("li");row.textContent=ghost.label+" · "+ghost.kind+" · claim "+ghost.claim.id+" ";
         if(ghost.reviewed)row.append(ghost.promoted?"Promoted: "+ghost.promoted.id:"Dismissed");
-        else row.append(action("Promote draft",()=>void write("workspace_review_ghost",{proposalId:ghost.id,promote:true})),
-          action("Dismiss draft",()=>void write("workspace_review_ghost",{proposalId:ghost.id,promote:false})));
+        else {
+          const target=document.createElement("input");
+          target.placeholder="Existing matching identity";
+          target.setAttribute("aria-label","Existing identity for "+ghost.label);
+          target.disabled=!editable;
+          row.append(action("Promote draft",()=>void write("workspace_review_ghost",{proposalId:ghost.id,promote:true})),
+            action("Dismiss draft",()=>void write("workspace_review_ghost",{proposalId:ghost.id,promote:false})),
+            target, action("Resolve to existing",()=>void write("workspace_resolve_ghost",{proposalId:ghost.id,targetId:target.value.trim()})));
+        }
         list.append(row);
       }
       status.textContent=ghosts.length+" draft records.";

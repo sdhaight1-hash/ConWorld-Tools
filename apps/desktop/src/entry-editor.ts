@@ -10,11 +10,11 @@ export type Block = { id: string; audience: string; content: { Text?: string; St
   Grid?: { columns: number; children: Block[] }; Template?: { key: string; version: number; children: Block[] };
   CustomTemplate?: { template_id: string; definition_revision: number; children: Block[] };
   SavedQuery?: Binding; ObjectLink?: ObjectLink; Query?: unknown; FamilyTable?: { world: string; id: string }; NetworkTable?: { world: string; id: string };
-  PublishedReferences?: { world: string; id: string }; ImpactTable?: { world: string; id: string } } };
+  PublishedStatements?: { world: string; id: string }; PublishedReferences?: { world: string; id: string }; ImpactTable?: { world: string; id: string } } };
 type Document = { schema_version: number; entry: { world: string; id: string }; root: Block };
 type Display = { content: { Text?: string; Stack?: Display[]; Panel?: Display[];
   Grid?: { columns: number; children: Display[] }; ObjectLink?: ObjectLink;
-  ReferenceRows?: { links: ObjectLink[]; truncated: boolean };
+  StatementRows?: { statements: string[]; truncated: boolean }; ReferenceRows?: { links: ObjectLink[]; truncated: boolean };
   QueryRows?: { records: [{ world: string; id: string }, string][]; truncated: boolean } } };
 type EntrySearch = { matches: [string, string][]; truncated: boolean };
 
@@ -179,6 +179,16 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
               button.disabled = !openAuthor || link.target.world !== worldId;
               button.addEventListener("click", () => openAuthor?.(link.target.id));
               parent.append(button);
+            }
+            if (node.content.StatementRows) {
+              const group = layoutContainer(parent, "panel");
+              const title = document.createElement("p");
+              title.textContent = "Released historical statements";
+              group.append(title);
+              for (const statement of node.content.StatementRows.statements) {
+                const row = document.createElement("p"); row.textContent = statement; group.append(row);
+              }
+              if (!node.content.StatementRows.statements.length) group.append("No released statements in this view.");
             }
             if (node.content.ReferenceRows) {
               const group = layoutContainer(parent, "panel");
@@ -355,7 +365,7 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
         let control: HTMLInputElement | HTMLSelectElement;
         if (parameter.default.type === "object_kind") {
           control = document.createElement("select");
-          for (const kind of ["person", "organization", "household", "family_house", "faction", "conflict", "definition", "relationship", "event_involvement", "actor_action",
+          for (const kind of ["person", "organization", "household", "family_house", "faction", "conflict", "office", "title", "asset", "population", "conflict_issue", "conflict_phase", "succession_rule", "definition", "relationship", "event_involvement", "actor_action",
             "historical_event", "source", "claim"]) control.add(new Option(kind.replaceAll("_", " "), kind));
         } else {
           control = document.createElement("input");

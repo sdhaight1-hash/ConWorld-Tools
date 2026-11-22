@@ -24,7 +24,7 @@ mod network;
 mod templates;
 
 // Version 29 adds version-pinned template layout variants without changing tables.
-pub(crate) const SCHEMA_VERSION: i64 = 31;
+pub(crate) const SCHEMA_VERSION: i64 = 33;
 
 // Candidate queries bind world (?1), focus/phrase (?2), author revision (?3),
 // limit (?4) and branch (?5). Follow only immutable inherited revisions.
@@ -190,13 +190,19 @@ impl Store {
         }
         if version < 27 {
             tx.execute_batch(include_str!("../migrations/0027.sql"))?;
-            entries::rebuild_public_page_index(&tx)?;
         }
         if version < 30 {
             tx.execute_batch(include_str!("../migrations/0030.sql"))?;
         }
         if version < 31 {
             tx.execute_batch(include_str!("../migrations/0031.sql"))?;
+        }
+        if version < 32 {
+            tx.execute_batch(include_str!("../migrations/0032.sql"))?;
+        }
+        if version < 33 {
+            tx.execute_batch(include_str!("../migrations/0033.sql"))?;
+            entries::rebuild_public_page_index(&tx)?;
         }
         if version < SCHEMA_VERSION {
             verify_foreign_keys(&tx)?;
@@ -2275,11 +2281,20 @@ impl Store {
         event: ObjectRef,
         view: ViewContext,
     ) -> Result<Vec<EvidenceStatement>, Error> {
+        let _tx = self.conn.unchecked_transaction()?;
+        self.evidence_at_inner(event, view)
+    }
+
+    fn evidence_at_inner(
+        &self,
+        event: ObjectRef,
+        view: ViewContext,
+    ) -> Result<Vec<EvidenceStatement>, Error> {
         if event.world != view.world {
             return Err(Error::WrongWorld);
         }
-        let tx = self.conn.unchecked_transaction()?;
-        let world = load_world(&tx, event.world)?;
+        let tx = &self.conn;
+        let world = load_world(tx, event.world)?;
         if view.revision < AuthorRevision(0) || view.revision > world.revision {
             return Err(Error::InvalidRevision);
         }
@@ -2291,20 +2306,13 @@ impl Store {
                 return Err(Error::InvalidRevision);
             }
         }
-        if !resolve_object(&tx, event, view.branch, view.revision, view.day)?.is_some_and(
+        if !resolve_object(tx, event, view.branch, view.revision, view.day)?.is_some_and(
             |version| matches!(version.record.data, ObjectData::HistoricalEvent { .. }),
         ) {
             return Ok(Vec::new());
         }
         if let Scope::Character(reader) = view.scope {
-            require_person(
-                &tx,
-                world.id,
-                reader,
-                view.branch,
-                view.revision.0,
-                view.day,
-            )?;
+            require_person(tx, world.id, reader, view.branch, view.revision.0, view.day)?;
         }
         let mut query = tx.prepare(
             "SELECT DISTINCT claim_id FROM claim_versions WHERE world_id = ?1 AND subject_id = ?2 ORDER BY claim_id"
@@ -2315,11 +2323,12 @@ impl Store {
         )?;
         let mut results = Vec::new();
         for id in ids {
+            self.check_query_control()?;
             let claim = ObjectRef {
                 world: event.world,
                 id: ObjectId(Uuid::from_bytes(id?)),
             };
-            let Some(version) = resolve_object(&tx, claim, view.branch, view.revision, view.day)?
+            let Some(version) = resolve_object(tx, claim, view.branch, view.revision, view.day)?
             else {
                 continue;
             };
@@ -2339,7 +2348,7 @@ impl Store {
                 version
                     .record
                     .source
-                    .map(|object| resolve_object(&tx, object, view.branch, view.revision, view.day))
+                    .map(|object| resolve_object(tx, object, view.branch, view.revision, view.day))
                     .transpose()?
                     .flatten()
                     .and_then(|source| match source.record.data {
@@ -2606,6 +2615,32 @@ fn load_fork(
     )
     .optional()?
     .ok_or(Error::NotFound)
+}
+
+/// Resolve the immutable main-branch metadata snapshot inherited by a fork.
+fn inherited_metadata(
+    conn: &Connection,
+    view: ViewContext,
+) -> Result<(AuthorRevision, WorldDay), Error> {
+    require_author(view.scope)?;
+    let world = load_world(conn, view.world)?;
+    if view.revision.0 < 0 || view.revision > world.revision {
+        return Err(Error::InvalidRevision);
+    }
+    let mut branch = view.branch;
+    let mut revision = view.revision;
+    let mut day = view.day;
+    for _ in 0..64 {
+        match load_fork(conn, view.world, branch, revision)? {
+            Some(fork) => {
+                branch = fork.parent;
+                revision = fork.inherited_revision;
+                day = day.min(fork.day);
+            }
+            None => return Ok((revision, day)),
+        }
+    }
+    Err(Error::QueryBudgetExceeded)
 }
 
 fn override_start(
@@ -3133,6 +3168,13 @@ fn write_version(
         ObjectData::FamilyHouse => ("family_house", &EventDate::Unknown, None),
         ObjectData::Faction => ("faction", &EventDate::Unknown, None),
         ObjectData::Conflict => ("conflict", &EventDate::Unknown, None),
+        ObjectData::Office => ("office", &EventDate::Unknown, None),
+        ObjectData::Title => ("title", &EventDate::Unknown, None),
+        ObjectData::Asset => ("asset", &EventDate::Unknown, None),
+        ObjectData::Population => ("population", &EventDate::Unknown, None),
+        ObjectData::ConflictIssue => ("conflict_issue", &EventDate::Unknown, None),
+        ObjectData::ConflictPhase => ("conflict_phase", &EventDate::Unknown, None),
+        ObjectData::SuccessionRule => ("succession_rule", &EventDate::Unknown, None),
         ObjectData::Definition {
             definition,
             description,
@@ -3507,6 +3549,13 @@ fn read_version(
         "family_house" => ObjectData::FamilyHouse,
         "faction" => ObjectData::Faction,
         "conflict" => ObjectData::Conflict,
+        "office" => ObjectData::Office,
+        "title" => ObjectData::Title,
+        "asset" => ObjectData::Asset,
+        "population" => ObjectData::Population,
+        "conflict_issue" => ObjectData::ConflictIssue,
+        "conflict_phase" => ObjectData::ConflictPhase,
+        "succession_rule" => ObjectData::SuccessionRule,
         "relationship" => {
             let (subject, target, kind, trust): ([u8; 16], [u8; 16], String, Option<u8>) = conn.query_row(
                 "SELECT subject_id, target_id, relation_kind, trust FROM relationship_versions
