@@ -497,6 +497,7 @@ fn find_text_blocks(page: DisplayElement, needle: &str, limit: usize) -> EntryTe
             }
             DisplayContent::Text(text) => text,
             DisplayContent::ObjectLink(link) => link.label,
+            DisplayContent::Image(image) => std::iter::once(image.alt).chain(image.hotspots.into_iter().map(|hotspot| hotspot.link.label)).collect::<Vec<_>>().join("\n"),
             DisplayContent::ReferenceRows { links, .. } => links
                 .into_iter()
                 .map(|link| link.label)
