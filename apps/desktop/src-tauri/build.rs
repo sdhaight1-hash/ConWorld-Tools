@@ -43,6 +43,8 @@ fn main() {
             "workspace_canonical_identity",
             "workspace_succession_preview",
             "workspace_enact_succession",
+            "workspace_media_assets",
+            "workspace_import_png",
             "workspace_create_identity",
             "workspace_network_facts",
             "workspace_record_network_fact",

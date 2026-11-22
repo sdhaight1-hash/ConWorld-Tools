@@ -153,3 +153,10 @@ button:disabled { opacity: 0.55; cursor: default; }
 .canvas-tree button { text-align: left; width: auto; overflow-wrap: anywhere; }
 .canvas-tree [aria-pressed="true"] { border-color: var(--gold); color: var(--gold); }
 .canvas-tree-controls { border-top: 1px solid var(--border); padding-top: 0.6rem; }
+
+.entry-image {margin: .75rem 0; max-width: 100%;}
+.entry-image-surface {position: relative; display: inline-block; max-width: 100%;}
+.entry-image img {display: block; max-width: 100%; height: auto; border-radius: 6px;}
+.entry-image .image-hotspot {position:absolute; transform:translate(-50%,-50%); min-width: 28px; min-height:28px; border-radius: 50%; background:#193746; color:white; border:2px solid white; padding: 2px;}
+.entry-image figcaption {font-size:.85rem; margin-top:.4rem;}
+.image-hotspot-list {font-size:.85rem;}

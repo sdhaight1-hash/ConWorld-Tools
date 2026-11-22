@@ -239,6 +239,8 @@ fn main() {
             workspace::workspace_canonical_identity,
             workspace::workspace_succession_preview,
             workspace::workspace_enact_succession,
+            workspace::workspace_media_assets,
+            workspace::workspace_import_png,
             workspace::workspace_create_identity,
             workspace::workspace_network_facts,
             workspace::workspace_persisted_impact,

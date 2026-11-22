@@ -47,6 +47,8 @@
     "allow-workspace-canonical-identity",
     "allow-workspace-succession-preview",
     "allow-workspace-enact-succession",
+    "allow-workspace-media-assets",
+    "allow-workspace-import-png",
     "allow-workspace-create-identity",
     "allow-workspace-network-facts",
     "allow-workspace-record-network-fact",
