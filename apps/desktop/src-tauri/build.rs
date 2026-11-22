@@ -53,6 +53,7 @@ fn main() {
             "workspace_withdraw_classification",
             "workspace_semantic_fact_backlinks",
             "workspace_semantic_fact",
+            "workspace_semantic_candidates",
             "workspace_annotate_semantic_fact",
             "workspace_semantic_fact_annotations",
             "workspace_retire_semantic_descriptor",

@@ -105,3 +105,7 @@ The desktop regression writes chronological UTC annotation form/list captures to
 The network/semantic inspector now invalidates stale results and action controls on focus edits, branch switches, new reads and writes. Each read has a generation token and historical context; late replies cannot overwrite a newer result. Pinned historical annotation inspection remains enabled while mutation is disabled. Added deferred mock-native response regression. Exact-head CI pending.
 
 AE-05 regression now checks area point/query parity through a branch-local correction, inherited and main history, cancellation followed by successful read, unsupported query version and both public and character scope denial. Archive replay verifies the branch correction's query output. Annotation selection and branch-list responses also use invalidation. New tests await CI.
+
+## AE-06 compatible reference selection
+
+A single author-only semantic picker uses the existing controlled indexed query service with the exact selected historical branch, type and label phrase. It filters Tag definitions and sourced claims, exposes bounded/truncated results, supports cancellation and keyboard-operable selection, and fills the original authoring or inspection field without modifying canonical data. Writes retain independent atomic validation. Regression exercises picking a compatible Concept instead of manually copying UUIDs while a previous inspection is pending. CI pending.

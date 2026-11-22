@@ -2493,6 +2493,92 @@ impl NetworkContext {
     }
 }
 
+#[derive(Serialize)]
+pub struct SemanticCandidate {
+    id: String,
+    label: String,
+}
+
+#[derive(Serialize)]
+pub struct SemanticCandidates {
+    rows: Vec<SemanticCandidate>,
+    truncated: bool,
+}
+
+/// A bounded, branch-aware selection search over the existing query authority.
+/// The write service still validates all reference kinds and sources.
+#[tauri::command]
+pub async fn workspace_semantic_candidates(
+    app: AppHandle,
+    request_id: String,
+    request: NetworkContext,
+    kind: String,
+    phrase: String,
+) -> Result<SemanticCandidates, String> {
+    run_query_job(app, request_id, move |workspace, control| {
+        let store = workspace.lock()?;
+        let view = request.resolve(&store)?;
+        let filter = match kind.as_str() {
+            "concept" => ObjectKindFilter::Concept,
+            "place" => ObjectKindFilter::Place,
+            "source" => ObjectKindFilter::Source,
+            "tag" => ObjectKindFilter::Definition,
+            "claim" => ObjectKindFilter::Claim,
+            _ => return Err("Unsupported semantic selection kind".into()),
+        };
+        let result = store
+            .execute_query_controlled(
+                &QuerySpec {
+                    schema_version: QUERY_SCHEMA_VERSION,
+                    filter: QueryFilter::And(vec![
+                        QueryFilter::Kind(filter),
+                        QueryFilter::FullTextPhrase(phrase),
+                    ]),
+                    limit: 100,
+                },
+                view,
+                control,
+            )
+            .map_err(|error| error.to_string())?;
+        let mut rows = Vec::new();
+        for version in result.rows {
+            control.check().map_err(|error| error.to_string())?;
+            if kind == "tag"
+                && !matches!(
+                    version.record.data,
+                    ObjectData::Definition {
+                        definition: Definition::Tag,
+                        ..
+                    }
+                )
+            {
+                continue;
+            }
+            if kind == "claim" {
+                let Some(source) = version.record.source else {
+                    continue;
+                };
+                if !store
+                    .get_object(source, view)
+                    .map_err(|error| error.to_string())?
+                    .is_some_and(|source| matches!(source.record.data, ObjectData::Source { .. }))
+                {
+                    continue;
+                }
+            }
+            rows.push(SemanticCandidate {
+                id: version.object.id.0.to_string(),
+                label: version.record.label,
+            });
+        }
+        Ok(SemanticCandidates {
+            rows,
+            truncated: result.truncated,
+        })
+    })
+    .await
+}
+
 #[tauri::command]
 pub fn workspace_metadata_branches(
     workspace: State<'_, AuthorWorkspace>,

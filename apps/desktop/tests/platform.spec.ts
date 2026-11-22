@@ -2397,6 +2397,7 @@ test("semantic inspection invalidates pending replies and stale actions when foc
             case "workspace_snapshot": return { world, day: args.day, view_revision: 4,
               people: [], relationships: [], events: [], definitions: [] };
             case "workspace_saved_queries": return [];
+            case "workspace_semantic_candidates": return { rows: [{id:"new",label:"Estuary Speech"}], truncated:false };
             case "workspace_classifications": {
               if (args.subjectId === "old") {
                 await new Promise<void>(resolve => {
@@ -2423,7 +2424,11 @@ test("semantic inspection invalidates pending replies and stale actions when foc
   await focus.fill("old");
   await inspect.click();
   await expect.poll(() => page.evaluate(() => (window as unknown as { __semanticPending: boolean }).__semanticPending)).toBe(true);
-  await focus.fill("new");
+  await studio.getByLabel("Selection destination").selectOption({label:"Classification inspector"});
+  await studio.getByLabel("Identity name or phrase").fill("Estuary");
+  await studio.getByRole("button", {name:"Find compatible identities",exact:true}).click();
+  await studio.getByRole("button", {name:"Estuary Speech · new",exact:true}).click();
+  await expect(focus).toHaveValue("new");
   await inspect.click();
   await expect(results).toContainText("new");
   await page.evaluate(() => (window as unknown as { __releaseSemantic: () => void }).__releaseSemantic());

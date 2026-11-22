@@ -29,6 +29,13 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
       <label>Identity label <input name="label" required maxlength="800"></label>
       <label>Identity type <select name="kind"><option value="organization">Organization</option><option value="household">Household</option><option value="family_house">Family house</option><option value="faction">Faction</option><option value="conflict">Conflict</option><option value="office">Office</option><option value="title">Hereditary or legal title</option><option value="asset">Asset</option><option value="population">Fictional population</option><option value="conflict_issue">Conflict issue</option><option value="conflict_phase">Conflict phase</option><option value="succession_rule">Succession rule</option><option value="concept">Concept</option><option value="place">Place</option><option value="person">Person</option></select></label>
       <button>Create identity</button></fieldset></form>
+    <form data-semantic-picker class="editor-form"><fieldset><legend>Find compatible identities</legend>
+      <p class="hint">Search by a word or phrase in the selected branch and revision. Select a result to fill the chosen field; nothing is created or edited.</p>
+      <label>Selection destination <select name="destination"></select></label>
+      <label>Identity name or phrase <input name="phrase" required maxlength="800"></label>
+      <button>Find compatible identities</button><button type="button" data-cancel-picker hidden>Cancel identity search</button>
+      <ul data-picker-results aria-label="Compatible identity results"></ul>
+    </fieldset></form>
     <form data-classification class="editor-form"><fieldset><legend>Record sourced concept classification</legend>
       <p class="hint">Use a Concept identity, a Tag definition and a source from historical search. Classification is not a claim of membership or ancestry.</p>
       <label>Concept identity <input name="subject" required></label>
@@ -122,8 +129,34 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
   selectedLabel.textContent = request.branch_id ? "Alternate branch: "+request.branch_id : "Main history";
   const chooser=host.querySelector<HTMLSelectElement>("[data-branch]")!;
   let inspection = 0;
+  let pickerRequest: string | undefined;
+  const cancelPicker = () => {
+    const id = pickerRequest;
+    pickerRequest = undefined;
+    host.querySelector<HTMLButtonElement>("[data-cancel-picker]")!.hidden = true;
+    if (id) void invoke("workspace_cancel_query", { requestId: id }).catch(() => {});
+  };
+  const picker = form("[data-semantic-picker]");
+  picker.querySelector("fieldset")!.disabled = false;
+  const destinations = [
+    ["Classification subject", "[data-classification]", "subject", "concept", true],
+    ["Classification descriptor", "[data-classification]", "descriptor", "tag", true],
+    ["Classification source", "[data-classification]", "source", "source", true],
+    ["Classification inspector", "[data-classification-focus]", "subject", "concept", false],
+    ["Area subject", "[data-site-area]", "place", "place", true],
+    ["Area descriptor", "[data-site-area]", "descriptor", "tag", true],
+    ["Area source", "[data-site-area]", "source", "source", true],
+    ["Area inspector", "[data-area-focus]", "place", "place", false],
+    ["Annotation claim", "[data-fact-annotation]", "claim", "claim", true],
+    ["Retirement descriptor", "[data-retire-descriptor]", "descriptor", "tag", true],
+  ] as const;
+  const destination = picker.elements.namedItem("destination") as HTMLSelectElement;
+  destinations.forEach(([label,,,, needsWrite], index) => {
+    if (editable || !needsWrite) destination.add(new Option(label, String(index)));
+  });
   const clear = (...selectors: string[]) => selectors.forEach(selector => host.querySelector(selector)?.replaceChildren());
   const beginInspection = (...selectors: string[]) => {
+    cancelPicker();
     clear(...selectors);
     status.textContent = "";
     const token = ++inspection;
@@ -132,6 +165,7 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
   };
   // Any focus edit invalidates rows and their write actions immediately.
   for (const [selector, results] of [
+    ["[data-semantic-picker]", ["[data-picker-results]"]],
     ["[data-classification-focus]", ["[data-classifications]"]],
     ["[data-semantic-focus]", ["[data-semantic-links]", "[data-semantic-detail]", "[data-annotations]"]],
     ["[data-semantic-fact]", ["[data-semantic-detail]"]],
@@ -142,15 +176,15 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
     ["[data-succession]", ["[data-succession-result]"]],
   ] as const) {
     form(selector).addEventListener("input", () => {
-      ++inspection; clear(...results); status.textContent = "";
+      ++inspection; cancelPicker(); clear(...results); status.textContent = "";
     });
   }
   const choose=(id:string | undefined)=>{
-    ++inspection; status.textContent = "";
+    ++inspection; cancelPicker(); status.textContent = "";
     if(id)selectedBranches.set(request.world_id,id);else selectedBranches.delete(request.world_id);
     if(id)request={...request,branch_id:id};else {const {branch_id:_,...main}=request;request=main;}
     selectedLabel.textContent=id?"Alternate branch: "+id:"Main history";
-    for(const selector of ["[data-annotations]","[data-area-result]","[data-classifications]","[data-semantic-links]","[data-semantic-detail]","[data-facts]","[data-impact-results]","[data-identity-path]","[data-succession-result]","[data-ghosts]","[data-candidate-results]","[data-templates]"])host.querySelector(selector)?.replaceChildren();
+    for(const selector of ["[data-picker-results]","[data-annotations]","[data-area-result]","[data-classifications]","[data-semantic-links]","[data-semantic-detail]","[data-facts]","[data-impact-results]","[data-identity-path]","[data-succession-result]","[data-ghosts]","[data-candidate-results]","[data-templates]"])host.querySelector(selector)?.replaceChildren();
     host.querySelector<HTMLButtonElement>("[data-enact]")!.disabled=true;
   };
   host.querySelector<HTMLButtonElement>("[data-load-branches]")!.onclick=async()=>{
@@ -179,7 +213,7 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
   async function write(command: string, args: Record<string, unknown>) {
     if (!valid() || busy || !editable) return;
     busy = true;
-    ++inspection;
+    ++inspection; cancelPicker();
     try { await invoke(command, { request, ...args }); if (valid()) await refresh(); }
     catch (error) { if (valid()) status.textContent = String(error); }
     finally { busy = false; }
@@ -188,6 +222,42 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
     const f = form(selector);
     f.onsubmit = event => { event.preventDefault(); if (valid()) action(f); };
   }
+  host.querySelector<HTMLButtonElement>("[data-cancel-picker]")!.onclick = () => {
+    ++inspection; cancelPicker(); clear("[data-picker-results]"); status.textContent = "Identity search cancelled.";
+  };
+  submit("[data-semantic-picker]", async f => {
+    const phrase = value(f,"phrase").trim();
+    if (!phrase) return;
+    const chosen = destinations[Number(destination.value)];
+    if (!chosen || (chosen[4] && !editable)) return;
+    const {ctx,current}=beginInspection("[data-picker-results]");
+    const requestId=crypto.randomUUID();
+    pickerRequest=requestId;
+    host.querySelector<HTMLButtonElement>("[data-cancel-picker]")!.hidden=false;
+    try {
+      const result = await invoke<{rows: {id: string; label: string}[]; truncated: boolean}>(
+        "workspace_semantic_candidates", {request:ctx,requestId,kind:chosen[3],phrase});
+      if (!current()) return;
+      const list=host.querySelector("[data-picker-results]")!;
+      for (const row of result.rows) {
+        const li=document.createElement("li"), button=document.createElement("button");
+        button.type="button"; button.textContent=row.label+" · "+row.id;
+        button.onclick=()=>{
+          if (!current()) return;
+          const input=form(chosen[1]).elements.namedItem(chosen[2]) as HTMLInputElement;
+          input.value=row.id;
+          input.dispatchEvent(new Event("input", {bubbles:true}));
+          ++inspection;
+          list.replaceChildren();
+          input.focus();
+          status.textContent="Identity selected.";
+        };
+        li.append(button); list.append(li);
+      }
+      status.textContent=result.rows.length+" compatible identities."+(result.truncated?" Refine the phrase to see further matches.":"");
+    } catch (error) { if(current())status.textContent=String(error); }
+    finally { if(pickerRequest===requestId) {pickerRequest=undefined;host.querySelector<HTMLButtonElement>("[data-cancel-picker]")!.hidden=true;} }
+  });
   submit("[data-identity]", f => void write("workspace_create_identity", { kind: value(f,"kind"), label: value(f,"label") }));
   submit("[data-classification]", f => void write("workspace_record_classification", { input: {
     subject_id: value(f,"subject"), descriptor_id: value(f,"descriptor"), source_id: value(f,"source"),

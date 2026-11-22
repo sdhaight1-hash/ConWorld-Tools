@@ -57,6 +57,7 @@
     "allow-workspace-withdraw-classification",
     "allow-workspace-semantic-fact-backlinks",
     "allow-workspace-semantic-fact",
+    "allow-workspace-semantic-candidates",
     "allow-workspace-annotate-semantic-fact",
     "allow-workspace-semantic-fact-annotations",
     "allow-workspace-retire-semantic-descriptor",

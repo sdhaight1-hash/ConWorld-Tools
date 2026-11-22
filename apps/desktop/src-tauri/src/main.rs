@@ -260,6 +260,7 @@ fn main() {
             workspace::workspace_withdraw_classification,
             workspace::workspace_semantic_fact_backlinks,
             workspace::workspace_semantic_fact,
+            workspace::workspace_semantic_candidates,
             workspace::workspace_annotate_semantic_fact,
             workspace::workspace_semantic_fact_annotations,
             workspace::workspace_retire_semantic_descriptor,
