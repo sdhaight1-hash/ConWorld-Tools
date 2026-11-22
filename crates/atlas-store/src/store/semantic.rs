@@ -51,9 +51,8 @@ impl Store {
         };
         let subject = object(row.get(0)?);
         let target = object(row.get(1)?);
-        let visible = |endpoint| {
-            resolve_object(&tx, endpoint, view.branch, view.revision, view.day)
-        };
+        let visible =
+            |endpoint| resolve_object(&tx, endpoint, view.branch, view.revision, view.day);
         let (Some(subject_version), Some(target_version)) = (visible(subject)?, visible(target)?)
         else {
             return Ok(None);
