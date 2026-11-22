@@ -494,7 +494,12 @@ fn alder_basin_persists_interconnected_history_and_authorized_replay()
     for (subject, target, kind, role) in [
         (title, guild, NetworkKind::TitleOf, "guild title"),
         (rule, title, NetworkKind::RuleOf, "designated_heir"),
-        (object(1003), title, NetworkKind::HeirDesignation, "designated heir"),
+        (
+            object(1003),
+            title,
+            NetworkKind::HeirDesignation,
+            "designated heir",
+        ),
     ] {
         edge(
             &mut store,
@@ -618,7 +623,10 @@ fn alder_basin_persists_interconnected_history_and_authorized_replay()
         participant: object(1000),
         role: Some(EventRole::Witness),
     };
-    assert_eq!(rows(&store, view, witness.clone())?, HashSet::from([treaty]));
+    assert_eq!(
+        rows(&store, view, witness.clone())?,
+        HashSet::from([treaty])
+    );
     assert!(
         rows(
             &store,
@@ -652,7 +660,11 @@ fn alder_basin_persists_interconnected_history_and_authorized_replay()
     let private = store.evidence_at(treaty, witness_view)?;
     assert_eq!(private.len(), 2);
     assert!(private.iter().all(|row| row.source.is_none()));
-    assert!(private.iter().any(|row| row.statement.contains("concealed payment")));
+    assert!(
+        private
+            .iter()
+            .any(|row| row.statement.contains("concealed payment"))
+    );
     assert_eq!(store.evidence_at(treaty, negotiator_view)?, reader);
     assert!(matches!(
         store.resolve_semantic_fact(linguistic_fact, public),
@@ -744,7 +756,10 @@ fn alder_basin_persists_interconnected_history_and_authorized_replay()
             Some(object(1003))
         );
         assert!(reopened.resolve_semantic_fact(succession, view)?.is_some());
-        assert_eq!(rows(&reopened, view, witness.clone())?, HashSet::from([treaty]));
+        assert_eq!(
+            rows(&reopened, view, witness.clone())?,
+            HashSet::from([treaty])
+        );
         let definitions = reopened.saved_label_queries(world.id, view.revision, Scope::Author)?;
         assert_eq!(definitions.len(), 1);
         assert_eq!(definitions[0].id, saved.id);
