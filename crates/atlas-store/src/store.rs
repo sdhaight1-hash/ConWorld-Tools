@@ -24,7 +24,7 @@ mod network;
 mod templates;
 
 // Version 29 adds version-pinned template layout variants without changing tables.
-pub(crate) const SCHEMA_VERSION: i64 = 33;
+pub(crate) const SCHEMA_VERSION: i64 = 35;
 
 // Candidate queries bind world (?1), focus/phrase (?2), author revision (?3),
 // limit (?4) and branch (?5). Follow only immutable inherited revisions.
@@ -191,6 +191,10 @@ impl Store {
         if version < 27 {
             tx.execute_batch(include_str!("../migrations/0027.sql"))?;
         }
+        // Legacy upgrade fixtures may retain a newer trigger while rebuilding the fact table.
+        if version < 34 {
+            tx.execute_batch("DROP TRIGGER IF EXISTS metadata_withdrawal_validate;")?;
+        }
         if version < 30 {
             tx.execute_batch(include_str!("../migrations/0030.sql"))?;
         }
@@ -203,6 +207,12 @@ impl Store {
         if version < 33 {
             tx.execute_batch(include_str!("../migrations/0033.sql"))?;
             entries::rebuild_public_page_index(&tx)?;
+        }
+        if version < 34 {
+            tx.execute_batch(include_str!("../migrations/0034.sql"))?;
+        }
+        if version < 35 {
+            tx.execute_batch(include_str!("../migrations/0035.sql"))?;
         }
         if version < SCHEMA_VERSION {
             verify_foreign_keys(&tx)?;
@@ -1728,6 +1738,33 @@ impl Store {
         Ok(version)
     }
 
+    pub fn metadata_branches(
+        &self,
+        view: ViewContext,
+    ) -> Result<Vec<crate::network::BranchSummary>, Error> {
+        let world = metadata_world(&self.conn, view, false)?;
+        let mut result = vec![crate::network::BranchSummary {
+            id: world.main,
+            parent: None,
+            day: None,
+            created_revision: 0,
+        }];
+        let mut stmt=self.conn.prepare("SELECT branch_id,parent_id,fork_day,created_revision FROM branch_forks WHERE world_id=?1 AND created_revision<=?2 ORDER BY created_revision LIMIT 201")?;
+        let mut rows = stmt.query(params![view.world.0.as_bytes(), view.revision.0])?;
+        while let Some(row) = rows.next()? {
+            if result.len() > 200 {
+                return Err(Error::QueryBudgetExceeded);
+            }
+            result.push(crate::network::BranchSummary {
+                id: BranchId(Uuid::from_bytes(row.get(0)?)),
+                parent: Some(BranchId(Uuid::from_bytes(row.get(1)?))),
+                day: Some(row.get(2)?),
+                created_revision: row.get(3)?,
+            });
+        }
+        Ok(result)
+    }
+
     pub fn branch_fork(
         &self,
         world: WorldId,
@@ -2617,11 +2654,8 @@ fn load_fork(
     .ok_or(Error::NotFound)
 }
 
-/// Resolve the immutable main-branch metadata snapshot inherited by a fork.
-fn inherited_metadata(
-    conn: &Connection,
-    view: ViewContext,
-) -> Result<(AuthorRevision, WorldDay), Error> {
+/// Validate the historical lineage before querying branch-specific metadata.
+fn metadata_world(conn: &Connection, view: ViewContext, writing: bool) -> Result<World, Error> {
     require_author(view.scope)?;
     let world = load_world(conn, view.world)?;
     if view.revision.0 < 0 || view.revision > world.revision {
@@ -2629,19 +2663,61 @@ fn inherited_metadata(
     }
     let mut branch = view.branch;
     let mut revision = view.revision;
-    let mut day = view.day;
-    for _ in 0..64 {
+    for depth in 0..64 {
         match load_fork(conn, view.world, branch, revision)? {
             Some(fork) => {
+                if depth == 0 && writing && view.day < fork.day {
+                    return Err(Error::BeforeFork);
+                }
                 branch = fork.parent;
                 revision = fork.inherited_revision;
-                day = day.min(fork.day);
             }
-            None => return Ok((revision, day)),
+            None => return Ok(world),
         }
     }
     Err(Error::QueryBudgetExceeded)
 }
+
+// Bind ?1 world, ?2 selected branch, ?3 author revision, ?4 selected day.
+const METADATA_CTE: &str = "
+WITH RECURSIVE lineage(branch_id,rev,cutoff,depth) AS (
+    VALUES(?2,?3,?4,0)
+    UNION ALL
+    SELECT f.parent_id,f.inherited_revision,min(l.cutoff,f.fork_day),l.depth+1
+    FROM lineage l JOIN branch_forks f ON f.world_id=?1 AND f.branch_id=l.branch_id
+    WHERE l.depth<63 AND f.created_revision<=l.rev
+),
+eligible AS (
+    SELECT l.* FROM lineage l LEFT JOIN branch_forks f ON f.world_id=?1 AND f.branch_id=l.branch_id
+    WHERE f.fork_day IS NULL OR l.cutoff>=f.fork_day
+),
+active_network AS (
+    SELECT p.* FROM network_facts p
+    JOIN author_revisions r ON r.world_id=p.world_id AND r.revision=p.recorded_revision
+    JOIN eligible l ON l.branch_id=r.branch_id
+    WHERE p.world_id=?1 AND p.recorded_revision<=l.rev
+      AND (p.withdrawn_revision IS NULL OR p.withdrawn_revision>l.rev)
+      AND (l.depth=0 OR p.starts_at<=l.cutoff)
+      AND NOT EXISTS (
+        SELECT 1 FROM metadata_withdrawals w JOIN eligible e ON e.branch_id=w.branch_id
+        WHERE w.world_id=p.world_id AND w.kind='network' AND w.fact_id=p.id
+          AND e.depth<=l.depth AND w.revision<=e.rev
+      )
+),
+active_parentage AS (
+    SELECT p.* FROM accepted_parentage p
+    JOIN author_revisions r ON r.world_id=p.world_id AND r.revision=p.recorded_revision
+    JOIN eligible l ON l.branch_id=r.branch_id
+    WHERE p.world_id=?1 AND p.recorded_revision<=l.rev
+      AND (p.withdrawn_revision IS NULL OR p.withdrawn_revision>l.rev)
+      AND (l.depth=0 OR p.starts_at<=l.cutoff)
+      AND NOT EXISTS (
+        SELECT 1 FROM metadata_withdrawals w JOIN eligible e ON e.branch_id=w.branch_id
+        WHERE w.world_id=p.world_id AND w.kind='parentage' AND w.fact_id=p.id
+          AND e.depth<=l.depth AND w.revision<=e.rev
+      )
+)
+";
 
 fn override_start(
     conn: &Connection,
