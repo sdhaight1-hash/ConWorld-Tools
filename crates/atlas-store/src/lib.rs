@@ -10,6 +10,7 @@ pub mod inheritance;
 pub mod layout;
 pub mod network;
 pub mod query;
+pub mod semantic;
 mod store;
 
 use std::path::PathBuf;
@@ -164,6 +165,7 @@ pub struct EvidenceStatement {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ObjectData {
     Person,
+    Concept,
     Organization,
     Household,
     FamilyHouse,

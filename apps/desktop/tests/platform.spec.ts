@@ -2258,3 +2258,69 @@ test("imported PNG and scoped hotspots edit in Canvas and public projection navi
   await inspector.locator(".image-hotspot").click();
   await expect(inspector.getByText("Released companion page")).toBeVisible();
 });
+
+test("classification authoring and evidence backlinks use historical author commands", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "archive", name: "Archive", revision: 4 };
+    const writes: unknown[] = [];
+    const fact = {
+      reference: { world: "archive", family: "classification", id: "classification" },
+      subject: { world: "archive", id: "language" }, target: null,
+      source: { world: "archive", id: "folio" }, descriptor: { world: "archive", id: "tag" },
+      description: "Language classification", rationale: "Record concept classification",
+      recorded_at: 5, source_branch: "main",
+    };
+    Object.assign(window, {
+      isTauri: true, __classificationWrites: writes,
+      __TAURI_INTERNALS__: {
+        invoke: async (command: string, args: Record<string, unknown>) => {
+          if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+          if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+          if (command === "workspace_worlds") return [{ ...world }];
+          if (command === "workspace_snapshot") return {
+            world: { ...world }, day: args.day, view_revision: args.revision ?? world.revision,
+            people: [], relationships: [], events: [], definitions: [],
+          };
+          if (command === "workspace_saved_queries") return [];
+          if (command === "workspace_record_classification" || command === "workspace_withdraw_classification") {
+            writes.push({ command, args }); world.revision++; return null;
+          }
+          if (command === "workspace_classifications") return [{
+            id: "classification", profile: "language", descriptor_id: "tag", descriptor_revision: 3,
+            source_id: "folio", starts_at: 0, ends_before: null, recorded_at: 5,
+          }];
+          if (command === "workspace_semantic_fact_backlinks") return [fact];
+          if (command === "workspace_semantic_fact") return fact;
+          throw new Error("Unexpected mock command: " + command);
+        },
+      },
+    });
+  });
+  await page.goto("/");
+  const studio = page.locator("[data-network-studio]");
+  await studio.locator("summary").click();
+  const form = studio.locator("[data-classification]");
+  await form.getByLabel("Concept identity").fill("language");
+  await form.getByLabel("Semantic profile").selectOption("language");
+  await form.getByLabel("Tag definition identity").fill("tag");
+  await form.getByLabel("Classification evidence source").fill("folio");
+  await form.getByRole("button", { name: "Record classification" }).click();
+  await expect(page.locator("#author-world-info")).toContainText("Author revision 5 / 5");
+  await studio.locator("summary").click();
+  await studio.getByLabel("Classification focus concept").fill("language");
+  await studio.getByRole("button", { name: "Inspect classifications" }).click();
+  await expect(studio.locator("[data-classifications]")).toContainText("revision 3");
+  await studio.getByLabel("Evidence or identity backlinks").fill("folio");
+  await studio.getByRole("button", { name: "Inspect semantic backlinks" }).click();
+  await expect(studio.locator("[data-semantic-links]")).toContainText("Language classification");
+  await studio.getByRole("button", { name: "Resolve classification fact" }).click();
+  await expect(studio.locator("[data-semantic-detail]")).toContainText("evidence folio");
+  await studio.getByRole("button", { name: "Withdraw classification" }).click();
+  await expect(page.locator("#author-world-info")).toContainText("Author revision 6 / 6");
+  const writes = await page.evaluate(() => (window as unknown as { __classificationWrites: unknown[] }).__classificationWrites);
+  expect(writes).toMatchObject([
+    { command: "workspace_record_classification", args: { request: { revision: 4 },
+      input: { subject_id: "language", descriptor_id: "tag", source_id: "folio", profile: "language" } } },
+    { command: "workspace_withdraw_classification", args: { request: { revision: 5 }, factId: "classification" } },
+  ]);
+});

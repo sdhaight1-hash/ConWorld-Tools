@@ -13,6 +13,8 @@ use crate::{
     WorldId,
 };
 
+use crate::semantic::ConceptProfile;
+
 pub const QUERY_SCHEMA_VERSION: u16 = 1;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -33,6 +35,8 @@ pub enum QueryFilter {
     /// Literal token phrase in versioned, source-backed claim statements.
     ClaimFullTextPhrase(String),
     Kind(ObjectKindFilter),
+    ClassifiedAs(ConceptProfile),
+    ClassifiedBy(ObjectRef),
     HasSource(ObjectRef),
     And(Vec<QueryFilter>),
     Or(Vec<QueryFilter>),
@@ -62,6 +66,7 @@ pub enum QueryFilter {
 #[serde(rename_all = "snake_case")]
 pub enum ObjectKindFilter {
     Person,
+    Concept,
     Organization,
     Household,
     FamilyHouse,
@@ -83,6 +88,34 @@ pub enum ObjectKindFilter {
     Claim,
 }
 
+impl From<&ObjectData> for ObjectKindFilter {
+    fn from(data: &ObjectData) -> Self {
+        match data {
+            ObjectData::Person => Self::Person,
+            ObjectData::Concept => Self::Concept,
+            ObjectData::Organization => Self::Organization,
+            ObjectData::Household => Self::Household,
+            ObjectData::FamilyHouse => Self::FamilyHouse,
+            ObjectData::Faction => Self::Faction,
+            ObjectData::Conflict => Self::Conflict,
+            ObjectData::Office => Self::Office,
+            ObjectData::Title => Self::Title,
+            ObjectData::Asset => Self::Asset,
+            ObjectData::Population => Self::Population,
+            ObjectData::ConflictIssue => Self::ConflictIssue,
+            ObjectData::ConflictPhase => Self::ConflictPhase,
+            ObjectData::SuccessionRule => Self::SuccessionRule,
+            ObjectData::Definition { .. } => Self::Definition,
+            ObjectData::Relationship { .. } => Self::Relationship,
+            ObjectData::EventInvolvement { .. } => Self::EventInvolvement,
+            ObjectData::ActorAction { .. } => Self::ActorAction,
+            ObjectData::HistoricalEvent { .. } => Self::HistoricalEvent,
+            ObjectData::Source { .. } => Self::Source,
+            ObjectData::Claim { .. } => Self::Claim,
+        }
+    }
+}
+
 /// Versioned, allowlisted wire/persistence shape for composite predicates.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
@@ -93,6 +126,8 @@ pub enum PredicateInput {
     FullText { text: String },
     ClaimFullText { text: String },
     ObjectKind { kind: ObjectKindFilter },
+    ClassifiedAs { profile: ConceptProfile },
+    ClassifiedBy { descriptor_id: String },
     HasSource { source_id: String },
     And { filters: Vec<PredicateInput> },
     Or { filters: Vec<PredicateInput> },
@@ -119,6 +154,14 @@ impl PredicateInput {
             Self::FullText { text } => QueryFilter::FullTextPhrase(text),
             Self::ClaimFullText { text } => QueryFilter::ClaimFullTextPhrase(text),
             Self::ObjectKind { kind } => QueryFilter::Kind(kind),
+            Self::ClassifiedAs { profile } => QueryFilter::ClassifiedAs(profile),
+            Self::ClassifiedBy { descriptor_id } => QueryFilter::ClassifiedBy(ObjectRef {
+                world,
+                id: crate::ObjectId(
+                    Uuid::parse_str(&descriptor_id)
+                        .map_err(|_| Error::InvalidInput("predicate descriptor ID"))?,
+                ),
+            }),
             Self::HasSource { source_id } => QueryFilter::HasSource(ObjectRef {
                 world,
                 id: crate::ObjectId(
@@ -162,6 +205,10 @@ impl PredicateInput {
             QueryFilter::FullTextPhrase(text) => Self::FullText { text: text.clone() },
             QueryFilter::ClaimFullTextPhrase(text) => Self::ClaimFullText { text: text.clone() },
             QueryFilter::Kind(kind) => Self::ObjectKind { kind: *kind },
+            QueryFilter::ClassifiedAs(profile) => Self::ClassifiedAs { profile: *profile },
+            QueryFilter::ClassifiedBy(descriptor) => Self::ClassifiedBy {
+                descriptor_id: descriptor.id.0.to_string(),
+            },
             QueryFilter::HasSource(source) => Self::HasSource {
                 source_id: source.id.0.to_string(),
             },
@@ -220,9 +267,23 @@ pub struct SavedLabelQuery {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ParameterValue {
-    Text { value: String },
-    ObjectKind { value: ObjectKindFilter },
-    Source { world_id: String, source_id: String },
+    Text {
+        value: String,
+    },
+    ObjectKind {
+        value: ObjectKindFilter,
+    },
+    ConceptProfile {
+        value: ConceptProfile,
+    },
+    Descriptor {
+        world_id: String,
+        descriptor_id: String,
+    },
+    Source {
+        world_id: String,
+        source_id: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -277,6 +338,17 @@ fn visit_parameter_leaves(
             },
         ),
         QueryFilter::Kind(kind) => ("object_kind", ParameterValue::ObjectKind { value: *kind }),
+        QueryFilter::ClassifiedAs(profile) => (
+            "concept_profile",
+            ParameterValue::ConceptProfile { value: *profile },
+        ),
+        QueryFilter::ClassifiedBy(descriptor) => (
+            "descriptor",
+            ParameterValue::Descriptor {
+                world_id: descriptor.world.0.to_string(),
+                descriptor_id: descriptor.id.0.to_string(),
+            },
+        ),
         QueryFilter::HasSource(source) => (
             "source",
             ParameterValue::Source {
@@ -306,6 +378,24 @@ fn visit_parameter_leaves(
             *text = value;
         }
         (QueryFilter::Kind(kind), ParameterValue::ObjectKind { value }) => *kind = value,
+        (QueryFilter::ClassifiedAs(profile), ParameterValue::ConceptProfile { value }) => {
+            *profile = value;
+        }
+        (
+            QueryFilter::ClassifiedBy(descriptor),
+            ParameterValue::Descriptor {
+                world_id,
+                descriptor_id,
+            },
+        ) => {
+            if Uuid::parse_str(&world_id).ok() != Some(descriptor.world.0) {
+                return Err(Error::WrongWorld);
+            }
+            descriptor.id = crate::ObjectId(
+                Uuid::parse_str(&descriptor_id)
+                    .map_err(|_| Error::InvalidInput("parameter descriptor ID"))?,
+            );
+        }
         (
             QueryFilter::HasSource(source),
             ParameterValue::Source {
@@ -565,6 +655,8 @@ impl Store {
         if matches!(
             &spec.filter,
             QueryFilter::Kind(_)
+                | QueryFilter::ClassifiedAs(_)
+                | QueryFilter::ClassifiedBy(_)
                 | QueryFilter::HasSource(_)
                 | QueryFilter::And(_)
                 | QueryFilter::Or(_)
@@ -640,6 +732,8 @@ impl Store {
                 unreachable!("handled by the indexed FTS5 query path")
             }
             QueryFilter::Kind(_)
+            | QueryFilter::ClassifiedAs(_)
+            | QueryFilter::ClassifiedBy(_)
             | QueryFilter::HasSource(_)
             | QueryFilter::And(_)
             | QueryFilter::Or(_)
@@ -704,7 +798,12 @@ pub(crate) fn validate_predicate(
         | QueryFilter::ClaimFullTextPhrase(label) => {
             search_label(label)?;
         }
-        QueryFilter::Kind(_) => {}
+        QueryFilter::Kind(_) | QueryFilter::ClassifiedAs(_) => {}
+        QueryFilter::ClassifiedBy(descriptor) => {
+            if descriptor.world != world {
+                return Err(Error::WrongWorld);
+            }
+        }
         QueryFilter::HasSource(source) => {
             if source.world != world {
                 return Err(Error::WrongWorld);
@@ -752,6 +851,8 @@ struct PredicatePlan<'a> {
     indexed: HashMap<(IndexedTextKind, &'a str), HashSet<ObjectRef>>,
     rows: HashMap<ObjectRef, Version>,
     sources: HashSet<ObjectRef>,
+    profiles: HashMap<ConceptProfile, HashSet<ObjectRef>>,
+    descriptors: HashMap<ObjectRef, HashSet<ObjectRef>>,
     matched: usize,
 }
 
@@ -788,6 +889,48 @@ impl<'a> PredicatePlan<'a> {
                     self.rows.insert(row.object, row);
                 }
                 self.indexed.insert(key, ids.clone());
+                Ok(Some(ids))
+            }
+            QueryFilter::ClassifiedBy(descriptor) => {
+                if let Some(ids) = self.descriptors.get(descriptor) {
+                    return Ok(Some(ids.clone()));
+                }
+                let assignments = store.classifications_by_descriptor(view, *descriptor)?;
+                self.matched += assignments.len();
+                if self.matched > INDEX_BUDGET {
+                    return Err(Error::QueryBudgetExceeded);
+                }
+                let mut ids = HashSet::new();
+                for assignment in assignments {
+                    store.check_query_control()?;
+                    let object = assignment.input.subject;
+                    if let Some(row) = store.get_object(object, view)? {
+                        ids.insert(object);
+                        self.rows.insert(object, row);
+                    }
+                }
+                self.descriptors.insert(*descriptor, ids.clone());
+                Ok(Some(ids))
+            }
+            QueryFilter::ClassifiedAs(profile) => {
+                if let Some(ids) = self.profiles.get(profile) {
+                    return Ok(Some(ids.clone()));
+                }
+                let assignments = store.classifications(view, None, Some(*profile))?;
+                self.matched += assignments.len();
+                if self.matched > INDEX_BUDGET {
+                    return Err(Error::QueryBudgetExceeded);
+                }
+                let mut ids = HashSet::new();
+                for assignment in assignments {
+                    store.check_query_control()?;
+                    let object = assignment.input.subject;
+                    if let Some(row) = store.get_object(object, view)? {
+                        ids.insert(object);
+                        self.rows.insert(object, row);
+                    }
+                }
+                self.profiles.insert(*profile, ids.clone());
                 Ok(Some(ids))
             }
             QueryFilter::HasSource(source) => {
@@ -841,41 +984,15 @@ fn predicate_matches(filter: &QueryFilter, version: &Version, plan: &PredicatePl
         QueryFilter::ExactLabel(text) => {
             version.record.label.to_lowercase() == text.trim().to_lowercase()
         }
-        QueryFilter::Kind(kind) => matches!(
-            (&version.record.data, kind),
-            (ObjectData::Person, ObjectKindFilter::Person)
-                | (ObjectData::Organization, ObjectKindFilter::Organization)
-                | (ObjectData::Household, ObjectKindFilter::Household)
-                | (ObjectData::FamilyHouse, ObjectKindFilter::FamilyHouse)
-                | (ObjectData::Faction, ObjectKindFilter::Faction)
-                | (ObjectData::Conflict, ObjectKindFilter::Conflict)
-                | (ObjectData::Office, ObjectKindFilter::Office)
-                | (ObjectData::Title, ObjectKindFilter::Title)
-                | (ObjectData::Asset, ObjectKindFilter::Asset)
-                | (ObjectData::Population, ObjectKindFilter::Population)
-                | (ObjectData::ConflictIssue, ObjectKindFilter::ConflictIssue)
-                | (ObjectData::ConflictPhase, ObjectKindFilter::ConflictPhase)
-                | (ObjectData::SuccessionRule, ObjectKindFilter::SuccessionRule)
-                | (ObjectData::Definition { .. }, ObjectKindFilter::Definition)
-                | (
-                    ObjectData::Relationship { .. },
-                    ObjectKindFilter::Relationship
-                )
-                | (
-                    ObjectData::EventInvolvement { .. },
-                    ObjectKindFilter::EventInvolvement
-                )
-                | (
-                    ObjectData::ActorAction { .. },
-                    ObjectKindFilter::ActorAction
-                )
-                | (
-                    ObjectData::HistoricalEvent { .. },
-                    ObjectKindFilter::HistoricalEvent
-                )
-                | (ObjectData::Source { .. }, ObjectKindFilter::Source)
-                | (ObjectData::Claim { .. }, ObjectKindFilter::Claim)
-        ),
+        QueryFilter::Kind(kind) => ObjectKindFilter::from(&version.record.data) == *kind,
+        QueryFilter::ClassifiedBy(descriptor) => plan
+            .descriptors
+            .get(descriptor)
+            .is_some_and(|ids| ids.contains(&version.object)),
+        QueryFilter::ClassifiedAs(profile) => plan
+            .profiles
+            .get(profile)
+            .is_some_and(|ids| ids.contains(&version.object)),
         QueryFilter::FullTextPhrase(text)
         | QueryFilter::ClaimFullTextPhrase(text)
         | QueryFilter::ExactAlias(text) => plan

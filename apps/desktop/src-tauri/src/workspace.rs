@@ -11,8 +11,8 @@ use atlas_store::{
     VersionRef, ViewContext, World, WorldDay, WorldId,
     discovery::{MentionDisposition, ReviewMention, SavePersonAlias},
     query::{
-        Direction, ParameterBinding, PredicateInput, QUERY_SCHEMA_VERSION, QueryControl,
-        QueryCursor, QueryFilter, QueryParameter, QuerySpec, SaveNamedLabelQuery,
+        Direction, ObjectKindFilter, ParameterBinding, PredicateInput, QUERY_SCHEMA_VERSION,
+        QueryControl, QueryCursor, QueryFilter, QueryParameter, QuerySpec, SaveNamedLabelQuery,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -179,7 +179,7 @@ pub struct MentionDiscoverySummary {
 pub struct SearchRow {
     id: String,
     label: String,
-    kind: &'static str,
+    kind: ObjectKindFilter,
     statement: Option<String>,
     source_citation: Option<String>,
 }
@@ -1056,28 +1056,7 @@ impl AuthorWorkspace {
                     } else {
                         None
                     };
-                    let kind = match version.record.data {
-                        ObjectData::Person => "person",
-                        ObjectData::Organization => "organization",
-                        ObjectData::Household => "household",
-                        ObjectData::FamilyHouse => "family_house",
-                        ObjectData::Faction => "faction",
-                        ObjectData::Conflict => "conflict",
-                        ObjectData::Office => "office",
-                        ObjectData::Title => "title",
-                        ObjectData::Asset => "asset",
-                        ObjectData::Population => "population",
-                        ObjectData::ConflictIssue => "conflict_issue",
-                        ObjectData::ConflictPhase => "conflict_phase",
-                        ObjectData::SuccessionRule => "succession_rule",
-                        ObjectData::Definition { .. } => "definition",
-                        ObjectData::Relationship { .. } => "relationship",
-                        ObjectData::EventInvolvement { .. } => "event_involvement",
-                        ObjectData::ActorAction { .. } => "actor_action",
-                        ObjectData::HistoricalEvent { .. } => "historical_event",
-                        ObjectData::Source { .. } => "source",
-                        ObjectData::Claim { .. } => "claim",
-                    };
+                    let kind = ObjectKindFilter::from(&version.record.data);
                     Ok(SearchRow {
                         id: version.object.id.0.to_string(),
                         label: version.record.label,
@@ -2681,6 +2660,193 @@ pub fn workspace_create_identity(
         .map_err(|e| e.to_string())
 }
 
+#[derive(Serialize)]
+pub struct ClassificationSummary {
+    id: String,
+    profile: atlas_store::semantic::ConceptProfile,
+    descriptor_id: String,
+    descriptor_branch: String,
+    descriptor_revision: i64,
+    descriptor_state_revision: i64,
+    source_id: String,
+    starts_at: i64,
+    ends_before: Option<i64>,
+    recorded_at: i64,
+}
+
+#[derive(Deserialize)]
+pub struct ClassificationRequest {
+    subject_id: String,
+    descriptor_id: String,
+    source_id: String,
+    profile: atlas_store::semantic::ConceptProfile,
+    starts_at: i64,
+    ends_before: Option<i64>,
+}
+
+#[tauri::command]
+pub fn workspace_record_classification(
+    workspace: State<'_, AuthorWorkspace>,
+    request: NetworkContext,
+    input: ClassificationRequest,
+) -> Result<String, String> {
+    use atlas_store::semantic::{ClassificationInput, DefinitionPin};
+    let mut store = workspace.lock()?;
+    let view = request.resolve(&store)?;
+    let descriptor = store
+        .get_object(
+            reference(view.world, &input.descriptor_id)?,
+            ViewContext {
+                day: WorldDay(input.starts_at),
+                ..view
+            },
+        )
+        .map_err(|e| e.to_string())?
+        .ok_or("Definition is unavailable at the requested start day")?;
+    store
+        .record_classification(
+            view,
+            ClassificationInput {
+                subject: reference(view.world, &input.subject_id)?,
+                profile: input.profile,
+                descriptor: DefinitionPin {
+                    version: descriptor.reference(),
+                },
+                source: reference(view.world, &input.source_id)?,
+                starts_at: WorldDay(input.starts_at),
+                ends_before: input.ends_before.map(WorldDay),
+            },
+            Uuid::new_v4(),
+        )
+        .map(|id| id.to_string())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn workspace_classifications(
+    workspace: State<'_, AuthorWorkspace>,
+    request: NetworkContext,
+    subject_id: String,
+) -> Result<Vec<ClassificationSummary>, String> {
+    let store = workspace.lock()?;
+    let view = request.resolve(&store)?;
+    Ok(store
+        .classifications(view, Some(reference(view.world, &subject_id)?), None)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|assignment| {
+            let input = assignment.input;
+            let pin = input.descriptor.version;
+            ClassificationSummary {
+                id: assignment.id.to_string(),
+                profile: input.profile,
+                descriptor_id: pin.object.id.0.to_string(),
+                descriptor_branch: pin.branch.0.to_string(),
+                descriptor_revision: pin.recorded_at.0,
+                descriptor_state_revision: pin.state_revision.0,
+                source_id: input.source.id.0.to_string(),
+                starts_at: input.starts_at.0,
+                ends_before: input.ends_before.map(|day| day.0),
+                recorded_at: assignment.recorded_at.0,
+            }
+        })
+        .collect())
+}
+
+#[tauri::command]
+pub fn workspace_withdraw_classification(
+    workspace: State<'_, AuthorWorkspace>,
+    request: NetworkContext,
+    fact_id: String,
+) -> Result<(), String> {
+    let mut store = workspace.lock()?;
+    let view = request.resolve(&store)?;
+    store
+        .withdraw_classification(view, id(&fact_id)?, Uuid::new_v4())
+        .map_err(|e| e.to_string())
+}
+
+#[derive(Serialize)]
+pub struct SemanticFactSummary {
+    reference: atlas_store::semantic::FactRef,
+    subject: ObjectRef,
+    target: Option<ObjectRef>,
+    source: Option<ObjectRef>,
+    descriptor: Option<ObjectRef>,
+    description: String,
+    rationale: String,
+    recorded_at: i64,
+    source_branch: String,
+}
+
+impl From<atlas_store::semantic::ResolvedFact> for SemanticFactSummary {
+    fn from(fact: atlas_store::semantic::ResolvedFact) -> Self {
+        use atlas_store::semantic::SemanticFactData;
+        let (subject, target, source, descriptor, description) = match fact.data {
+            SemanticFactData::Network(input) => (
+                input.subject,
+                Some(input.target),
+                Some(input.source),
+                None,
+                format!("{:?}: {}", input.kind, input.role),
+            ),
+            SemanticFactData::Parentage(input) => (
+                input.parent,
+                Some(input.child),
+                None,
+                None,
+                format!("{:?} parentage", input.kind),
+            ),
+            SemanticFactData::Classification(input) => (
+                input.subject,
+                None,
+                Some(input.source),
+                Some(input.descriptor.version.object),
+                format!("{:?} classification", input.profile),
+            ),
+        };
+        Self {
+            reference: fact.reference,
+            subject,
+            target,
+            source,
+            descriptor,
+            description,
+            rationale: fact.rationale,
+            recorded_at: fact.recorded_at.0,
+            source_branch: fact.source_branch.0.to_string(),
+        }
+    }
+}
+
+#[tauri::command]
+pub fn workspace_semantic_fact_backlinks(
+    workspace: State<'_, AuthorWorkspace>,
+    request: NetworkContext,
+    target_id: String,
+) -> Result<Vec<SemanticFactSummary>, String> {
+    let store = workspace.lock()?;
+    let view = request.resolve(&store)?;
+    store
+        .semantic_fact_backlinks(reference(view.world, &target_id)?, view)
+        .map(|facts| facts.into_iter().map(Into::into).collect())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn workspace_semantic_fact(
+    workspace: State<'_, AuthorWorkspace>,
+    request: NetworkContext,
+    reference: atlas_store::semantic::FactRef,
+) -> Result<Option<SemanticFactSummary>, String> {
+    let store = workspace.lock()?;
+    let view = request.resolve(&store)?;
+    store
+        .resolve_semantic_fact(reference, view)
+        .map(|fact| fact.map(Into::into))
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub fn workspace_network_facts(
     workspace: State<'_, AuthorWorkspace>,
@@ -3376,7 +3542,13 @@ mod tests {
         assert_eq!(matches.revision, 3);
         assert_eq!(matches.rows.len(), 2);
         assert_ne!(matches.rows[0].id, matches.rows[1].id);
-        assert!(matches.rows.iter().all(|row| row.kind == "person"));
+        assert_eq!(serde_json::to_value(&matches.rows[0])?["kind"], "person");
+        assert!(
+            matches
+                .rows
+                .iter()
+                .all(|row| row.kind == ObjectKindFilter::Person)
+        );
         assert_eq!(
             workspace
                 .search(
@@ -3459,7 +3631,7 @@ mod tests {
             &test_control(),
         )?;
         assert_eq!(references.rows.len(), 1);
-        assert_eq!(references.rows[0].kind, "relationship");
+        assert_eq!(references.rows[0].kind, ObjectKindFilter::Relationship);
         assert!(
             workspace
                 .search(

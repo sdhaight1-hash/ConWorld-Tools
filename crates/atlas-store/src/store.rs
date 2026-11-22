@@ -18,14 +18,16 @@ use crate::query::{
 use crate::*;
 
 pub(crate) const APPLICATION_ID: i64 = 0x4357_4c44; // CWLD
+pub(crate) mod classification;
 mod entries;
 mod family;
 pub(crate) mod media;
 mod network;
+mod semantic;
 mod templates;
 
 // Version 29 adds version-pinned template layout variants without changing tables.
-pub(crate) const SCHEMA_VERSION: i64 = 36;
+pub(crate) const SCHEMA_VERSION: i64 = 40;
 
 // Candidate queries bind world (?1), focus/phrase (?2), author revision (?3),
 // limit (?4) and branch (?5). Follow only immutable inherited revisions.
@@ -114,6 +116,7 @@ impl Store {
             1..=SCHEMA_VERSION if application_id == APPLICATION_ID => {}
             _ => return Err(Error::WrongDatabase),
         }
+        verify_semantic_schema_lineage(&tx, version)?;
         if version < 2 {
             tx.execute_batch(include_str!("../migrations/0002.sql"))?;
         }
@@ -218,8 +221,21 @@ impl Store {
         if version < 36 {
             tx.execute_batch(include_str!("../migrations/0036.sql"))?;
         }
+        if version < 37 {
+            tx.execute_batch(include_str!("../migrations/0037.sql"))?;
+        }
+        if version < 38 {
+            tx.execute_batch(include_str!("../migrations/0038.sql"))?;
+        }
+        if version < 39 {
+            tx.execute_batch(include_str!("../migrations/0039.sql"))?;
+        }
+        if version < 40 {
+            tx.execute_batch(include_str!("../migrations/0040.sql"))?;
+        }
         if version < SCHEMA_VERSION {
             verify_foreign_keys(&tx)?;
+            classification::verify_classification_integrity(&tx)?;
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
         tx.commit()?;
@@ -1122,6 +1138,8 @@ impl Store {
             QueryFilter::ClaimFullTextPhrase(text) => ("claimtext", text.trim().to_string()),
             QueryFilter::ExactAlias(_)
             | QueryFilter::Kind(_)
+            | QueryFilter::ClassifiedAs(_)
+            | QueryFilter::ClassifiedBy(_)
             | QueryFilter::HasSource(_)
             | QueryFilter::And(_)
             | QueryFilter::Or(_)
@@ -2977,6 +2995,25 @@ fn apply_change(
     Ok(())
 }
 
+/// Schema 37 was used by two independent unreleased branches.
+/// Reject the spatial variant rather than treating it as ontology history.
+pub(crate) fn verify_semantic_schema_lineage(conn: &Connection, version: i64) -> Result<(), Error> {
+    if !(37..=40).contains(&version) {
+        return Ok(());
+    }
+    let registry: String = conn.query_row(
+        "SELECT sql FROM sqlite_schema WHERE type='table' AND name='objects'",
+        [],
+        |row| row.get(0),
+    )?;
+    if !registry.contains("'concept'") || registry.contains("'place'") {
+        return Err(Error::Integrity(
+            "incompatible unreleased schema lineage; restore a schema-36 backup".into(),
+        ));
+    }
+    Ok(())
+}
+
 pub(crate) fn verify_foreign_keys(conn: &Connection) -> Result<(), Error> {
     let violation = conn
         .query_row("PRAGMA foreign_key_check", [], |row| row.get(0))
@@ -3243,6 +3280,7 @@ fn write_version(
     }
     let (kind, occurrence, citation) = match &record.data {
         ObjectData::Person => ("person", &EventDate::Unknown, None),
+        ObjectData::Concept => ("concept", &EventDate::Unknown, None),
         ObjectData::Organization => ("organization", &EventDate::Unknown, None),
         ObjectData::Household => ("household", &EventDate::Unknown, None),
         ObjectData::FamilyHouse => ("family_house", &EventDate::Unknown, None),
@@ -3624,6 +3662,7 @@ fn read_version(
 ) -> rusqlite::Result<Version> {
     let data = match row.get::<_, String>(1)?.as_str() {
         "person" => ObjectData::Person,
+        "concept" => ObjectData::Concept,
         "organization" => ObjectData::Organization,
         "household" => ObjectData::Household,
         "family_house" => ObjectData::FamilyHouse,

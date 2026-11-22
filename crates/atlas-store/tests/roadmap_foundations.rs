@@ -1312,8 +1312,8 @@ fn caption_search_reauthorizes_destinations_without_resaving_sources() -> Result
         scope: Scope::Public,
         ..view
     };
-    let control = QueryControl::new(std::time::Duration::from_secs(10))?;
     let find = |store: &Store, context, term, limit| {
+        let control = QueryControl::new(std::time::Duration::from_secs(10))?;
         store.search_public_pages(public(context), term, limit, &control)
     };
     author.revision = store.save_entry_layout(author, &source, true, Uuid::new_v4())?;
@@ -2517,6 +2517,44 @@ fn branch_local_network_and_parentage_corrections_never_change_parent_or_sibling
         ..author
     };
     let prior = branch;
+    let member_ref = atlas_store::semantic::FactRef {
+        world: world.id,
+        family: atlas_store::semantic::FactFamily::Network,
+        id: member,
+    };
+    let parent_ref = atlas_store::semantic::FactRef {
+        world: world.id,
+        family: atlas_store::semantic::FactFamily::Parentage,
+        id: parent,
+    };
+    let original = store.resolve_semantic_fact(member_ref, prior)?.unwrap();
+    assert_eq!(original.source_branch, world.main);
+    assert_eq!(
+        original.data,
+        atlas_store::semantic::SemanticFactData::Network(fact.clone())
+    );
+    assert!(store.resolve_semantic_fact(parent_ref, prior)?.is_some());
+    assert!(
+        store
+            .resolve_semantic_fact(
+                atlas_store::semantic::FactRef {
+                    family: atlas_store::semantic::FactFamily::Parentage,
+                    ..member_ref
+                },
+                prior,
+            )?
+            .is_none()
+    );
+    assert!(matches!(
+        store.resolve_semantic_fact(
+            member_ref,
+            ViewContext {
+                scope: Scope::Public,
+                ..prior
+            }
+        ),
+        Err(Error::CapabilityDenied)
+    ));
     store.withdraw_network_fact(branch, member, Uuid::new_v4())?;
     branch.revision = AuthorRevision(branch.revision.0 + 1);
     store.withdraw_parentage(
@@ -2560,7 +2598,18 @@ fn branch_local_network_and_parentage_corrections_never_change_parent_or_sibling
         branch: sibling.id,
         ..main
     };
+    assert!(store.resolve_semantic_fact(member_ref, branch)?.is_none());
+    assert!(store.resolve_semantic_fact(parent_ref, branch)?.is_none());
+    assert_eq!(
+        store.resolve_semantic_fact(member_ref, prior)?,
+        Some(original.clone())
+    );
     for context in [main, sibling] {
+        assert_eq!(
+            store.resolve_semantic_fact(member_ref, context)?,
+            Some(original.clone())
+        );
+        assert!(store.resolve_semantic_fact(parent_ref, context)?.is_some());
         assert_eq!(store.network_facts(context, house)?[0].id, member);
         assert_eq!(store.family_links(context, person)?[0].id, parent);
     }
@@ -2867,5 +2916,697 @@ fn chromosome_painter_keeps_contiguous_toy_homologues_and_deterministic_seed() -
         ),
         Err(Error::CapabilityDenied)
     ));
+    Ok(())
+}
+
+#[test]
+fn semantic_definition_pin_rejects_stale_and_incompatible_versions() -> Result<(), Error> {
+    use atlas_store::semantic::DefinitionPin;
+    let mut store = Store::open(":memory:")?;
+    let world = seed(&mut store)?;
+    let mut author = view(&world, 13);
+    let definition = ObjectRef::new(world.id);
+    let record = |label: &str| Record {
+        label: label.into(),
+        valid: ValidInterval::default(),
+        data: ObjectData::Definition {
+            definition: Definition::Tag,
+            description: "Governed vocabulary".into(),
+        },
+        source: None,
+    };
+    let command = |expected, change| Command {
+        world: world.id,
+        branch: world.main,
+        expected,
+        id: Uuid::new_v4(),
+        author: "Fixture".into(),
+        rationale: "Definition version validation".into(),
+        scope: Scope::Author,
+        changes: vec![change],
+    };
+    author.revision = store.apply(&command(
+        author.revision,
+        Change::Create(definition, record("Culture")),
+    ))?;
+    let old = author;
+    let pin = DefinitionPin {
+        version: store.get_object(definition, old)?.unwrap().reference(),
+    };
+    assert_eq!(
+        store.validate_definition_pin(pin, old)?.record.label,
+        "Culture"
+    );
+    let person = DefinitionPin {
+        version: store.get_object(id(&world, 1), old)?.unwrap().reference(),
+    };
+    assert!(matches!(
+        store.validate_definition_pin(person, old),
+        Err(Error::WrongKind)
+    ));
+    assert!(matches!(
+        store.validate_definition_pin(
+            pin,
+            ViewContext {
+                scope: Scope::Public,
+                ..old
+            }
+        ),
+        Err(Error::CapabilityDenied)
+    ));
+    author.revision = store.apply(&command(
+        author.revision,
+        Change::Correct(definition, record("Cultural tradition")),
+    ))?;
+    assert!(matches!(
+        store.validate_definition_pin(pin, author),
+        Err(Error::InvalidInput("definition version pin"))
+    ));
+    assert_eq!(
+        store.validate_definition_pin(pin, old)?.record.label,
+        "Culture"
+    );
+    Ok(())
+}
+
+#[test]
+fn canonical_concept_identity_is_searchable_and_historical() -> Result<(), Error> {
+    use atlas_store::{network::IdentityKind, query::ObjectKindFilter};
+    let mut store = Store::open(":memory:")?;
+    let world = seed(&mut store)?;
+    let mut author = view(&world, 13);
+    let before = author;
+    let concept = store.create_identity(
+        author,
+        IdentityKind::Concept,
+        "River language",
+        Uuid::new_v4(),
+    )?;
+    author.revision = AuthorRevision(author.revision.0 + 1);
+    assert!(store.get_object(concept, before)?.is_none());
+    let version = store.get_object(concept, author)?.unwrap();
+    assert_eq!(version.record.data, ObjectData::Concept);
+    let spec = query(QueryFilter::Kind(ObjectKindFilter::Concept));
+    assert!(store.execute_query(&spec, before)?.rows.is_empty());
+    assert_eq!(store.execute_query(&spec, author)?.rows[0].object, concept);
+    assert!(matches!(
+        store.get_object(
+            concept,
+            ViewContext {
+                scope: Scope::Public,
+                ..author
+            }
+        ),
+        Err(Error::CapabilityDenied)
+    ));
+    store.verify_foreign_keys(Scope::Author)?;
+    Ok(())
+}
+
+#[test]
+fn classifications_preserve_pins_and_branch_local_withdrawals() -> Result<(), Error> {
+    use atlas_store::{
+        network::IdentityKind,
+        semantic::{ClassificationInput, ConceptProfile, DefinitionPin},
+    };
+    let dir = tempfile::tempdir()?;
+    let mut store = Store::open(dir.path().join("source.sqlite"))?;
+    let world = seed(&mut store)?;
+    let mut author = view(&world, 13);
+    let concept = store.create_identity(
+        author,
+        IdentityKind::Concept,
+        "Estuary speech",
+        Uuid::new_v4(),
+    )?;
+    author.revision = AuthorRevision(2);
+    let definition = ObjectRef::new(world.id);
+    let record = |label: &str| Record {
+        label: label.into(),
+        valid: ValidInterval::default(),
+        data: ObjectData::Definition {
+            definition: Definition::Tag,
+            description: "Language vocabulary".into(),
+        },
+        source: None,
+    };
+    let edit = |expected, change| Command {
+        world: world.id,
+        branch: world.main,
+        expected,
+        id: Uuid::new_v4(),
+        author: "Fixture".into(),
+        rationale: "Vocabulary revision".into(),
+        scope: Scope::Author,
+        changes: vec![change],
+    };
+    author.revision = store.apply(&edit(
+        author.revision,
+        Change::Create(definition, record("Language")),
+    ))?;
+    let pin = DefinitionPin {
+        version: store.get_object(definition, author)?.unwrap().reference(),
+    };
+    let input = ClassificationInput {
+        subject: concept,
+        profile: ConceptProfile::Language,
+        descriptor: pin,
+        source: id(&world, 9),
+        starts_at: WorldDay(13),
+        ends_before: Some(WorldDay(20)),
+    };
+    assert!(matches!(
+        store.record_classification(
+            author,
+            ClassificationInput {
+                subject: id(&world, 1),
+                ..input
+            },
+            Uuid::new_v4()
+        ),
+        Err(Error::WrongKind)
+    ));
+    assert!(matches!(
+        store.record_classification(
+            author,
+            ClassificationInput {
+                source: id(&world, 2),
+                ..input
+            },
+            Uuid::new_v4()
+        ),
+        Err(Error::WrongKind)
+    ));
+    let before = author;
+    let profile_query = query(QueryFilter::ClassifiedAs(ConceptProfile::Language));
+    let descriptor_query = query(QueryFilter::ClassifiedBy(definition));
+    assert!(store.execute_query(&profile_query, before)?.rows.is_empty());
+    let assignment = store.record_classification(author, input, Uuid::new_v4())?;
+    author.revision = AuthorRevision(4);
+    assert_eq!(
+        store.execute_query(&descriptor_query, author)?.rows[0].object,
+        concept
+    );
+    let fact_ref = atlas_store::semantic::FactRef {
+        world: world.id,
+        family: atlas_store::semantic::FactFamily::Classification,
+        id: assignment,
+    };
+    let fact = store.resolve_semantic_fact(fact_ref, author)?.unwrap();
+    assert_eq!(
+        fact.data,
+        atlas_store::semantic::SemanticFactData::Classification(input)
+    );
+    for target in [concept, definition, id(&world, 9)] {
+        assert!(
+            store
+                .semantic_fact_backlinks(target, author)?
+                .contains(&fact)
+        );
+    }
+    assert!(store.resolve_semantic_fact(fact_ref, before)?.is_none());
+    assert_eq!(
+        store.execute_query(&profile_query, author)?.rows[0].object,
+        concept
+    );
+    let compound = query(QueryFilter::And(vec![
+        profile_query.filter.clone(),
+        QueryFilter::ExactLabel("Estuary speech".into()),
+    ]));
+    assert_eq!(
+        store.execute_query(&compound, author)?.rows[0].object,
+        concept
+    );
+    assert!(
+        store
+            .classifications(before, Some(concept), None)?
+            .is_empty()
+    );
+    assert_eq!(
+        store.classifications(author, Some(concept), None)?[0].id,
+        assignment
+    );
+    assert!(matches!(
+        store.record_classification(author, input, Uuid::new_v4()),
+        Err(Error::InvalidInput("overlapping classification"))
+    ));
+    assert!(matches!(
+        store.classifications(
+            ViewContext {
+                scope: Scope::Public,
+                ..author
+            },
+            None,
+            Some(ConceptProfile::Language)
+        ),
+        Err(Error::CapabilityDenied)
+    ));
+    assert!(
+        store
+            .classifications(
+                ViewContext {
+                    day: WorldDay(20),
+                    ..author
+                },
+                Some(concept),
+                None
+            )?
+            .is_empty()
+    );
+    author.revision = store.apply(&edit(
+        author.revision,
+        Change::Correct(definition, record("Written and spoken language")),
+    ))?;
+    assert_eq!(
+        store.classifications(author, Some(concept), None)?[0].input,
+        input
+    );
+    assert!(matches!(
+        store.record_classification(
+            author,
+            ClassificationInput {
+                profile: ConceptProfile::Culture,
+                ..input
+            },
+            Uuid::new_v4()
+        ),
+        Err(Error::InvalidInput("definition version pin"))
+    ));
+    let fork = store.fork(&ForkCommand {
+        world: world.id,
+        parent: world.main,
+        day: author.day,
+        expected: author.revision,
+        id: Uuid::new_v4(),
+        author: "Fixture".into(),
+        rationale: "Alternative classification history".into(),
+        scope: Scope::Author,
+    })?;
+    let inherited = ViewContext {
+        branch: fork.id,
+        revision: fork.created_revision,
+        ..author
+    };
+    assert_eq!(
+        store.classifications(inherited, None, Some(ConceptProfile::Language))?[0].id,
+        assignment
+    );
+    assert_eq!(
+        store.execute_query(&profile_query, inherited)?.rows[0].object,
+        concept
+    );
+    store.withdraw_classification(inherited, assignment, Uuid::new_v4())?;
+    let after = ViewContext {
+        revision: AuthorRevision(fork.created_revision.0 + 1),
+        ..inherited
+    };
+    assert!(store.execute_query(&profile_query, after)?.rows.is_empty());
+    assert!(
+        store
+            .execute_query(&descriptor_query, after)?
+            .rows
+            .is_empty()
+    );
+    assert!(store.resolve_semantic_fact(fact_ref, after)?.is_none());
+    assert!(store.semantic_fact_backlinks(concept, after)?.is_empty());
+    assert!(
+        store
+            .classifications(after, Some(concept), None)?
+            .is_empty()
+    );
+    assert_eq!(
+        store.classifications(inherited, Some(concept), None)?[0].id,
+        assignment
+    );
+    assert_eq!(
+        store.classifications(
+            ViewContext {
+                branch: world.main,
+                ..after
+            },
+            Some(concept),
+            None
+        )?[0]
+            .id,
+        assignment
+    );
+    use atlas_store::{
+        archive::restore_archive,
+        layout::SavedQueryBinding,
+        query::{ParameterBinding, ParameterValue, SaveNamedLabelQuery},
+    };
+    let mut main = ViewContext {
+        branch: world.main,
+        ..after
+    };
+    let saved = store.save_named_parameterized_query(SaveNamedLabelQuery {
+        world_id: world.id,
+        expected: main.revision,
+        query_id: None,
+        name: "Languages",
+        spec: &profile_query,
+        command_id: Uuid::new_v4(),
+        scope: Scope::Author,
+    })?;
+    main.revision = saved.recorded_at;
+    let binding = SavedQueryBinding {
+        world: world.id,
+        query_id: saved.id,
+        definition_revision: saved.recorded_at.0,
+        bindings: vec![ParameterBinding {
+            name: "concept_profile_1".into(),
+            value: ParameterValue::ConceptProfile {
+                value: ConceptProfile::Language,
+            },
+        }],
+    };
+    assert_eq!(
+        store
+            .execute_query(&binding.resolve(&store, main)?, main)?
+            .rows[0]
+            .object,
+        concept
+    );
+    let layout = LayoutDocument {
+        schema_version: LAYOUT_SCHEMA_VERSION,
+        entry: concept,
+        root: LayoutElement {
+            id: ElementId(Uuid::new_v4()),
+            audience: ClaimAudience::Public,
+            content: ElementContent::Stack(vec![LayoutElement {
+                id: ElementId(Uuid::new_v4()),
+                audience: ClaimAudience::Author,
+                content: ElementContent::SavedQuery(binding),
+            }]),
+        },
+    };
+    main.revision = store.save_entry_layout(main, &layout, true, Uuid::new_v4())?;
+    let public = ViewContext {
+        scope: Scope::Public,
+        ..main
+    };
+    assert_eq!(
+        store.display_entry(public, concept)?.unwrap().content,
+        DisplayContent::Stack(vec![])
+    );
+    let backup = dir.path().join("backup.sqlite");
+    let restored = dir.path().join("restored.sqlite");
+    store.backup_to(&backup, Scope::Author)?;
+    restore_archive(&backup, &restored, Scope::Author)?;
+    let reopened = Store::open(&restored)?;
+    assert_eq!(
+        reopened.classifications(main, Some(concept), None)?,
+        store.classifications(main, Some(concept), None)?
+    );
+    assert_eq!(
+        reopened.semantic_fact_backlinks(concept, main)?,
+        store.semantic_fact_backlinks(concept, main)?
+    );
+    assert_eq!(
+        reopened.display_entry(public, concept)?,
+        store.display_entry(public, concept)?
+    );
+    assert!(reopened.resolve_semantic_fact(fact_ref, after)?.is_none());
+    store.verify_foreign_keys(Scope::Author)?;
+    Ok(())
+}
+
+#[test]
+fn semantic_network_relations_require_curated_endpoint_profiles() -> Result<(), Error> {
+    use atlas_store::{
+        network::{IdentityKind, NetworkInput, NetworkKind},
+        semantic::{ClassificationInput, ConceptProfile, DefinitionPin, FactFamily, FactRef},
+    };
+    let mut store = Store::open(":memory:")?;
+    let world = seed(&mut store)?;
+    let mut author = view(&world, 13);
+    let culture = store.create_identity(
+        author,
+        IdentityKind::Concept,
+        "Estuary culture",
+        Uuid::new_v4(),
+    )?;
+    author.revision = AuthorRevision(2);
+    let language = store.create_identity(
+        author,
+        IdentityKind::Concept,
+        "Estuary language",
+        Uuid::new_v4(),
+    )?;
+    author.revision = AuthorRevision(3);
+    let descriptor = ObjectRef::new(world.id);
+    author.revision = store.apply(&Command {
+        world: world.id,
+        branch: world.main,
+        expected: author.revision,
+        id: Uuid::new_v4(),
+        author: "Fixture".into(),
+        rationale: "Curated vocabulary".into(),
+        scope: Scope::Author,
+        changes: vec![Change::Create(
+            descriptor,
+            Record {
+                label: "Domain profile".into(),
+                valid: ValidInterval::default(),
+                data: ObjectData::Definition {
+                    definition: Definition::Tag,
+                    description: "Curated metadata".into(),
+                },
+                source: None,
+            },
+        )],
+    })?;
+    let pin = DefinitionPin {
+        version: store.get_object(descriptor, author)?.unwrap().reference(),
+    };
+    let source = id(&world, 9);
+    let relation = NetworkInput {
+        subject: culture,
+        target: language,
+        source,
+        kind: NetworkKind::CultureLanguage,
+        role: "documented_language".into(),
+        starts_at: 13,
+        ends_before: None,
+    };
+    assert!(matches!(
+        store.record_network_fact(author, &relation, Uuid::new_v4()),
+        Err(Error::WrongKind)
+    ));
+    for (subject, profile) in [
+        (culture, ConceptProfile::Culture),
+        (language, ConceptProfile::Language),
+    ] {
+        store.record_classification(
+            author,
+            ClassificationInput {
+                subject,
+                profile,
+                descriptor: pin,
+                source,
+                starts_at: WorldDay(13),
+                ends_before: None,
+            },
+            Uuid::new_v4(),
+        )?;
+        author.revision = AuthorRevision(author.revision.0 + 1);
+    }
+    let wrong = NetworkInput {
+        kind: NetworkKind::WorkingMaterial,
+        role: "working_medium".into(),
+        ..relation.clone()
+    };
+    assert!(matches!(
+        store.record_network_fact(author, &wrong, Uuid::new_v4()),
+        Err(Error::WrongKind)
+    ));
+    let wrong_role = NetworkInput {
+        role: "membership".into(),
+        ..relation.clone()
+    };
+    assert!(matches!(
+        store.record_network_fact(author, &wrong_role, Uuid::new_v4()),
+        Err(Error::InvalidInput("semantic relation role"))
+    ));
+    let before = author;
+    let fact = store.record_network_fact(author, &relation, Uuid::new_v4())?;
+    author.revision = AuthorRevision(author.revision.0 + 1);
+    let reference = FactRef {
+        world: world.id,
+        family: FactFamily::Network,
+        id: fact,
+    };
+    assert!(store.resolve_semantic_fact(reference, before)?.is_none());
+    assert_eq!(store.network_facts(author, culture)?[0].input, relation);
+    assert!(store.resolve_semantic_fact(reference, author)?.is_some());
+    store.verify_foreign_keys(Scope::Author)?;
+    Ok(())
+}
+
+#[test]
+fn schema_37_spatial_lineage_is_rejected_without_mutating_archive() -> Result<(), Error> {
+    let dir = tempfile::tempdir()?;
+    let path = dir.path().join("legacy.sqlite");
+    let mut store = Store::open(&path)?;
+    seed(&mut store)?;
+    drop(store);
+
+    // Reproduce the held branch's conflicting schema marker and registry.
+    let conn = rusqlite::Connection::open(&path)?;
+    conn.execute_batch(
+        "PRAGMA foreign_keys=OFF;
+         CREATE TABLE objects_spatial (
+             world_id BLOB NOT NULL REFERENCES worlds(id),
+             id BLOB NOT NULL,
+             kind TEXT NOT NULL CHECK(kind IN ('person','historical_event','source','claim',
+                'relationship','event_involvement','actor_action','definition','organization',
+                'household','family_house','faction','conflict','office','title','asset',
+                'population','conflict_issue','conflict_phase','succession_rule','place')),
+             PRIMARY KEY(world_id,id), UNIQUE(world_id,id,kind)
+         ) STRICT;
+         INSERT INTO objects_spatial SELECT * FROM objects;
+         DROP TABLE objects;
+         ALTER TABLE objects_spatial RENAME TO objects;
+         PRAGMA user_version=37;",
+    )?;
+    drop(conn);
+    assert!(matches!(Store::open(&path), Err(Error::Integrity(_))));
+    assert!(matches!(
+        inspect_archive(&path, Scope::Author),
+        Err(Error::Integrity(_))
+    ));
+    let conn = rusqlite::Connection::open(&path)?;
+    let schema: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    assert_eq!(schema, 37);
+    Ok(())
+}
+
+#[test]
+fn ontology_migration_from_reconstructed_schema_36_preserves_fact_history() -> Result<(), Error> {
+    use atlas_store::{
+        archive::restore_archive,
+        genealogy::RecordParentage,
+        network::{IdentityKind, NetworkInput, NetworkKind},
+        semantic::{FactFamily, FactRef},
+    };
+    let dir = tempfile::tempdir()?;
+    let path = dir.path().join("schema36.sqlite");
+    let mut store = Store::open(&path)?;
+    let world = seed(&mut store)?;
+    let mut author = view(&world, 13);
+    let house = store.create_identity(
+        author,
+        IdentityKind::FamilyHouse,
+        "House Vale",
+        Uuid::new_v4(),
+    )?;
+    author.revision = AuthorRevision(2);
+    let network = store.record_network_fact(
+        author,
+        &NetworkInput {
+            subject: id(&world, 2),
+            target: house,
+            source: id(&world, 9),
+            kind: NetworkKind::Membership,
+            role: "member".into(),
+            starts_at: 13,
+            ends_before: None,
+        },
+        Uuid::new_v4(),
+    )?;
+    author.revision = AuthorRevision(3);
+    let parentage = store.record_parentage(
+        author,
+        RecordParentage {
+            parent: id(&world, 1),
+            child: id(&world, 2),
+            kind: ParentageKind::Biological,
+            starts_at: WorldDay(0),
+            ends_before: None,
+            command_id: Uuid::new_v4(),
+            rationale: "Register",
+        },
+    )?;
+    author.revision = AuthorRevision(4);
+    let references = [
+        FactRef {
+            world: world.id,
+            family: FactFamily::Network,
+            id: network,
+        },
+        FactRef {
+            world: world.id,
+            family: FactFamily::Parentage,
+            id: parentage,
+        },
+    ];
+    let expected = references
+        .iter()
+        .map(|reference| store.resolve_semantic_fact(*reference, author))
+        .collect::<Result<Vec<_>, _>>()?;
+    let expected_person = store.get_object(id(&world, 2), author)?;
+    drop(store);
+
+    // Restore schema-36 DDL using the original registry and network migrations,
+    // keeping the existing canonical rows. No ontology facts are fabricated.
+    let connection = rusqlite::Connection::open(&path)?;
+    connection.execute_batch(
+        "PRAGMA foreign_keys=OFF;
+         BEGIN IMMEDIATE;
+         DROP TABLE IF EXISTS site_area_withdrawals;
+         DROP TABLE IF EXISTS site_area_facts;
+         DROP TABLE classification_withdrawals;
+         DROP TABLE concept_classifications;",
+    )?;
+    let registry = include_str!("../migrations/0032.sql");
+    let (objects, _) = registry
+        .split_once("CREATE TABLE network_facts_v32")
+        .expect("original object registry");
+    let (_, ghosts) = registry
+        .split_once("CREATE TABLE ghost_proposals_v32")
+        .expect("original ghost registry");
+    connection.execute_batch(objects)?;
+    connection.execute_batch(&format!("CREATE TABLE ghost_proposals_v32{ghosts}"))?;
+    connection.execute_batch(include_str!("../migrations/0035.sql"))?;
+    connection.execute_batch("PRAGMA user_version=36; COMMIT;")?;
+    drop(connection);
+    assert_eq!(inspect_archive(&path, Scope::Author)?.schema, 36);
+
+    // A broken source archive must fail migration atomically.
+    let broken = dir.path().join("broken.sqlite");
+    std::fs::copy(&path, &broken)?;
+    let connection = rusqlite::Connection::open(&broken)?;
+    connection.execute_batch(
+        "PRAGMA foreign_keys=OFF;
+         INSERT INTO objects(world_id,id,kind) VALUES(randomblob(16),randomblob(16),'person');",
+    )?;
+    drop(connection);
+    assert!(Store::open(&broken).is_err());
+    let connection = rusqlite::Connection::open(&broken)?;
+    let revision: i64 = connection.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    assert_eq!(revision, 36);
+    let new_table: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name='concept_classifications')",
+        [],
+        |row| row.get(0),
+    )?;
+    assert!(!new_table);
+    drop(connection);
+
+    let restored = dir.path().join("restored.sqlite");
+    let manifest = restore_archive(&path, &restored, Scope::Author)?;
+    assert!(manifest.schema >= 40);
+    let reopened = Store::open(&restored)?;
+    assert_eq!(reopened.get_object(id(&world, 2), author)?, expected_person);
+    for (reference, fact) in references.iter().zip(expected) {
+        assert_eq!(reopened.resolve_semantic_fact(*reference, author)?, fact);
+    }
+    assert!(
+        reopened
+            .classifications(author, Some(house), None)?
+            .is_empty()
+    );
+    reopened.verify_foreign_keys(Scope::Author)?;
+    assert_eq!(inspect_archive(&path, Scope::Author)?.schema, 36);
     Ok(())
 }
