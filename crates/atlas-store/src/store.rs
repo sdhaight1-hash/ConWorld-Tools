@@ -117,6 +117,7 @@ impl Store {
             1..=SCHEMA_VERSION if application_id == APPLICATION_ID => {}
             _ => return Err(Error::WrongDatabase),
         }
+        verify_semantic_schema_lineage(&tx, version)?;
         if version < 2 {
             tx.execute_batch(include_str!("../migrations/0002.sql"))?;
         }
@@ -2999,6 +3000,25 @@ fn apply_change(
                 start.0
             ],
         )?;
+    }
+    Ok(())
+}
+
+/// Schema 37 was used by two independent unreleased branches.
+/// Reject the spatial variant rather than treating it as ontology history.
+pub(crate) fn verify_semantic_schema_lineage(conn: &Connection, version: i64) -> Result<(), Error> {
+    if !(37..=40).contains(&version) {
+        return Ok(());
+    }
+    let registry: String = conn.query_row(
+        "SELECT sql FROM sqlite_schema WHERE type='table' AND name='objects'",
+        [],
+        |row| row.get(0),
+    )?;
+    if !registry.contains("'concept'") || registry.contains("'place'") {
+        return Err(Error::Integrity(
+            "incompatible unreleased schema lineage; restore a schema-36 backup".into(),
+        ));
     }
     Ok(())
 }

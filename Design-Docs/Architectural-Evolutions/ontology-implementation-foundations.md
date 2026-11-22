@@ -79,3 +79,7 @@ The new semantic_workload example creates real canonical Concept identities and 
 ## Site area author and query integration
 
 Added native measurement commands with explicit source, descriptor and interval, a same-interval correction path, historical inspection, stable reference resolution and typed saved area predicates (unknown or minimum in the exact authored unit). Area predicates remain fixed in a saved definition; no unapproved runtime conversion. Desktop inspector and combined search use these existing author-only surfaces. CI and native screenshots remain outstanding. Draft PR #74 is held against #73; #67 remains separate.
+
+## Release lineage guard
+
+Schema 37 was assigned independently by #67 and #73 before release. Store open and standalone archive inspection now reject the incompatible spatial registry at versions 37–40 before migration, including empty development databases. The regression reconstructs that registry and confirms no schema version mutation. Released schema 36 remains the supported migration baseline; incompatible experimental databases require their original branch or a verified schema-36 backup. The held combined candidate must inherit this guard while advancing to schemas 41/42.
