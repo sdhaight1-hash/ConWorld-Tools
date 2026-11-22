@@ -13,6 +13,13 @@ pub enum IdentityKind {
     FamilyHouse,
     Faction,
     Conflict,
+    Office,
+    Title,
+    Asset,
+    Population,
+    ConflictIssue,
+    ConflictPhase,
+    SuccessionRule,
 }
 
 impl IdentityKind {
@@ -24,6 +31,13 @@ impl IdentityKind {
             Self::FamilyHouse => "family_house",
             Self::Faction => "faction",
             Self::Conflict => "conflict",
+            Self::Office => "office",
+            Self::Title => "title",
+            Self::Asset => "asset",
+            Self::Population => "population",
+            Self::ConflictIssue => "conflict_issue",
+            Self::ConflictPhase => "conflict_phase",
+            Self::SuccessionRule => "succession_rule",
         }
     }
 
@@ -35,6 +49,13 @@ impl IdentityKind {
             Self::FamilyHouse => crate::ObjectData::FamilyHouse,
             Self::Faction => crate::ObjectData::Faction,
             Self::Conflict => crate::ObjectData::Conflict,
+            Self::Office => crate::ObjectData::Office,
+            Self::Title => crate::ObjectData::Title,
+            Self::Asset => crate::ObjectData::Asset,
+            Self::Population => crate::ObjectData::Population,
+            Self::ConflictIssue => crate::ObjectData::ConflictIssue,
+            Self::ConflictPhase => crate::ObjectData::ConflictPhase,
+            Self::SuccessionRule => crate::ObjectData::SuccessionRule,
         }
     }
 
@@ -46,6 +67,13 @@ impl IdentityKind {
             "family_house" => Ok(Self::FamilyHouse),
             "faction" => Ok(Self::Faction),
             "conflict" => Ok(Self::Conflict),
+            "office" => Ok(Self::Office),
+            "title" => Ok(Self::Title),
+            "asset" => Ok(Self::Asset),
+            "population" => Ok(Self::Population),
+            "conflict_issue" => Ok(Self::ConflictIssue),
+            "conflict_phase" => Ok(Self::ConflictPhase),
+            "succession_rule" => Ok(Self::SuccessionRule),
             _ => Err(crate::Error::WrongKind),
         }
     }
@@ -60,6 +88,15 @@ pub enum NetworkKind {
     ConfirmedCause,
     AllegedCause,
     ConflictPosition,
+    OfficeHolding,
+    OfficeOf,
+    TitleHolding,
+    TitleOf,
+    Ownership,
+    IssueOf,
+    PhaseOf,
+    RuleOf,
+    PopulationMember,
 }
 
 impl NetworkKind {
@@ -71,6 +108,15 @@ impl NetworkKind {
             Self::ConfirmedCause => "confirmed_cause",
             Self::AllegedCause => "alleged_cause",
             Self::ConflictPosition => "conflict_position",
+            Self::OfficeHolding => "office_holding",
+            Self::OfficeOf => "office_of",
+            Self::TitleHolding => "title_holding",
+            Self::TitleOf => "title_of",
+            Self::Ownership => "ownership",
+            Self::IssueOf => "issue_of",
+            Self::PhaseOf => "phase_of",
+            Self::RuleOf => "rule_of",
+            Self::PopulationMember => "population_member",
         }
     }
 
@@ -82,6 +128,15 @@ impl NetworkKind {
             "confirmed_cause" => Ok(Self::ConfirmedCause),
             "alleged_cause" => Ok(Self::AllegedCause),
             "conflict_position" => Ok(Self::ConflictPosition),
+            "office_holding" => Ok(Self::OfficeHolding),
+            "office_of" => Ok(Self::OfficeOf),
+            "title_holding" => Ok(Self::TitleHolding),
+            "title_of" => Ok(Self::TitleOf),
+            "ownership" => Ok(Self::Ownership),
+            "issue_of" => Ok(Self::IssueOf),
+            "phase_of" => Ok(Self::PhaseOf),
+            "rule_of" => Ok(Self::RuleOf),
+            "population_member" => Ok(Self::PopulationMember),
             _ => Err(crate::Error::WrongKind),
         }
     }

@@ -114,9 +114,42 @@ impl Store {
                     && matches!(target.record.data, ObjectData::Person) => {}
             NetworkKind::Succession
                 if institution(&subject.record.data) && institution(&target.record.data) => {}
+            NetworkKind::OfficeHolding
+                if matches!(subject.record.data, ObjectData::Person)
+                    && matches!(target.record.data, ObjectData::Office) => {}
+            NetworkKind::OfficeOf
+                if matches!(subject.record.data, ObjectData::Office)
+                    && institution(&target.record.data) => {}
+            NetworkKind::TitleHolding
+                if matches!(subject.record.data, ObjectData::Person)
+                    && matches!(target.record.data, ObjectData::Title) => {}
+            NetworkKind::TitleOf
+                if matches!(subject.record.data, ObjectData::Title)
+                    && institution(&target.record.data) => {}
+            NetworkKind::Ownership
+                if (matches!(subject.record.data, ObjectData::Person) || institution(&subject.record.data))
+                    && matches!(target.record.data, ObjectData::Asset) => {}
+            NetworkKind::IssueOf
+                if matches!(subject.record.data, ObjectData::ConflictIssue)
+                    && matches!(target.record.data, ObjectData::Conflict) => {}
+            NetworkKind::PhaseOf
+                if matches!(subject.record.data, ObjectData::ConflictPhase)
+                    && matches!(target.record.data, ObjectData::Conflict) => {}
+            NetworkKind::PopulationMember
+                if matches!(subject.record.data, ObjectData::Person)
+                    && matches!(target.record.data, ObjectData::Population) => {}
+            NetworkKind::RuleOf
+                if matches!(subject.record.data, ObjectData::SuccessionRule)
+                    && matches!(target.record.data, ObjectData::Title) =>
+            {
+                if !matches!(input.role.as_str(), "elective" | "primogeniture" | "absolute_primogeniture" |
+                    "matrilineal" | "designated_heir" | "custom") {
+                    return Err(Error::InvalidInput("succession rule kind"));
+                }
+            }
             NetworkKind::ConflictPosition
                 if matches!(subject.record.data, ObjectData::Faction)
-                    && matches!(target.record.data, ObjectData::Conflict) =>
+                    && matches!(target.record.data, ObjectData::Conflict | ObjectData::ConflictIssue) =>
             {
                 if !matches!(
                     input.role.as_str(),
@@ -156,6 +189,19 @@ impl Store {
                 view.revision.0,input.ends_before,input.starts_at], |row| row.get(0))?;
         if duplicate {
             return Err(Error::InvalidInput("overlapping network fact"));
+        }
+        // An office/title represents one seat, and a title has one active rule.
+        // A multi-seat body uses multiple office identities.
+        if matches!(input.kind, NetworkKind::OfficeHolding | NetworkKind::TitleHolding | NetworkKind::RuleOf) {
+            let occupied: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM network_facts WHERE world_id=?1 AND kind=?2
+                 AND target_id=?3 AND recorded_revision<=?4 AND (withdrawn_revision IS NULL OR withdrawn_revision>?4)
+                 AND (?5 IS NULL OR starts_at<?5) AND (ends_before IS NULL OR ends_before>?6))",
+                params![view.world.0.as_bytes(),kind,input.target.id.0.as_bytes(),view.revision.0,input.ends_before,input.starts_at],
+                |row| row.get(0))?;
+            if occupied {
+                return Err(Error::InvalidInput("overlapping exclusive role"));
+            }
         }
         // Conservative whole-history DAG: never allow a confirmed cause or succession cycle.
         if matches!(
@@ -366,7 +412,8 @@ impl Store {
                 .rows
                 .into_iter()
                 .filter(|item| matches!(item.record.data, ObjectData::Person | ObjectData::Organization |
-                    ObjectData::FamilyHouse | ObjectData::Household | ObjectData::Faction | ObjectData::Conflict))
+                    ObjectData::FamilyHouse | ObjectData::Household | ObjectData::Faction | ObjectData::Conflict |
+                    ObjectData::Office | ObjectData::Title | ObjectData::Asset | ObjectData::Population | ObjectData::ConflictIssue | ObjectData::ConflictPhase | ObjectData::SuccessionRule))
                 .map(|item| item.object)
                 .collect();
             results.push(crate::network::GhostCandidate {
@@ -409,7 +456,9 @@ impl Store {
         }
         let matches_alias = if kind == "person" {
             active_alias_versions(&tx, effective)?.iter().any(|alias| alias.person == target &&
-                alias.active && alias.label.to_lowercase() == label.to_lowercase())
+                alias.active && alias.starts_at.is_none_or(|start| start <= effective.day)
+                && alias.ends_before.is_none_or(|end| effective.day < end)
+                && alias.label.to_lowercase() == label.to_lowercase())
         } else {
             false
         };

@@ -24,7 +24,7 @@ mod network;
 mod templates;
 
 // Version 29 adds version-pinned template layout variants without changing tables.
-pub(crate) const SCHEMA_VERSION: i64 = 31;
+pub(crate) const SCHEMA_VERSION: i64 = 32;
 
 // Candidate queries bind world (?1), focus/phrase (?2), author revision (?3),
 // limit (?4) and branch (?5). Follow only immutable inherited revisions.
@@ -197,6 +197,9 @@ impl Store {
         }
         if version < 31 {
             tx.execute_batch(include_str!("../migrations/0031.sql"))?;
+        }
+        if version < 32 {
+            tx.execute_batch(include_str!("../migrations/0032.sql"))?;
         }
         if version < SCHEMA_VERSION {
             verify_foreign_keys(&tx)?;
@@ -3159,6 +3162,13 @@ fn write_version(
         ObjectData::FamilyHouse => ("family_house", &EventDate::Unknown, None),
         ObjectData::Faction => ("faction", &EventDate::Unknown, None),
         ObjectData::Conflict => ("conflict", &EventDate::Unknown, None),
+        ObjectData::Office => ("office", &EventDate::Unknown, None),
+        ObjectData::Title => ("title", &EventDate::Unknown, None),
+        ObjectData::Asset => ("asset", &EventDate::Unknown, None),
+        ObjectData::Population => ("population", &EventDate::Unknown, None),
+        ObjectData::ConflictIssue => ("conflict_issue", &EventDate::Unknown, None),
+        ObjectData::ConflictPhase => ("conflict_phase", &EventDate::Unknown, None),
+        ObjectData::SuccessionRule => ("succession_rule", &EventDate::Unknown, None),
         ObjectData::Definition {
             definition,
             description,
@@ -3533,6 +3543,13 @@ fn read_version(
         "family_house" => ObjectData::FamilyHouse,
         "faction" => ObjectData::Faction,
         "conflict" => ObjectData::Conflict,
+        "office" => ObjectData::Office,
+        "title" => ObjectData::Title,
+        "asset" => ObjectData::Asset,
+        "population" => ObjectData::Population,
+        "conflict_issue" => ObjectData::ConflictIssue,
+        "conflict_phase" => ObjectData::ConflictPhase,
+        "succession_rule" => ObjectData::SuccessionRule,
         "relationship" => {
             let (subject, target, kind, trust): ([u8; 16], [u8; 16], String, Option<u8>) = conn.query_row(
                 "SELECT subject_id, target_id, relation_kind, trust FROM relationship_versions

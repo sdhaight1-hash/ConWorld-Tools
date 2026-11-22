@@ -169,6 +169,13 @@ pub enum ObjectData {
     FamilyHouse,
     Faction,
     Conflict,
+    Office,
+    Title,
+    Asset,
+    Population,
+    ConflictIssue,
+    ConflictPhase,
+    SuccessionRule,
     Definition {
         definition: Definition,
         description: String,
