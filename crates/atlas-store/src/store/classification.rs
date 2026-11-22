@@ -1,5 +1,6 @@
 //! Canonical author-only curated classification persistence and bounded reads.
 use super::*;
+use crate::query::{classification_candidate_matches, classification_seek_anchor};
 use crate::semantic::{Classification, ClassificationInput, ConceptProfile, DefinitionPin};
 
 pub(super) const ACTIVE: &str = "
@@ -365,20 +366,34 @@ impl Store {
         self.check_query_control()?;
         let tx = self.conn.unchecked_transaction()?;
         metadata_world(&tx, view, false)?;
-        let (condition, value) = match filter {
+        let mut nodes = 0;
+        validate_predicate(filter, view.world, 0, &mut nodes)?;
+        let anchor = classification_seek_anchor(filter)
+            .ok_or(Error::InvalidInput("classification page filter"))?;
+        let terms = match filter {
+            QueryFilter::And(children) => children.as_slice(),
+            _ => std::slice::from_ref(filter),
+        };
+        // Check every descriptor before returning an empty result, even if
+        // another term is absent or cannot match any candidate.
+        let mut missing = false;
+        for term in terms {
+            if let QueryFilter::ClassifiedBy(descriptor) = term {
+                missing |= !visible_tag_descriptor(&tx, view, *descriptor)?;
+            }
+        }
+        if missing {
+            return Ok((Vec::new(), false));
+        }
+        let (condition, value) = match anchor {
             QueryFilter::ClassifiedAs(profile) => {
                 ("p.profile=?7", Value::Text(profile.key().into()))
             }
-            QueryFilter::ClassifiedBy(descriptor) => {
-                if !visible_tag_descriptor(&tx, view, *descriptor)? {
-                    return Ok((Vec::new(), false));
-                }
-                (
-                    "p.descriptor_id=?7",
-                    Value::Blob(descriptor.id.0.as_bytes().to_vec()),
-                )
-            }
-            _ => return Err(Error::InvalidInput("classification page filter")),
+            QueryFilter::ClassifiedBy(descriptor) => (
+                "p.descriptor_id=?7",
+                Value::Blob(descriptor.id.0.as_bytes().to_vec()),
+            ),
+            _ => unreachable!("positive classification anchor"),
         };
         let label = after.map_or("", |(label, _)| label);
         let id = after.map_or([0; 16], |(_, object)| *object.id.0.as_bytes());
@@ -403,13 +418,13 @@ impl Store {
             &id[..],
             &value
         ])?;
-        let mut descriptor_matches = tx.prepare(&format!(
+        let mut subject_matches = tx.prepare(&format!(
             "{METADATA_CTE} {ACTIVE}
              SELECT p.id,p.subject_id,p.profile,p.descriptor_id,p.descriptor_branch,
                     p.descriptor_state_revision,p.descriptor_revision,p.source_id,p.starts_at,
                     p.ends_before,p.recorded_revision,p.branch_id
              FROM active_classification p
-             WHERE p.subject_id=?8 AND {condition}
+             WHERE p.subject_id=?5
              AND p.starts_at<=?4 AND (p.ends_before IS NULL OR p.ends_before>?4)
              ORDER BY p.id LIMIT 5"
         ))?;
@@ -434,38 +449,32 @@ impl Store {
             if version.record.data != ObjectData::Concept || version.record.label != candidate {
                 continue;
             }
-            let matches = match filter {
-                QueryFilter::ClassifiedAs(profile) => has_profile(&tx, view, object, *profile)?,
-                QueryFilter::ClassifiedBy(_) => {
-                    let mut assignments = descriptor_matches.query(params![
-                        view.world.0.as_bytes(),
-                        view.branch.0.as_bytes(),
-                        view.revision.0,
-                        view.day.0,
-                        rusqlite::types::Null,
-                        rusqlite::types::Null,
-                        &value,
-                        object.id.0.as_bytes(),
-                    ])?;
-                    let mut visible = false;
-                    let mut profiles = HashSet::new();
-                    while let Some(row) = assignments.next()? {
-                        self.check_query_control()?;
-                        let profile = ConceptProfile::parse(&row.get::<_, String>(2)?)?;
-                        if !profiles.insert(profile) {
-                            return Err(Error::Integrity(
-                                "overlapping active classifications".into(),
-                            ));
-                        }
-                        if read_classification(&tx, view, row)?.is_some() {
-                            visible = true;
-                        }
-                    }
-                    visible
+            let mut assignments = subject_matches.query(params![
+                view.world.0.as_bytes(),
+                view.branch.0.as_bytes(),
+                view.revision.0,
+                view.day.0,
+                object.id.0.as_bytes(),
+            ])?;
+            let mut seen = HashSet::new();
+            let mut profiles = HashSet::new();
+            let mut descriptors = HashSet::new();
+            // The curated vocabulary has four profiles and permits at most
+            // one active assignment per profile. Five rows expose corruption.
+            while let Some(row) = assignments.next()? {
+                self.check_query_control()?;
+                let profile = ConceptProfile::parse(&row.get::<_, String>(2)?)?;
+                if !seen.insert(profile) {
+                    return Err(Error::Integrity(
+                        "overlapping active classifications".into(),
+                    ));
                 }
-                _ => unreachable!("classification page filter validated"),
-            };
-            if !matches {
+                if let Some(assignment) = read_classification(&tx, view, row)? {
+                    profiles.insert(assignment.input.profile);
+                    descriptors.insert(assignment.input.descriptor.version.object);
+                }
+            }
+            if !classification_candidate_matches(filter, &version, &profiles, &descriptors) {
                 continue;
             }
             result.push(version);

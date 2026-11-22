@@ -138,14 +138,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         assert!(!result.truncated);
         let sparse_us = sparse.elapsed().as_micros();
         let dense = Instant::now();
-        let result = store.execute_query(&spec(ConceptProfile::Language), view);
-        if count <= 2000 {
-            let result = result?;
-            assert_eq!(result.rows.len(), 500);
-            assert!(result.truncated);
-        } else {
-            assert!(matches!(result, Err(Error::QueryBudgetExceeded)));
-        }
+        let result = store.execute_query(&spec(ConceptProfile::Language), view)?;
+        assert_eq!(result.rows.len(), 500);
+        assert!(result.truncated);
         let dense_us = dense.elapsed().as_micros();
         let point = Instant::now();
         assert!(store.resolve_semantic_fact(fact, view)?.is_some());
@@ -162,8 +157,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             links.elapsed().as_micros()
         );
     }
-    // One-shot dense queries can reject; the standalone profile page path
-    // should seek instead of materializing the entire matching world.
+    // One-shot and paged semantic queries share a bounded seek path.
     let spec = spec(ConceptProfile::Language);
     if count == 1000 {
         let first = store.execute_query_page(&spec, view, None)?;
@@ -223,6 +217,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!(
         "descriptor_first_two_pages=2 distinct={} elapsed_ms={}",
         seen.len(),
+        started.elapsed().as_millis()
+    );
+    let composite = QuerySpec {
+        filter: QueryFilter::And(vec![
+            QueryFilter::ClassifiedBy(descriptor),
+            QueryFilter::ClassifiedAs(ConceptProfile::Language),
+            QueryFilter::LabelContains("Concept ".into()),
+        ]),
+        ..spec.clone()
+    };
+    let control = QueryControl::new(Duration::from_secs(30))?;
+    let started = Instant::now();
+    let first = store.execute_query_page_controlled(&composite, view, None, &control)?;
+    let direct = store.execute_query_controlled(&composite, view, &control)?;
+    assert_eq!(first.rows, direct.rows);
+    assert!(direct.truncated);
+    let control = QueryControl::new(Duration::from_secs(30))?;
+    let second =
+        store.execute_query_page_controlled(&composite, view, first.next_cursor.as_ref(), &control)?;
+    assert_eq!(first.rows.len(), 500);
+    assert_eq!(second.rows.len(), if count == 1000 { 490 } else { 500 });
+    let mut ids = std::collections::HashSet::new();
+    for row in first.rows.iter().chain(&second.rows) {
+        assert!(ids.insert(row.object));
+    }
+    println!(
+        "composite_first_two_pages=2 distinct={} elapsed_ms={}",
+        ids.len(),
         started.elapsed().as_millis()
     );
     let control = QueryControl::new(Duration::from_secs(30))?;

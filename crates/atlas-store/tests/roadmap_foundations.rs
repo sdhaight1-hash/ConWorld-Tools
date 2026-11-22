@@ -4396,6 +4396,60 @@ fn classification_descriptor_pages_deduplicate_and_pin_cursor_context() -> Resul
     ));
     let updated = store.execute_query_page(&spec, author, None)?;
     assert_eq!(updated.rows[0].object, second);
+    let compound = QuerySpec {
+        limit: 1,
+        ..query(QueryFilter::And(vec![
+            QueryFilter::ClassifiedBy(descriptor),
+            QueryFilter::ClassifiedAs(ConceptProfile::Culture),
+            QueryFilter::LabelContains("SAME".into()),
+        ]))
+    };
+    for context in [old, author] {
+        let result = store.execute_query(&compound, context)?;
+        let page = store.execute_query_page(&compound, context, None)?;
+        assert_eq!(result.rows, page.rows);
+        assert_eq!(page.rows.len(), 1);
+        assert_eq!(page.rows[0].object, first);
+        assert!(!result.truncated);
+        assert!(page.next_cursor.is_none());
+    }
+    let invalid = query(QueryFilter::And(vec![
+        QueryFilter::ClassifiedBy(id(&world, 9999)),
+        QueryFilter::ClassifiedBy(first),
+        QueryFilter::LabelContains("never matches".into()),
+    ]));
+    assert!(matches!(
+        store.execute_query(&invalid, author),
+        Err(Error::WrongKind)
+    ));
+    let invalid_label = query(QueryFilter::And(vec![
+        QueryFilter::ClassifiedBy(id(&world, 9999)),
+        QueryFilter::ExactLabel(" ".into()),
+    ]));
+    assert!(matches!(
+        store.execute_query_page(&invalid_label, author, None),
+        Err(Error::InvalidInput("query label"))
+    ));
+    let saved = store.save_named_label_query(atlas_store::query::SaveNamedLabelQuery {
+        world_id: world.id,
+        expected: author.revision,
+        query_id: None,
+        name: "Culture concepts",
+        spec: &compound,
+        command_id: Uuid::new_v4(),
+        scope: Scope::Author,
+    })?;
+    author.revision = saved.recorded_at;
+    let definitions = store.saved_label_queries(world.id, author.revision, Scope::Author)?;
+    let replay = &definitions
+        .iter()
+        .find(|item| item.id == saved.id)
+        .unwrap()
+        .spec;
+    assert_eq!(replay, &compound);
+    let page = store.execute_query_page(replay, author, None)?;
+    assert_eq!(page.rows[0].object, first);
+    assert!(page.next_cursor.is_none());
     assert!(matches!(
         store.execute_query_page(
             &query(QueryFilter::ClassifiedBy(first)),

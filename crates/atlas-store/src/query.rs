@@ -581,6 +581,15 @@ fn validate_query_request(spec: &QuerySpec, view: ViewContext) -> Result<(), Err
 impl Store {
     pub fn execute_query(&self, spec: &QuerySpec, view: ViewContext) -> Result<QueryResult, Error> {
         validate_query_request(spec, view)?;
+        if classification_seek_anchor(&spec.filter).is_some() {
+            let (rows, truncated) =
+                self.classification_page(view, &spec.filter, None, spec.limit)?;
+            return Ok(QueryResult {
+                rows,
+                truncated,
+                revision: view.revision,
+            });
+        }
         self.execute_bounded_query(spec, view)
     }
 
@@ -609,7 +618,7 @@ impl Store {
 
     /// Page only complete, bounded author queries. Reevaluate the immutable
     /// recorded view on each call; do not cache raw rows or trust offsets.
-    /// Standalone classification profile/descriptor predicates seek an indexed label/UUID window.
+    /// Positive classification conjunctions seek an indexed label/UUID window.
     /// Other predicates retain the existing bounded materialization planner.
     pub fn execute_query_page(
         &self,
@@ -626,10 +635,7 @@ impl Store {
         {
             return Err(Error::InvalidInput("query cursor context"));
         }
-        if matches!(
-            &spec.filter,
-            QueryFilter::ClassifiedAs(_) | QueryFilter::ClassifiedBy(_)
-        ) {
+        if classification_seek_anchor(&spec.filter).is_some() {
             let boundary = after.map(|cursor| (cursor.label.as_str(), cursor.last));
             let (rows, has_more) =
                 self.classification_page(view, &spec.filter, boundary, spec.limit)?;
@@ -1039,6 +1045,58 @@ impl<'a> PredicatePlan<'a> {
             }
             _ => Ok(None),
         }
+    }
+}
+
+/// The existing desktop combines flat predicates. Only a positive semantic
+/// anchor with local conjunctions is eligible for the seek path; arbitrary
+/// boolean, text-index, spatial and source predicates keep their original plan.
+pub(crate) fn classification_seek_anchor(filter: &QueryFilter) -> Option<&QueryFilter> {
+    match filter {
+        QueryFilter::ClassifiedAs(_) | QueryFilter::ClassifiedBy(_) => Some(filter),
+        QueryFilter::And(children)
+            if children.iter().all(|child| {
+                matches!(
+                    child,
+                    QueryFilter::ClassifiedAs(_)
+                        | QueryFilter::ClassifiedBy(_)
+                        | QueryFilter::Kind(_)
+                        | QueryFilter::LabelContains(_)
+                        | QueryFilter::ExactLabel(_)
+                )
+            }) =>
+        {
+            children
+                .iter()
+                .find(|child| matches!(child, QueryFilter::ClassifiedBy(_)))
+                .or_else(|| {
+                    children
+                        .iter()
+                        .find(|child| matches!(child, QueryFilter::ClassifiedAs(_)))
+                })
+        }
+        _ => None,
+    }
+}
+
+/// Reuse the same local predicate evaluator and exact classification identities
+/// for candidates reauthorized by the store.
+pub(crate) fn classification_candidate_matches(
+    filter: &QueryFilter,
+    version: &Version,
+    profiles: &HashSet<ConceptProfile>,
+    descriptors: &HashSet<ObjectRef>,
+) -> bool {
+    match filter {
+        QueryFilter::ClassifiedAs(profile) => profiles.contains(profile),
+        QueryFilter::ClassifiedBy(descriptor) => descriptors.contains(descriptor),
+        QueryFilter::And(children) => children.iter().all(|child| {
+            classification_candidate_matches(child, version, profiles, descriptors)
+        }),
+        QueryFilter::Kind(_) | QueryFilter::LabelContains(_) | QueryFilter::ExactLabel(_) => {
+            predicate_matches(filter, version, &PredicatePlan::default())
+        }
+        _ => unreachable!("classification seek conjunction validated"),
     }
 }
 
