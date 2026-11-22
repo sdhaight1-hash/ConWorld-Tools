@@ -53,6 +53,43 @@ struct SmokeObservation {
     webgpu: WebGpuStatus,
     benchmark: Option<BenchmarkObservation>,
     ontology_verified: Option<bool>,
+    ontology: Option<OntologyObservation>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct OntologyObservation {
+    passed: bool,
+    tasks: Vec<OntologyTaskObservation>,
+    error: Option<String>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct OntologyTaskObservation {
+    name: String,
+    elapsed_ms: f64,
+    submissions: usize,
+}
+
+impl OntologyObservation {
+    fn verified(&self) -> bool {
+        self.passed
+            && self.error.is_none()
+            && self.tasks.len() == 3
+            && self
+                .tasks
+                .iter()
+                .zip([
+                    ("culture_language", 4),
+                    ("novel_category_shared_material", 4),
+                    ("site_area_history_and_evidence", 3),
+                ])
+                .all(|(task, (name, submissions))| {
+                    task.name == name
+                        && task.submissions == submissions
+                        && task.elapsed_ms.is_finite()
+                        && task.elapsed_ms >= 0.0
+                })
+    }
 }
 
 #[derive(Deserialize, Serialize)]
@@ -135,7 +172,13 @@ fn complete_platform_smoke(
                 && observation.canvas2d_verified
                 && observation.history_verified
         }
-        PlatformSmoke::Ontology => observation.ontology_verified == Some(true),
+        PlatformSmoke::Ontology => {
+            observation.ontology_verified == Some(true)
+                && observation
+                    .ontology
+                    .as_ref()
+                    .is_some_and(OntologyObservation::verified)
+        }
         PlatformSmoke::Renderer { require_gpu } => observation
             .benchmark
             .as_ref()

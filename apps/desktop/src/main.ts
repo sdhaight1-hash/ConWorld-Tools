@@ -47,10 +47,10 @@ async function start() {
     await showAuthorWorkspace(response.scene, graph.setScene, graph.select);
   }
   if (response.ontology_smoke) {
-    const ontologyVerified = graph ? await verifyOntologySmoke() : false;
+    const ontology = graph ? await verifyOntologySmoke() : { passed: false, tasks: [], error: "Missing graph" };
     await invoke("complete_platform_smoke", { observation: {
       scene_verified: false, canvas2d_verified: false, history_verified: false,
-      webgpu: "api_unavailable", ontology_verified: ontologyVerified,
+      webgpu: "api_unavailable", ontology_verified: ontology.passed, ontology,
     } });
     return;
   }

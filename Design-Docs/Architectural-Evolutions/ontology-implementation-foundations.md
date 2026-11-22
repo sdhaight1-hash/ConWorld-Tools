@@ -109,3 +109,7 @@ AE-05 regression now checks area point/query parity through a branch-local corre
 ## AE-06 compatible reference selection
 
 A single author-only semantic picker uses the existing controlled indexed query service with the exact selected historical branch, type and label phrase. It filters Tag definitions and sourced claims, exposes bounded/truncated results, supports cancellation and keyboard-operable selection, and fills the original authoring or inspection field without modifying canonical data. Writes retain independent atomic validation. Regression exercises picking a compatible Concept instead of manually copying UUIDs while a previous inspection is pending. CI pending.
+
+## AE-08 measured native author task report
+
+The isolated Windows desktop smoke now uses the actual compatible selector through native controlled IPC, checks selected stable ID and focus transfer, then records elapsed milliseconds and committed form submissions separately for culture/language, reusable setting-specific category/shared material, and historical measurement/evidence tasks. The Rust smoke gate requires all three actual observations and expected write counts, not merely a frontend boolean. These are automated native workflow timings, not comparative human usability timings or completed measurements until CI reports them.

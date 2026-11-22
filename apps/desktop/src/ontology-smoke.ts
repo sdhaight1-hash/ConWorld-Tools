@@ -49,10 +49,17 @@ async function waitFor(test: () => boolean, label: string) {
   }
 }
 
-export async function verifyOntologySmoke(): Promise<boolean> {
+export type OntologyObservation = { passed: boolean; tasks: { name: string; elapsed_ms: number; submissions: number }[]; error: string | null };
+export async function verifyOntologySmoke(): Promise<OntologyObservation> {
+  const tasks: OntologyObservation["tasks"] = [];
   try {
     let current = await world();
     let submissions = 0;
+    let started = performance.now(), previousSubmissions = 0;
+    const finishTask = (name: string) => {
+      tasks.push({ name, elapsed_ms: performance.now() - started, submissions: submissions - previousSubmissions });
+      started = performance.now(); previousSubmissions = submissions;
+    };
     const request = (revision = current.revision, day = 0) => ({ world_id: current.id, revision, day });
     const write = async (selector: string, fields: Record<string, string>) => {
       const next = current.revision + 1;
@@ -72,6 +79,21 @@ export async function verifyOntologySmoke(): Promise<boolean> {
     const query = (predicate: unknown, revision = current.revision, day = 0) => invoke<Result>("workspace_composite_query", {
       requestId: crypto.randomUUID(), request: { ...request(revision, day), predicate, limit: 20 },
     });
+    // Exercise the actual compatible, branch-aware selector, not a mocked reply.
+    const studio = document.querySelector<HTMLDetailsElement>("[data-network-studio]")!;
+    const picker = studio.querySelector<HTMLFormElement>("[data-semantic-picker]")!;
+    const destination = picker.elements.namedItem("destination") as HTMLSelectElement;
+    const choice = Array.from(destination.options).find(option => option.text === "Classification inspector");
+    assert(choice, "classification inspector selection missing");
+    form("[data-semantic-picker]", { destination: choice.value, phrase: "Estuary speech" });
+    await waitFor(() => picker.querySelector("[data-picker-results] button") !== null, "native compatible selection did not render");
+    const candidate = picker.querySelector<HTMLButtonElement>("[data-picker-results] button")!;
+    assert(candidate.textContent?.includes(object(11)), "native compatible identity mismatch");
+    candidate.focus();
+    candidate.click();
+    assert(document.activeElement === studio.querySelector('[data-classification-focus] input[name="subject"]'),
+      "compatible selection did not focus the original field");
+    assert((document.activeElement as HTMLInputElement).value === object(11), "identity selection lost stable ID");
     await classify(10, "culture", descriptor);
     await classify(11, "language", descriptor);
     await classify(12, "material", descriptor);
@@ -81,6 +103,7 @@ export async function verifyOntologySmoke(): Promise<boolean> {
       "culture/language stable relation missing");
     assert((await query({ op: "classified_as", profile: "language" })).rows[0]?.id === object(11),
       "language search mismatch");
+    finishTask("culture_language");
 
     await classify(13, "technology", driveTag);
     await classify(14, "technology", driveTag);
@@ -92,6 +115,7 @@ export async function verifyOntologySmoke(): Promise<boolean> {
     const material = await invoke<Fact[]>("workspace_network_facts", { request: request(), focus: object(12) });
     assert(material.filter(f => f.input.kind === "working_material").length === 2,
       "two drives did not share the original material identity");
+    finishTask("novel_category_shared_material");
 
     const area = (revision = current.revision, day = 0) => invoke<Area | null>("workspace_site_area",
       { request: request(revision, day), placeId: object(15) });
@@ -119,13 +143,14 @@ export async function verifyOntologySmoke(): Promise<boolean> {
     form("[data-semantic-focus]", { target: source });
     await waitFor(() => document.querySelector("[data-semantic-links]")?.textContent?.includes("Site area") === true,
       "native source backlink inspector did not render");
-    console.info("Ontology native smoke passed", { submissions, revision: current.revision, tasks: 3 });
+    finishTask("site_area_history_and_evidence");
+    console.info("Ontology native smoke passed", { submissions, revision: current.revision, tasks });
     document.querySelector<HTMLElement>("#host")!.textContent = "Native ontology smoke passed: " + submissions + " authored submissions";
-    return true;
+    return { passed: true, tasks, error: null };
   } catch (error) {
     const message = String(error);
     console.error(message);
     document.querySelector<HTMLElement>("#host")!.textContent = "Native ontology smoke failed: " + message;
-    return false;
+    return { passed: false, tasks, error: message };
   }
 }
