@@ -144,7 +144,12 @@ fn alder_basin_persists_interconnected_history_and_authorized_replay()
         create(faction, "Harbor League", ObjectData::Faction, None),
         create(rival, "Hill League", ObjectData::Faction, None),
         create(conflict, "Toll dispute", ObjectData::Conflict, None),
-        create(descriptor, "Regional vocabulary", tag("Semantic profiles"), None),
+        create(
+            descriptor,
+            "Regional vocabulary",
+            tag("Semantic profiles"),
+            None,
+        ),
         create(area, "Survey area", tag("Measured site area"), None),
         create(culture, "Alder culture", ObjectData::Concept, None),
         create(language, "River Speech", ObjectData::Concept, None),
@@ -152,7 +157,12 @@ fn alder_basin_persists_interconnected_history_and_authorized_replay()
         create(technology, "River pump", ObjectData::Concept, None),
         // Unsupported domain semantics remain named concepts, not invented typed facts.
         create(object(13), "Lantern faith", ObjectData::Concept, None),
-        create(object(14), "Silver crown currency", ObjectData::Concept, None),
+        create(
+            object(14),
+            "Silver crown currency",
+            ObjectData::Concept,
+            None,
+        ),
         create(object(15), "Salt commodity", ObjectData::Concept, None),
     ];
     for (event, label, day) in [
@@ -208,7 +218,11 @@ fn alder_basin_persists_interconnected_history_and_authorized_replay()
     }
     for (id, audience, statement) in [
         (40, ClaimAudience::Public, "A toll agreement was announced."),
-        (41, ClaimAudience::Author, "The private register disputes the vote."),
+        (
+            41,
+            ClaimAudience::Author,
+            "The private register disputes the vote.",
+        ),
         (
             42,
             ClaimAudience::Character(object(1000)),
@@ -271,18 +285,36 @@ fn alder_basin_persists_interconnected_history_and_authorized_replay()
     let linguistic_fact = edge(
         &mut store,
         &mut view,
-        input(culture, language, NetworkKind::CultureLanguage, "documented_language", 0),
+        input(
+            culture,
+            language,
+            NetworkKind::CultureLanguage,
+            "documented_language",
+            0,
+        ),
     )?;
     edge(
         &mut store,
         &mut view,
-        input(technology, material, NetworkKind::WorkingMaterial, "working_medium", 0),
+        input(
+            technology,
+            material,
+            NetworkKind::WorkingMaterial,
+            "working_medium",
+            0,
+        ),
     )?;
     for d in 0..3 {
         edge(
             &mut store,
             &mut view,
-            input(object(30 + d), basin, NetworkKind::ProperPartWithin, "physical", 0),
+            input(
+                object(30 + d),
+                basin,
+                NetworkKind::ProperPartWithin,
+                "physical",
+                0,
+            ),
         )?;
     }
     let area_pin = DefinitionPin {
@@ -295,7 +327,13 @@ fn alder_basin_persists_interconnected_history_and_authorized_replay()
         edge(
             &mut store,
             &mut view,
-            input(place, object(30 + i % 3), NetworkKind::ProperPartWithin, "physical", 36_500),
+            input(
+                place,
+                object(30 + i % 3),
+                NetworkKind::ProperPartWithin,
+                "physical",
+                36_500,
+            ),
         )?;
         edge(
             &mut store,
@@ -305,7 +343,13 @@ fn alder_basin_persists_interconnected_history_and_authorized_replay()
         edge(
             &mut store,
             &mut view,
-            input(mill, place, NetworkKind::LocatedAt, "asset_placement", 36_500),
+            input(
+                mill,
+                place,
+                NetworkKind::LocatedAt,
+                "asset_placement",
+                36_500,
+            ),
         )?;
         edge(
             &mut store,
@@ -342,7 +386,13 @@ fn alder_basin_persists_interconnected_history_and_authorized_replay()
             edge(
                 &mut store,
                 &mut view,
-                input(person, house, NetworkKind::Membership, "family member", born),
+                input(
+                    person,
+                    house,
+                    NetworkKind::Membership,
+                    "family member",
+                    born,
+                ),
             )?;
             edge(
                 &mut store,
@@ -367,14 +417,54 @@ fn alder_basin_persists_interconnected_history_and_authorized_replay()
         }
     }
     for (subject, target, kind, role, day) in [
-        (faction, conflict, NetworkKind::ConflictPosition, "supports", 73_000),
-        (rival, conflict, NetworkKind::ConflictPosition, "opposes", 73_000),
-        (founding, charter, NetworkKind::ConfirmedCause, "recorded cause", 36_500),
-        (charter, treaty, NetworkKind::ConfirmedCause, "recorded cause", 73_000),
-        (treaty, object(100), NetworkKind::LocatedAt, "event_site", 73_000),
-        (object(1003), guild, NetworkKind::Membership, "millwright", 105_850),
+        (
+            faction,
+            conflict,
+            NetworkKind::ConflictPosition,
+            "supports",
+            73_000,
+        ),
+        (
+            rival,
+            conflict,
+            NetworkKind::ConflictPosition,
+            "opposes",
+            73_000,
+        ),
+        (
+            founding,
+            charter,
+            NetworkKind::ConfirmedCause,
+            "recorded cause",
+            36_500,
+        ),
+        (
+            charter,
+            treaty,
+            NetworkKind::ConfirmedCause,
+            "recorded cause",
+            73_000,
+        ),
+        (
+            treaty,
+            object(100),
+            NetworkKind::LocatedAt,
+            "event_site",
+            73_000,
+        ),
+        (
+            object(1003),
+            guild,
+            NetworkKind::Membership,
+            "millwright",
+            105_850,
+        ),
     ] {
-        edge(&mut store, &mut view, input(subject, target, kind, role, day))?;
+        edge(
+            &mut store,
+            &mut view,
+            input(subject, target, kind, role, day),
+        )?;
     }
 
     let expected_places: HashSet<_> = (0..3)
@@ -449,16 +539,29 @@ fn alder_basin_persists_interconnected_history_and_authorized_replay()
         store.resolve_semantic_fact(linguistic_fact, public),
         Err(Error::CapabilityDenied)
     ));
-    assert!(store.resolve_semantic_fact(linguistic_fact, before_facts)?.is_none());
+    assert!(
+        store
+            .resolve_semantic_fact(linguistic_fact, before_facts)?
+            .is_none()
+    );
     let original = store.resolve_semantic_fact(linguistic_fact, view)?.unwrap();
 
     // Reject a same-lens containment cycle atomically.
-    let cycle = input(basin, object(100), NetworkKind::ProperPartWithin, "physical", NOW);
+    let cycle = input(
+        basin,
+        object(100),
+        NetworkKind::ProperPartWithin,
+        "physical",
+        NOW,
+    );
     assert!(matches!(
         store.record_network_fact(view, &cycle, Uuid::new_v4()),
         Err(Error::InvalidInput(_))
     ));
-    assert_eq!(store.world(world.id, Scope::Author)?.revision, view.revision);
+    assert_eq!(
+        store.world(world.id, Scope::Author)?.revision,
+        view.revision
+    );
     let fork = store.fork(&ForkCommand {
         world: world.id,
         parent: world.main,
@@ -477,11 +580,19 @@ fn alder_basin_persists_interconnected_history_and_authorized_replay()
     let branch_fact = edge(
         &mut store,
         &mut alternative,
-        input(object(1003), rival, NetworkKind::Membership, "alternate allegiance", NOW),
+        input(
+            object(1003),
+            rival,
+            NetworkKind::Membership,
+            "alternate allegiance",
+            NOW,
+        ),
     )?;
     view.revision = alternative.revision;
     assert!(store.resolve_semantic_fact(branch_fact, view)?.is_none());
-    let branch_record = store.resolve_semantic_fact(branch_fact, alternative)?.unwrap();
+    let branch_record = store
+        .resolve_semantic_fact(branch_fact, alternative)?
+        .unwrap();
     assert_eq!(branch_record.source_branch, fork.id);
     assert_eq!(
         store.resolve_semantic_fact(linguistic_fact, alternative)?,
