@@ -151,6 +151,17 @@ export function editCanvasTree(host: HTMLElement, original: Block, worldId: stri
       pin.textContent = "Template: " + node.content.Template.key + " · version " + node.content.Template.version;
       controls.append(pin);
     }
+    if (node.content.FamilyTable) {
+      const target = document.createElement("input");
+      target.value = node.content.FamilyTable.id;
+      target.required = true;
+      target.readOnly = !editable;
+      target.addEventListener("input", () => { node.content.FamilyTable!.id = target.value.trim(); changed(); });
+      field("Family subject identity", target);
+      const description = document.createElement("p");
+      description.textContent = "Accepted biological, adoptive and legal links at the selected date. Author only.";
+      controls.append(description);
+    }
     if (node.content.Query) {
       const description = document.createElement("p");
       description.textContent = "Historical query · follows the selected day and revision. Author only.";
@@ -212,7 +223,7 @@ export function editCanvasTree(host: HTMLElement, original: Block, worldId: stri
       audience.add(new Option("Existing character audience", "character"));
       audience.value = "character";
     } else audience.value = node.audience;
-    audience.disabled = !editable || node === root || !!node.content.SavedQuery || !!node.content.Query;
+    audience.disabled = !editable || node === root || !!node.content.SavedQuery || !!node.content.Query || !!node.content.FamilyTable;
     audience.addEventListener("change", () => {
       if (audience.value === "character") return;
       node.audience = audience.value;
@@ -250,7 +261,7 @@ export function editCanvasTree(host: HTMLElement, original: Block, worldId: stri
         commit("Inserted version-pinned template; existing components unchanged.");
       }, all.length > 494 || row.depth > 12));
       const history = document.createElement("select");
-      for (const [value, label] of [["person_events", "Person event history"], ["actors", "Event actors"],
+      for (const [value, label] of [["person_events", "Person event history"], ["family", "Accepted family links"], ["actors", "Event actors"],
         ["witnesses", "Event witnesses"], ["victims", "Event victims"], ["stakeholders", "Event stakeholders"]]) {
         history.add(new Option(label, value));
       }

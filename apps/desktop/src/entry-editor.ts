@@ -8,7 +8,7 @@ export type Binding = { world: string; query_id: string; definition_revision: nu
   bindings: { name: string; value: ParameterValue }[] };
 export type Block = { id: string; audience: string; content: { Text?: string; Stack?: Block[]; Panel?: Block[];
   Grid?: { columns: number; children: Block[] }; Template?: { key: string; version: number; children: Block[] };
-  SavedQuery?: Binding; ObjectLink?: ObjectLink; Query?: unknown } };
+  SavedQuery?: Binding; ObjectLink?: ObjectLink; Query?: unknown; FamilyTable?: { world: string; id: string } } };
 type Document = { schema_version: number; entry: { world: string; id: string }; root: Block };
 type Display = { content: { Text?: string; Stack?: Display[]; Panel?: Display[];
   Grid?: { columns: number; children: Display[] }; ObjectLink?: ObjectLink;

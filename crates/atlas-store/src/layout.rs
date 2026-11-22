@@ -47,6 +47,7 @@ pub enum ElementContent {
     Text(String),
     Query(QuerySpec),
     SavedQuery(SavedQueryBinding),
+    FamilyTable(ObjectRef),
     ObjectLink(ObjectLink),
 }
 
@@ -208,6 +209,11 @@ impl LayoutDocument {
                         return Err(Error::InvalidInput("layout link label"));
                     }
                 }
+                ElementContent::FamilyTable(person) => {
+                    if person.world != self.entry.world {
+                        return Err(Error::WrongWorld);
+                    }
+                }
                 ElementContent::SavedQuery(binding) => {
                     if binding.world != self.entry.world {
                         return Err(Error::WrongWorld);
@@ -232,7 +238,9 @@ impl LayoutDocument {
                 continue;
             }
             match &element.content {
-                ElementContent::Query(_) | ElementContent::SavedQuery(_) => {
+                ElementContent::Query(_)
+                | ElementContent::SavedQuery(_)
+                | ElementContent::FamilyTable(_) => {
                     return Err(Error::CapabilityDenied);
                 }
                 ElementContent::Stack(children)
@@ -274,7 +282,9 @@ impl LayoutDocument {
                 }
                 // Destination-dependent captions are excluded from static text search.
                 ElementContent::ObjectLink(_) => {}
-                ElementContent::Query(_) | ElementContent::SavedQuery(_) => {
+                ElementContent::Query(_)
+                | ElementContent::SavedQuery(_)
+                | ElementContent::FamilyTable(_) => {
                     return Err(Error::CapabilityDenied);
                 }
             }
@@ -441,7 +451,9 @@ fn project(
             }
             DisplayContent::ObjectLink(link.clone())
         }
-        ElementContent::Query(_) | ElementContent::SavedQuery(_) => {
+        ElementContent::Query(_)
+        | ElementContent::SavedQuery(_)
+        | ElementContent::FamilyTable(_) => {
             if view.scope != Scope::Author {
                 return Err(Error::CapabilityDenied);
             }
@@ -449,6 +461,34 @@ fn project(
                 return Err(Error::QueryBudgetExceeded);
             }
             budget.queries += 1;
+            if let ElementContent::FamilyTable(person) = &element.content {
+                let links = store.family_links(view, *person)?;
+                let truncated = links.len() > 50;
+                let records = links
+                    .into_iter()
+                    .take(50)
+                    .map(|link| {
+                        let (relative, direction) = if link.parent == *person {
+                            (link.child, "child")
+                        } else {
+                            (link.parent, "parent")
+                        };
+                        let kind = match link.kind {
+                            crate::genealogy::ParentageKind::Biological => "biological",
+                            crate::genealogy::ParentageKind::Adoptive => "adoptive",
+                            crate::genealogy::ParentageKind::Legal => "legal",
+                        };
+                        (
+                            relative,
+                            format!("{} · {kind} {direction}", link.relative_label),
+                        )
+                    })
+                    .collect();
+                return Ok(Some(DisplayElement {
+                    id: element.id,
+                    content: DisplayContent::QueryRows { records, truncated },
+                }));
+            }
             let result = match &element.content {
                 ElementContent::Query(query) => store.execute_query(query, view)?,
                 ElementContent::SavedQuery(binding) => {

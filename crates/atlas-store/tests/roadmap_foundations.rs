@@ -1698,3 +1698,103 @@ fn versioned_template_keeps_queries_private_and_persists_independent_instances()
     );
     Ok(())
 }
+
+#[test]
+fn family_canvas_component_uses_accepted_parentage_at_selected_day_and_revision() -> Result<(), Error>
+{
+    use atlas_store::genealogy::RecordParentage;
+
+    let mut store = Store::open(":memory:")?;
+    let world = seed(&mut store)?;
+    let person = id(&world, 2);
+    let mut author = view(&world, 0);
+    let link_id = store.record_parentage(
+        author,
+        RecordParentage {
+            parent: id(&world, 1),
+            child: person,
+            kind: ParentageKind::Biological,
+            starts_at: WorldDay(10),
+            ends_before: Some(WorldDay(20)),
+            command_id: Uuid::new_v4(),
+            rationale: "Accepted household register",
+        },
+    )?;
+    author.revision = AuthorRevision(2);
+    let block = |audience, content| LayoutElement {
+        id: ElementId(Uuid::new_v4()),
+        audience,
+        content,
+    };
+    let document = LayoutDocument {
+        schema_version: LAYOUT_SCHEMA_VERSION,
+        entry: person,
+        root: block(
+            ClaimAudience::Public,
+            ElementContent::Stack(vec![block(
+                ClaimAudience::Author,
+                ElementContent::FamilyTable(person),
+            )]),
+        ),
+    };
+    let at = |revision, day| ViewContext {
+        revision,
+        day: WorldDay(day),
+        ..author
+    };
+    let before = document.compile(&store, at(author.revision, 9))?.unwrap();
+    let DisplayContent::Stack(before) = before.content else {
+        panic!("expected stack")
+    };
+    assert_eq!(
+        before[0].content,
+        DisplayContent::QueryRows {
+            records: vec![],
+            truncated: false,
+        }
+    );
+    let revision = store.save_entry_layout(author, &document, true, Uuid::new_v4())?;
+    let page = store.display_entry(at(revision, 10), person)?.unwrap();
+    let DisplayContent::Stack(rows) = page.content else {
+        panic!("expected stack")
+    };
+    assert_eq!(
+        rows[0].content,
+        DisplayContent::QueryRows {
+            records: vec![(id(&world, 1), "Alice Vale · biological parent".into())],
+            truncated: false,
+        }
+    );
+    let public = ViewContext {
+        scope: Scope::Public,
+        ..at(revision, 10)
+    };
+    assert_eq!(
+        store.display_entry(public, person)?.unwrap().content,
+        DisplayContent::Stack(vec![])
+    );
+    store.withdraw_parentage(
+        at(revision, 10),
+        person,
+        link_id,
+        Uuid::new_v4(),
+        "Register corrected",
+    )?;
+    let corrected = AuthorRevision(revision.0 + 1);
+    let after = store.display_entry(at(corrected, 10), person)?.unwrap();
+    let DisplayContent::Stack(rows) = after.content else {
+        panic!("expected stack")
+    };
+    assert_eq!(
+        rows[0].content,
+        DisplayContent::QueryRows {
+            records: vec![],
+            truncated: false,
+        }
+    );
+    assert_ne!(
+        store.display_entry(at(revision, 10), person)?,
+        store.display_entry(at(corrected, 10), person)?
+    );
+    Ok(())
+}
