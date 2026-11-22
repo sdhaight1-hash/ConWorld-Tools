@@ -2351,7 +2351,7 @@ test("classification authoring and evidence backlinks use historical author comm
   await expect(studio.locator("[data-semantic-detail]")).toContainText("descriptor tag @ revision 3 (state 2, branch main)");
   await expect(studio.locator("[data-semantic-detail]")).toContainText("recorded on branch main");
   await expect(studio.locator("[data-semantic-detail]")).not.toContainText("corrects fact");
-  await studio.getByLabel("Fact family", { exact: true }).selectOption("site_area");
+  await studio.locator("[data-semantic-fact]").getByRole("combobox").selectOption("site_area");
   await studio.getByLabel("Stable fact identity").fill("area");
   await studio.getByRole("button", { name: "Resolve fact", exact: true }).click();
   await expect(studio.locator("[data-semantic-detail]")).toContainText("corrects fact prior-area");
