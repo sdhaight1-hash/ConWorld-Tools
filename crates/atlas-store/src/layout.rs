@@ -34,6 +34,11 @@ pub struct LayoutElement {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ElementContent {
     Stack(Vec<LayoutElement>),
+    Panel(Vec<LayoutElement>),
+    Grid {
+        columns: u8,
+        children: Vec<LayoutElement>,
+    },
     Text(String),
     Query(QuerySpec),
     SavedQuery(SavedQueryBinding),
@@ -101,6 +106,11 @@ pub struct DisplayElement {
 #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum DisplayContent {
     Stack(Vec<DisplayElement>),
+    Panel(Vec<DisplayElement>),
+    Grid {
+        columns: u8,
+        children: Vec<DisplayElement>,
+    },
     Text(String),
     ObjectLink(ObjectLink),
     QueryRows {
@@ -152,7 +162,12 @@ impl LayoutDocument {
                 return Err(Error::WrongWorld);
             }
             match &element.content {
-                ElementContent::Stack(children) => {
+                ElementContent::Grid { columns, .. } if !(1..=4).contains(columns) => {
+                    return Err(Error::InvalidInput("layout grid columns"));
+                }
+                ElementContent::Stack(children)
+                | ElementContent::Panel(children)
+                | ElementContent::Grid { children, .. } => {
                     if children.len() + pending.len() + visited.len() > MAX_ELEMENTS {
                         return Err(Error::QueryBudgetExceeded);
                     }
@@ -196,7 +211,9 @@ impl LayoutDocument {
                 ElementContent::Query(_) | ElementContent::SavedQuery(_) => {
                     return Err(Error::CapabilityDenied);
                 }
-                ElementContent::Stack(children) => {
+                ElementContent::Stack(children)
+                | ElementContent::Panel(children)
+                | ElementContent::Grid { children, .. } => {
                     pending.extend(children.iter().map(|child| (child, audience)))
                 }
                 ElementContent::Text(_) | ElementContent::ObjectLink(_) => {}
@@ -220,7 +237,9 @@ impl LayoutDocument {
                 continue;
             }
             match &element.content {
-                ElementContent::Stack(children) => pending.extend(children.iter().rev()),
+                ElementContent::Stack(children)
+                | ElementContent::Panel(children)
+                | ElementContent::Grid { children, .. } => pending.extend(children.iter().rev()),
                 ElementContent::Text(block) => {
                     // SQLite tokenization may stop at NUL; normalize it only in
                     // candidates. Queries containing NUL use the exact fallback.
@@ -245,7 +264,9 @@ impl LayoutDocument {
                 continue;
             }
             match &element.content {
-                ElementContent::Stack(children) => pending.extend(children.iter().rev()),
+                ElementContent::Stack(children)
+                | ElementContent::Panel(children)
+                | ElementContent::Grid { children, .. } => pending.extend(children.iter().rev()),
                 ElementContent::ObjectLink(link) => links.push((element.id, link)),
                 _ => {}
             }
@@ -258,7 +279,7 @@ impl LayoutDocument {
         let mut updated = self.clone();
         let moved =
             take_child(&mut updated.root, id, ClaimAudience::Public).ok_or(Error::NotFound)?;
-        let destination = find_stack(&mut updated.root, target).ok_or(Error::NotFound)?;
+        let destination = find_container(&mut updated.root, target).ok_or(Error::NotFound)?;
         destination.push(moved);
         updated.validate()?;
         *self = updated;
@@ -294,8 +315,11 @@ fn take_child(
     enclosing: ClaimAudience,
 ) -> Option<LayoutElement> {
     let inherited = restrict(element.audience, enclosing);
-    let ElementContent::Stack(children) = &mut element.content else {
-        return None;
+    let children = match &mut element.content {
+        ElementContent::Stack(children)
+        | ElementContent::Panel(children)
+        | ElementContent::Grid { children, .. } => children,
+        _ => return None,
     };
     if let Some(index) = children.iter().position(|child| child.id == id) {
         let mut moved = children.remove(index);
@@ -307,14 +331,17 @@ fn take_child(
         .find_map(|child| take_child(child, id, inherited))
 }
 
-fn find_stack(element: &mut LayoutElement, id: ElementId) -> Option<&mut Vec<LayoutElement>> {
-    let ElementContent::Stack(children) = &mut element.content else {
-        return None;
+fn find_container(element: &mut LayoutElement, id: ElementId) -> Option<&mut Vec<LayoutElement>> {
+    let children = match &mut element.content {
+        ElementContent::Stack(children)
+        | ElementContent::Panel(children)
+        | ElementContent::Grid { children, .. } => children,
+        _ => return None,
     };
     if element.id == id {
         Some(children)
     } else {
-        children.iter_mut().find_map(|child| find_stack(child, id))
+        children.iter_mut().find_map(|child| find_container(child, id))
     }
 }
 
@@ -341,14 +368,28 @@ fn project(
         return Err(Error::InvalidInput("duplicate layout element ID"));
     }
     let content = match &element.content {
-        ElementContent::Stack(children) => {
+        ElementContent::Stack(children)
+        | ElementContent::Panel(children)
+        | ElementContent::Grid { children, .. } => {
             let mut projected = Vec::new();
             for child in children {
                 if let Some(child) = project(child, store, view, depth + 1, budget)? {
                     projected.push(child);
                 }
             }
-            DisplayContent::Stack(projected)
+            match &element.content {
+                ElementContent::Panel(_) => DisplayContent::Panel(projected),
+                ElementContent::Grid { columns, .. } => {
+                    if !(1..=4).contains(columns) {
+                        return Err(Error::InvalidInput("layout grid columns"));
+                    }
+                    DisplayContent::Grid {
+                        columns: *columns,
+                        children: projected,
+                    }
+                }
+                _ => DisplayContent::Stack(projected),
+            }
         }
         ElementContent::Text(text) => {
             if text.len() > 16_384 {

@@ -1807,3 +1807,73 @@ test("event and search-only source entries use the same persistent editor and hi
     command: "workspace_entry_layout", args: { worldId: "archive", entryId: "folio", revision: 4, day: 0 },
   });
 });
+
+test("Canvas arrangement changes preserve content IDs across reopen and public projection", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "archive", name: "Archive", revision: 4 };
+    const writes: { root: { content: { Stack: unknown[] } } }[] = [];
+    let saved: unknown = null;
+    Object.assign(window, {
+      isTauri: true, __layoutWrites: writes,
+      __TAURI_INTERNALS__: {
+        invoke: async (command: string, args: Record<string, unknown>) => {
+          if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+          if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+          if (command === "workspace_worlds") return [{ ...world }];
+          if (command === "workspace_snapshot") return {
+            world: { ...world }, day: args.day, view_revision: world.revision,
+            people: [{ id: "alice", label: "Alice" }], relationships: [], events: [], definitions: [],
+          };
+          if (command === "workspace_saved_queries") return [];
+          if (command === "workspace_entry_layout") return saved;
+          if (command === "workspace_save_layout") {
+            writes.push(args.document as typeof writes[number]);
+            saved = [args.document, args.published];
+            world.revision++;
+            return null;
+          }
+          if (command === "workspace_public_entry") return { content: { Stack: [
+            { content: { Panel: [{ content: { Text: "Public biography" } }] } },
+          ] } };
+          throw new Error("Unexpected mock command: " + command);
+        },
+      },
+    });
+  });
+  await page.goto("/");
+  const graph = page.getByRole("region", { name: "Saved world graph" });
+  const inspector = graph.getByRole("complementary", { name: "Node inspector" });
+  await graph.locator("#nodes button[data-node=alice]").click();
+  await inspector.getByRole("button", { name: "Open character page" }).click();
+  await inspector.getByLabel("Page arrangement").selectOption("2");
+  await inspector.getByRole("textbox", { name: "Page text", exact: true }).fill("Public biography");
+  await inspector.getByRole("textbox", { name: "Author notes" }).fill("Secret notes");
+  await inspector.getByLabel("Publish page text").check();
+  await inspector.getByRole("button", { name: "Save page" }).click();
+  await inspector.getByRole("button", { name: "Open character page" }).click();
+  await expect(inspector.getByLabel("Page arrangement")).toHaveValue("2");
+  await inspector.getByLabel("Page arrangement").selectOption("panel");
+  await inspector.getByRole("button", { name: "Save page" }).click();
+  await inspector.getByRole("button", { name: "Open character page" }).click();
+  await expect(inspector.getByLabel("Page arrangement")).toHaveValue("panel");
+  await inspector.getByRole("button", { name: "View current public page" }).click();
+  await expect(inspector.locator("[data-public-result] .entry-panel")).toHaveText("Public biography");
+  await expect(inspector.locator("[data-public-result]")).not.toContainText("Secret notes");
+  if (process.env.ATLAS_CAPTURE_PHASE3 === "1") {
+    const timestamp = new Date().toISOString().slice(0, 19).replace("T", "_").replaceAll(":", "-") + "Z";
+    await inspector.screenshot({
+      path: "../../Development-Screenshots/" + timestamp + "_phase-04_canvas_mock-native-panel_01.png",
+      animations: "disabled",
+    });
+  }
+  const writes = await page.evaluate(() => (window as unknown as {
+    __layoutWrites: { root: { content: { Stack: {
+      id: string; content: { Grid?: { columns: number; children: unknown[] }; Panel?: unknown[] }
+    }[] } } }[];
+  }).__layoutWrites);
+  const grid = writes[0].root.content.Stack[0];
+  const panel = writes[1].root.content.Stack[0];
+  expect(grid.content.Grid?.columns).toBe(2);
+  expect(panel.id).toBe(grid.id);
+  expect(panel.content.Panel).toEqual(grid.content.Grid?.children);
+});

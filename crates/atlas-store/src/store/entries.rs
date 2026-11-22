@@ -408,7 +408,9 @@ fn find_text_blocks(page: DisplayElement, needle: &str, limit: usize) -> EntryTe
     let mut pending = vec![page];
     while let Some(element) = pending.pop() {
         let text = match element.content {
-            DisplayContent::Stack(children) => {
+            DisplayContent::Stack(children)
+            | DisplayContent::Panel(children)
+            | DisplayContent::Grid { children, .. } => {
                 pending.extend(children.into_iter().rev());
                 continue;
             }
