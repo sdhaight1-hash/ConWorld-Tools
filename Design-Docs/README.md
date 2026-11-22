@@ -71,3 +71,5 @@ See the [Phase Zero verification log](Phase-0-Verification.md) for the desktop a
 ## Review notes (non-normative)
 
 - [Entry ontology review — 2026-11-22](Entry-Ontology-Review-2026-11-22.md): actual registry parity, existing-scope gaps and proposed worldbuilding taxonomy; recommendations only, no feature scope or production changes.
+
+- [Bug hunting and optimization review — 2026-11-22](Repository-Audit-2026-11-22-bugs-and-performance.md): frozen combined candidate, isolated SQLite defect reproductions, focused network plans, staged backup proposal and prioritized native regression criteria; no production change.
