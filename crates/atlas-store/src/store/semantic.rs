@@ -57,6 +57,7 @@ impl Store {
                 recorded_at: assignment.recorded_at,
                 source_branch: assignment.source_branch,
                 rationale: row.get(12)?,
+                corrects: None,
                 data: SemanticFactData::Classification(assignment.input),
             }));
         }
@@ -90,6 +91,7 @@ impl Store {
                 recorded_at: measurement.recorded_at,
                 source_branch: measurement.source_branch,
                 rationale: row.get(14)?,
+                corrects: measurement.corrects,
                 data: SemanticFactData::SiteArea(measurement.input),
             }));
         }
@@ -187,6 +189,7 @@ impl Store {
             recorded_at: AuthorRevision(row.get(7)?),
             source_branch: BranchId(Uuid::from_bytes(row.get(8)?)),
             rationale: row.get(9)?,
+            corrects: None,
             data,
         };
         self.check_query_control()?;

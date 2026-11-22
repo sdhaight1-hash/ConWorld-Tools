@@ -2291,7 +2291,8 @@ test("classification authoring and evidence backlinks use historical author comm
       subject: { world: "archive", id: "language" }, target: null,
       source: { world: "archive", id: "folio" }, descriptor: { world: "archive", id: "tag" },
       description: "Language classification", rationale: "Record concept classification",
-      recorded_at: 5, source_branch: "main",
+      recorded_at: 5, source_branch: "main", descriptor_revision: 3,
+      descriptor_state_revision: 2, descriptor_branch: "main", corrects: null,
     };
     Object.assign(window, {
       isTauri: true, __classificationWrites: writes,
@@ -2341,6 +2342,12 @@ test("classification authoring and evidence backlinks use historical author comm
   await expect(studio.locator("[data-semantic-links]")).toContainText("Language classification");
   await studio.getByRole("button", { name: "Resolve classification fact" }).click();
   await expect(studio.locator("[data-semantic-detail]")).toContainText("evidence folio");
+  await expect(studio.locator("[data-semantic-detail]")).toContainText("descriptor tag @ revision 3 (state 2, branch main)");
+  await expect(studio.locator("[data-semantic-detail]")).toContainText("recorded on branch main");
+  if (process.env.ATLAS_CAPTURE_PHASE3 === "1") {
+    const timestamp = new Date().toISOString().slice(0, 19).replace("T", "_").replaceAll(":", "-") + "Z";
+    await studio.locator("[data-semantic-detail]").screenshot({ path: "../../Development-Screenshots/" + timestamp + "_phase-03_query_mock-native-semantic-provenance_01.png", animations: "disabled" });
+  }
   await studio.getByRole("button", { name: "Select fact for annotation" }).click();
   await expect(studio.getByLabel("Annotation fact UUID")).toHaveValue("classification");
   await studio.getByLabel("Sourced claim UUID").fill("claim");

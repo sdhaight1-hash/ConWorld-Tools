@@ -2954,6 +2954,10 @@ pub struct SemanticFactSummary {
     target: Option<ObjectRef>,
     source: Option<ObjectRef>,
     descriptor: Option<ObjectRef>,
+    descriptor_revision: Option<i64>,
+    descriptor_state_revision: Option<i64>,
+    descriptor_branch: Option<String>,
+    corrects: Option<String>,
     description: String,
     rationale: String,
     recorded_at: i64,
@@ -2963,6 +2967,11 @@ pub struct SemanticFactSummary {
 impl From<atlas_store::semantic::ResolvedFact> for SemanticFactSummary {
     fn from(fact: atlas_store::semantic::ResolvedFact) -> Self {
         use atlas_store::semantic::SemanticFactData;
+        let pin = match &fact.data {
+            SemanticFactData::Classification(input) => Some(input.descriptor.version),
+            SemanticFactData::SiteArea(input) => Some(input.descriptor.version),
+            _ => None,
+        };
         let (subject, target, source, descriptor, description) = match fact.data {
             SemanticFactData::Network(input) => (
                 input.subject,
@@ -2999,6 +3008,10 @@ impl From<atlas_store::semantic::ResolvedFact> for SemanticFactSummary {
             target,
             source,
             descriptor,
+            descriptor_revision: pin.map(|version| version.recorded_at.0),
+            descriptor_state_revision: pin.map(|version| version.state_revision.0),
+            descriptor_branch: pin.map(|version| version.branch.0.to_string()),
+            corrects: fact.corrects.map(|id| id.to_string()),
             description,
             rationale: fact.rationale,
             recorded_at: fact.recorded_at.0,

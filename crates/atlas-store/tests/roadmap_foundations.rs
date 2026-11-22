@@ -3965,11 +3965,24 @@ fn site_area_preserves_unknown_zero_units_corrections_and_archive() -> Result<()
         id: second,
     };
     assert!(store.resolve_semantic_fact(reference, prior)?.is_none());
+    let resolved = store.resolve_semantic_fact(reference, author)?.unwrap();
+    assert_eq!(resolved.corrects, Some(first));
+    let predecessor = FactRef {
+        id: first,
+        ..reference
+    };
+    assert_eq!(
+        store
+            .resolve_semantic_fact(predecessor, prior)?
+            .unwrap()
+            .corrects,
+        None
+    );
+    assert!(store.resolve_semantic_fact(predecessor, author)?.is_none());
     assert!(
         store
             .semantic_fact_backlinks(descriptor, author)?
-            .iter()
-            .any(|fact| fact.reference == reference)
+            .contains(&resolved)
     );
     let next = SiteAreaInput {
         reading: AreaReading::Unknown,
