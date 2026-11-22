@@ -192,7 +192,33 @@ fn complete_platform_smoke(
         "observation": observation,
     });
     println!("ATLAS_PLATFORM_SMOKE {report}");
-    app.exit(i32::from(!passed));
+    if passed
+        && matches!(*smoke, PlatformSmoke::Ontology)
+        && let Some(directory) = std::env::var_os("ATLAS_ONTOLOGY_CAPTURE_HANDSHAKE")
+    {
+        let directory = std::path::PathBuf::from(directory);
+        // Keep the verified window alive only for the explicitly requested capture.
+        // The launcher owns the temporary directory and acknowledges after saving.
+        std::thread::spawn(move || {
+            let ready = directory.join("ready");
+            let captured = directory.join("captured");
+            if std::fs::write(ready, b"verified").is_err() {
+                app.exit(1);
+                return;
+            }
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+            while std::time::Instant::now() < deadline {
+                if captured.is_file() {
+                    app.exit(0);
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            app.exit(1);
+        });
+    } else {
+        app.exit(i32::from(!passed));
+    }
     Ok(())
 }
 

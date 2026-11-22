@@ -113,3 +113,7 @@ A single author-only semantic picker uses the existing controlled indexed query 
 ## AE-08 measured native author task report
 
 The isolated Windows desktop smoke now uses the actual compatible selector through native controlled IPC, checks selected stable ID and focus transfer, then records elapsed milliseconds and committed form submissions separately for culture/language, reusable setting-specific category/shared material, and historical measurement/evidence tasks. The Rust smoke gate requires all three actual observations and expected write counts, not merely a frontend boolean. These are automated native workflow timings, not comparative human usability timings or completed measurements until CI reports them.
+
+## Native Windows capture gate
+
+The existing explicit ontology smoke mode now supports an opt-in bounded capture handshake with its Windows launcher. After the actual author task checks succeed, the WebView scrolls to the verified evidence view and waits for paint; the launcher identifies and foregrounds that exact process window, verifies its desktop bounds, saves a UTC-named screenshot under Development-Screenshots and acknowledges it. The isolated smoke process fails rather than reporting capture success if the window is unavailable or acknowledgment times out. Normal app launches have no capture behavior. Windows CI uploads the resulting artifact; visual inspection and indexing are required before claiming actual evidence. No capture generated or verified in this implementation commit.

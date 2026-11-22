@@ -2,6 +2,7 @@ param(
     [Parameter(Mandatory = $true)][string] $Binary,
     [switch] $RendererBenchmark,
     [switch] $Ontology,
+    [string] $CaptureDirectory,
     [switch] $RequireGpu
 )
 
@@ -9,6 +10,7 @@ $ErrorActionPreference = "Stop"
 $exe = (Resolve-Path $Binary).Path
 if ($RequireGpu -and !$RendererBenchmark) { throw "-RequireGpu needs -RendererBenchmark." }
 if ($Ontology -and $RendererBenchmark) { throw "Choose one smoke mode." }
+if ($CaptureDirectory -and !$Ontology) { throw "-CaptureDirectory needs -Ontology." }
 $arguments = @("--platform-smoke")
 if ($Ontology) { $arguments = @("--ontology-smoke") }
 if ($RendererBenchmark) {
@@ -26,12 +28,71 @@ $startInfo.UseShellExecute = $false
 $startInfo.CreateNoWindow = $true
 $startInfo.RedirectStandardOutput = $true
 $startInfo.RedirectStandardError = $true
+$handshake = $null
+if ($CaptureDirectory) {
+    $CaptureDirectory = (New-Item -ItemType Directory -Force -Path $CaptureDirectory).FullName
+    $handshake = (New-Item -ItemType Directory -Path (Join-Path ([System.IO.Path]::GetTempPath()) ([Guid]::NewGuid().ToString()))).FullName
+    $startInfo.EnvironmentVariables["ATLAS_ONTOLOGY_CAPTURE_HANDSHAKE"] = $handshake
+}
 $process = New-Object System.Diagnostics.Process
 $process.StartInfo = $startInfo
 try {
     if (!$process.Start()) { throw "Could not launch the native platform test." }
     $stdout = $process.StandardOutput.ReadToEndAsync()
     $stderr = $process.StandardError.ReadToEndAsync()
+    if ($handshake) {
+        $deadline = [DateTime]::UtcNow.AddSeconds(55)
+        while (!(Test-Path (Join-Path $handshake "ready")) -and !$process.HasExited -and [DateTime]::UtcNow -lt $deadline) {
+            Start-Sleep -Milliseconds 50
+        }
+        if (Test-Path (Join-Path $handshake "ready")) {
+            Add-Type -AssemblyName System.Drawing
+            Add-Type -AssemblyName System.Windows.Forms
+            Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class AtlasNativeCapture {
+    [StructLayout(LayoutKind.Sequential)]
+    public struct Rect { public int Left, Top, Right, Bottom; }
+    [DllImport("user32.dll")]
+    public static extern bool GetWindowRect(IntPtr hwnd, out Rect rect);
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hwnd);
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")]
+    public static extern bool SetProcessDPIAware();
+}
+'@
+            [void][AtlasNativeCapture]::SetProcessDPIAware()
+            $process.Refresh()
+            $hwnd = $process.MainWindowHandle
+            if ($hwnd -eq [IntPtr]::Zero) { throw "Native ontology window is unavailable for capture." }
+            [void][AtlasNativeCapture]::SetForegroundWindow($hwnd)
+            Start-Sleep -Milliseconds 300
+            if ([AtlasNativeCapture]::GetForegroundWindow() -ne $hwnd) { throw "Native ontology window is not foreground; refusing to capture another window." }
+            $rect = New-Object AtlasNativeCapture+Rect
+            if (![AtlasNativeCapture]::GetWindowRect($hwnd, [ref]$rect)) { throw "Cannot obtain native window bounds." }
+            $width = $rect.Right - $rect.Left
+            $height = $rect.Bottom - $rect.Top
+            $bounds = New-Object System.Drawing.Rectangle($rect.Left, $rect.Top, $width, $height)
+            if ($width -lt 460 -or $height -lt 540 -or ![System.Windows.Forms.SystemInformation]::VirtualScreen.Contains($bounds)) {
+                throw "Native window is not fully visible on the capture desktop."
+            }
+            $bitmap = New-Object System.Drawing.Bitmap($width, $height)
+            try {
+                $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+                try {
+                    $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+                } finally { $graphics.Dispose() }
+                $stamp = [DateTime]::UtcNow.ToString("yyyy-MM-dd_HH-mm-ss'Z'")
+                $capture = Join-Path $CaptureDirectory ($stamp + "_phase-03_semantic_native-ontology-evidence_01.png")
+                $bitmap.Save($capture, [System.Drawing.Imaging.ImageFormat]::Png)
+                Write-Output "ATLAS_NATIVE_CAPTURE $capture"
+            } finally { $bitmap.Dispose() }
+            Set-Content -Encoding ascii -Path (Join-Path $handshake "captured") -Value "captured"
+        }
+    }
     $finished = $process.WaitForExit(60000)
     if (!$finished) {
         try {
@@ -63,5 +124,9 @@ try {
         throw "Windows scene, Canvas2D or history verification failed."
     }
 } finally {
+    if (!$process.HasExited) {
+        try { $process.Kill(); $process.WaitForExit() } catch { }
+    }
     $process.Dispose()
+    if ($handshake) { Remove-Item -LiteralPath $handshake -Recurse -Force }
 }

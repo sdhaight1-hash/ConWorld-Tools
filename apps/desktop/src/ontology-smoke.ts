@@ -146,6 +146,9 @@ export async function verifyOntologySmoke(): Promise<OntologyObservation> {
     finishTask("site_area_history_and_evidence");
     console.info("Ontology native smoke passed", { submissions, revision: current.revision, tasks });
     document.querySelector<HTMLElement>("#host")!.textContent = "Native ontology smoke passed: " + submissions + " authored submissions";
+    // Put the verified native result in view before asking the launcher to capture.
+    document.querySelector("[data-semantic-focus]")?.scrollIntoView({ block: "start" });
+    await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
     return { passed: true, tasks, error: null };
   } catch (error) {
     const message = String(error);

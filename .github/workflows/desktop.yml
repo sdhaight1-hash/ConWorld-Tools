@@ -67,7 +67,15 @@ jobs:
         run: |
           ./apps/desktop/scripts/windows-platform-smoke.ps1 -Binary ./target/debug/atlas-desktop.exe
           ./apps/desktop/scripts/windows-platform-smoke.ps1 -Binary ./target/debug/atlas-desktop.exe -RendererBenchmark
-          ./apps/desktop/scripts/windows-platform-smoke.ps1 -Binary ./target/debug/atlas-desktop.exe -Ontology
+          ./apps/desktop/scripts/windows-platform-smoke.ps1 -Binary ./target/debug/atlas-desktop.exe -Ontology -CaptureDirectory ./Development-Screenshots
+      - name: Upload native ontology capture
+        if: runner.os == 'Windows' && success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: phase-03-native-ontology
+          path: Development-Screenshots/*_phase-03_semantic_native-ontology-evidence_01.png
+          if-no-files-found: error
+          retention-days: 30
       - name: Browser fallback smoke tests
         if: runner.os == 'Linux'
         working-directory: apps/desktop
