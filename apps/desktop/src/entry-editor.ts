@@ -8,6 +8,7 @@ export type Binding = { world: string; query_id: string; definition_revision: nu
   bindings: { name: string; value: ParameterValue }[] };
 export type Block = { id: string; audience: string; content: { Text?: string; Stack?: Block[]; Panel?: Block[];
   Grid?: { columns: number; children: Block[] }; Template?: { key: string; version: number; children: Block[] };
+  CustomTemplate?: { template_id: string; definition_revision: number; children: Block[] };
   SavedQuery?: Binding; ObjectLink?: ObjectLink; Query?: unknown; FamilyTable?: { world: string; id: string }; NetworkTable?: { world: string; id: string };
   PublishedReferences?: { world: string; id: string }; ImpactTable?: { world: string; id: string } } };
 type Document = { schema_version: number; entry: { world: string; id: string }; root: Block };
@@ -147,7 +148,7 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
       simpleFields.hidden = true;
       treeButton.hidden = true;
       treeHost.hidden = false;
-      const tree = editCanvasTree(treeHost, document.root, worldId, entryId, revision, editable, clearAuthorPreview);
+      const tree = editCanvasTree(treeHost, document.root, worldId, entryId, day, revision, editable, clearAuthorPreview);
       currentDraft = () => ({ ...document, root: tree.root() });
     }
     function installEditorActions() {

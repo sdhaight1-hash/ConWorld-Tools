@@ -2108,3 +2108,86 @@ test("institution studio records a sourced fact and reviews a separate draft", a
     {command: "workspace_review_ghost", args: {request: {revision: 6}, proposalId: "proposal", promote: true}},
   ]);
 });
+
+test("custom template insertion uses exact pin and Canvas drag and undo preserve privacy", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "archive", name: "Archive", revision: 4 };
+    const writes: unknown[] = [];
+    let saved: unknown = [{
+      schema_version: 1, entry: { world: "archive", id: "alice" },
+      root: { id: "root", audience: "Public", content: { Stack: [
+        { id: "private-panel", audience: "Author", content: { Panel: [
+          { id: "secret", audience: "Public", content: { Text: "Secret testimony" } },
+        ] } },
+        { id: "public-grid", audience: "Public", content: { Grid: { columns: 2, children: [] } } },
+      ] } },
+    }, false];
+    Object.assign(window, {
+      isTauri: true, __customTemplateWrites: writes,
+      __TAURI_INTERNALS__: {
+        invoke: async (command: string, args: Record<string, unknown>) => {
+          if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+          if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+          if (command === "workspace_worlds") return [{ ...world }];
+          if (command === "workspace_snapshot") return {
+            world: { ...world }, day: args.day, view_revision: args.revision ?? world.revision,
+            people: [{ id: "alice", label: "Alice" }], relationships: [], events: [], definitions: [],
+          };
+          if (command === "workspace_saved_queries") return [];
+          if (command === "workspace_entry_layout") return saved;
+          if (command === "workspace_custom_templates") return [{id: "template", name: "Family profile", revision: 3}];
+          if (command === "workspace_instantiate_custom_template") {
+            writes.push(args);
+            return {id: "instance", audience: "Author", content: {CustomTemplate: {
+              template_id: "template", definition_revision: 3, children: [{id: "new-root", audience: "Public", content: {Stack: []}}],
+            }}};
+          }
+          if (command === "workspace_save_layout") {
+            writes.push(args.document);
+            saved = [args.document, args.published];
+            world.revision++;
+            return null;
+          }
+          throw new Error("Unexpected mock command: " + command);
+        },
+      },
+    });
+  });
+  await page.goto("/");
+  const graph = page.getByRole("region", { name: "Saved world graph" });
+  const inspector = graph.getByRole("complementary", { name: "Node inspector" });
+  await graph.locator("#nodes button[data-node=alice]").click();
+  await inspector.getByRole("button", { name: "Open character page" }).click();
+  await expect(inspector.getByRole("heading", { name: "Canvas tree" })).toBeVisible();
+  const text = inspector.getByRole("button", { name: "Text · Secret testimony" });
+  const grid = inspector.getByRole("button", { name: "Grid · public-g" });
+  await text.dragTo(grid);
+  await expect(inspector.getByLabel("Component audience")).toHaveValue("Author");
+  await inspector.getByRole("button", { name: "Undo Canvas edit" }).click();
+  await text.click();
+  await expect(inspector.getByLabel("Component audience")).toHaveValue("Public");
+  await inspector.getByRole("button", { name: "Redo Canvas edit" }).click();
+  await text.click();
+  await expect(inspector.getByLabel("Component audience")).toHaveValue("Author");
+  await grid.click();
+  await inspector.getByRole("button", { name: "Load custom templates" }).click();
+  await inspector.getByLabel("Custom template", { exact: true }).selectOption("template");
+  await inspector.getByRole("button", { name: "Insert custom template" }).click();
+  await expect(inspector.getByText("Custom template revision 3 · template")).toBeVisible();
+  if (process.env.ATLAS_CAPTURE_PHASE3 === "1") {
+    const timestamp = new Date().toISOString().slice(0, 19).replace("T", "_").replaceAll(":", "-") + "Z";
+    await inspector.screenshot({path: "../../Development-Screenshots/" + timestamp + "_phase-04_canvas_mock-native-custom-template_01.png", animations: "disabled"});
+  }
+  await inspector.getByRole("button", { name: "Save page" }).click();
+  await expect(page.locator("#author-world-info")).toContainText("Author revision 5 / 5");
+  const writes = await page.evaluate(() => (window as unknown as { __customTemplateWrites: unknown[] }).__customTemplateWrites);
+  expect(writes).toMatchObject([
+    {request: {revision: 4}, templateId: "template", definitionRevision: 3, entryId: "alice"},
+    {root: {content: {Stack: [
+      {id: "private-panel", content: {Panel: []}},
+      {id: "public-grid", content: {Grid: {children: [
+        {id: "secret", audience: "Author"}, {id: "instance", content: {CustomTemplate: {template_id: "template", definition_revision: 3}}},
+      ]}}},
+    ]}}},
+  ]);
+});

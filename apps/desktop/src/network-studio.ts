@@ -30,7 +30,14 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
       <label>End UTF-8 byte (exclusive) <input name="end" type="number" min="1" required></label>
       <label>Proposed type <select name="kind"><option value="person">Person</option><option value="organization">Organization</option><option value="household">Household</option><option value="family_house">Family house</option><option value="faction">Faction</option><option value="conflict">Conflict</option></select></label>
       <button>Propose ghost identity</button></fieldset></form>
-    <button type="button" data-review>Review draft identities</button><ul data-ghosts></ul><p data-status role="status"></p>`;
+    <button type="button" data-review>Review draft identities</button><ul data-ghosts></ul>
+    <form data-template class="editor-form"><fieldset><legend>Save persisted page as custom template</legend>
+      <p class="hint">Copies authored presentation, not resolved data. Existing instances never auto-update.</p>
+      <label>Template source entry identity <input name="source" required></label>
+      <label>Template name <input name="name" required maxlength="200"></label>
+      <label>Existing template identity (optional revision) <input name="id"></label>
+      <button>Save custom template</button></fieldset></form>
+    <button type="button" data-template-list>List custom templates</button><ul data-templates></ul><p data-status role="status"></p>`;
   parent.prepend(host);
   const status = host.querySelector<HTMLElement>("[data-status]")!;
   const form = (selector: string) => host.querySelector<HTMLFormElement>(selector)!;
@@ -87,6 +94,15 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
   };
   submit("[data-ghost]", f=>void write("workspace_propose_ghost",{claimId:value(f,"claim"),startByte:Number(value(f,"start")),
     endByte:Number(value(f,"end")),kind:value(f,"kind")}));
+  submit("[data-template]", f => void write("workspace_save_custom_template", { sourceId: value(f,"source"), name:value(f,"name"), templateId:value(f,"id") || null }));
+  host.querySelector<HTMLButtonElement>("[data-template-list]")!.onclick = async () => {
+    try {
+      const templates = await invoke<{id:string;name:string;revision:number}[]>("workspace_custom_templates",{request});
+      if(!valid())return;
+      const list=host.querySelector("[data-templates]")!;list.replaceChildren();
+      for(const template of templates){const row=document.createElement("li");row.textContent=template.name+" · "+template.id+" · revision "+template.revision;list.append(row);}
+    } catch(error){if(valid())status.textContent=String(error);}
+  };
   host.querySelector<HTMLButtonElement>("[data-review]")!.onclick=async()=>{
     try{
       const ghosts=await invoke<Ghost[]>("workspace_ghost_proposals",{request});
