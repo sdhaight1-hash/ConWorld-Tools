@@ -6,7 +6,7 @@ use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 
 use atlas_store::{
-    ActionOutcome, AuthorRevision, Change, ClaimAudience, Command, Definition, EventDate,
+    ActionOutcome, AuthorRevision, BranchId, Change, ClaimAudience, Command, Definition, EventDate,
     EventRole, ObjectData, ObjectId, ObjectRef, Record, Scope, Store, ValidInterval, Version,
     VersionRef, ViewContext, World, WorldDay, WorldId,
     discovery::{MentionDisposition, ReviewMention, SavePersonAlias},
@@ -2109,6 +2109,7 @@ pub fn workspace_save_query(
 #[derive(Deserialize)]
 pub struct FamilyRequest {
     world_id: String,
+    branch_id: Option<String>,
     person_id: String,
     day: i64,
     revision: i64,
@@ -2122,6 +2123,7 @@ impl FamilyRequest {
         Ok((
             ViewContext {
                 revision: AuthorRevision(self.revision),
+                branch: self.branch_id.as_deref().map(id).transpose()?.map(BranchId).unwrap_or(world.main),
                 ..view(&world, self.day)
             },
             reference(world.id, &self.person_id)?,
@@ -2407,6 +2409,7 @@ pub async fn workspace_search_public_pages(
 #[derive(Deserialize)]
 pub struct NetworkContext {
     world_id: String,
+    branch_id: Option<String>,
     day: i64,
     revision: i64,
 }
@@ -2418,6 +2421,7 @@ impl NetworkContext {
             .map_err(|e| e.to_string())?;
         Ok(ViewContext {
             revision: AuthorRevision(self.revision),
+            branch: self.branch_id.as_deref().map(id).transpose()?.map(BranchId).unwrap_or(world.main),
             ..view(&world, self.day)
         })
     }

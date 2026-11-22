@@ -52,7 +52,7 @@ impl Store {
         label: &str,
         command_id: Uuid,
     ) -> Result<ObjectRef, Error> {
-        author_context(&self.conn, view)?;
+        metadata_world(&self.conn, view, true)?;
         bounded_text(label)?;
         let object = ObjectRef::new(view.world);
         self.apply(&Command {
@@ -94,11 +94,12 @@ impl Store {
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let world = author_context(&tx, view)?;
+        let world = metadata_world(&tx, view, true)?;
         let effective = ViewContext {
             day: WorldDay(input.starts_at),
             ..view
         };
+        metadata_world(&tx, effective, true)?;
         let subject = resolved(&tx, effective, input.subject)?;
         let target = resolved(&tx, effective, input.target)?;
         let source = resolved(&tx, effective, input.source)?;
@@ -192,12 +193,11 @@ impl Store {
         }
         let kind = input.kind.name();
         let duplicate: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM network_facts WHERE world_id=?1 AND kind=?2
-             AND ((subject_id=?3 AND target_id=?4) OR (?2='marriage' AND subject_id=?4 AND target_id=?3))
-             AND recorded_revision<=?5 AND (withdrawn_revision IS NULL OR withdrawn_revision>?5)
-             AND (?6 IS NULL OR starts_at<?6) AND (ends_before IS NULL OR ends_before>?7))",
-            params![view.world.0.as_bytes(),kind,input.subject.id.0.as_bytes(),input.target.id.0.as_bytes(),
-                view.revision.0,input.ends_before,input.starts_at], |row| row.get(0))?;
+            &format!("{METADATA_CTE} SELECT EXISTS(SELECT 1 FROM active_network WHERE kind=?5
+             AND ((subject_id=?6 AND target_id=?7) OR (?5='marriage' AND subject_id=?7 AND target_id=?6))
+             AND (?8 IS NULL OR starts_at<?8) AND (ends_before IS NULL OR ends_before>?4))"),
+            params![view.world.0.as_bytes(),view.branch.0.as_bytes(),view.revision.0,input.starts_at,
+                kind,input.subject.id.0.as_bytes(),input.target.id.0.as_bytes(),input.ends_before], |row| row.get(0))?;
         if duplicate {
             return Err(Error::InvalidInput("overlapping network fact"));
         }
@@ -208,11 +208,10 @@ impl Store {
             NetworkKind::OfficeHolding | NetworkKind::TitleHolding | NetworkKind::RuleOf
         ) {
             let occupied: bool = tx.query_row(
-                "SELECT EXISTS(SELECT 1 FROM network_facts WHERE world_id=?1 AND kind=?2
-                 AND target_id=?3 AND recorded_revision<=?4 AND (withdrawn_revision IS NULL OR withdrawn_revision>?4)
-                 AND (?5 IS NULL OR starts_at<?5) AND (ends_before IS NULL OR ends_before>?6))",
-                params![view.world.0.as_bytes(),kind,input.target.id.0.as_bytes(),view.revision.0,input.ends_before,input.starts_at],
-                |row| row.get(0))?;
+                &format!("{METADATA_CTE} SELECT EXISTS(SELECT 1 FROM active_network WHERE kind=?5
+                    AND target_id=?6 AND (?7 IS NULL OR starts_at<?7) AND (ends_before IS NULL OR ends_before>?4))"),
+                params![view.world.0.as_bytes(),view.branch.0.as_bytes(),view.revision.0,input.starts_at,
+                    kind,input.target.id.0.as_bytes(),input.ends_before], |row| row.get(0))?;
             if occupied {
                 return Err(Error::InvalidInput("overlapping exclusive role"));
             }
@@ -223,12 +222,8 @@ impl Store {
             NetworkKind::ConfirmedCause | NetworkKind::Succession
         ) {
             let mut edges = HashMap::<ObjectRef, Vec<ObjectRef>>::new();
-            let mut stmt = tx.prepare(
-                "SELECT subject_id,target_id FROM network_facts
-                WHERE world_id=?1 AND kind=?2 AND recorded_revision<=?3
-                AND (withdrawn_revision IS NULL OR withdrawn_revision>?3) LIMIT 4001",
-            )?;
-            let mut rows = stmt.query(params![view.world.0.as_bytes(), kind, view.revision.0])?;
+            let mut stmt = tx.prepare(&format!("{METADATA_CTE} SELECT subject_id,target_id FROM active_network WHERE kind=?5 LIMIT 4001"))?;
+            let mut rows = stmt.query(params![view.world.0.as_bytes(),view.branch.0.as_bytes(),view.revision.0,input.starts_at,kind])?;
             let mut count = 0;
             while let Some(row) = rows.next()? {
                 count += 1;
@@ -248,7 +243,7 @@ impl Store {
         let rev = append_revision(
             &tx,
             &world,
-            world.main,
+            view.branch,
             view.revision,
             command_id,
             ("Local author", "Record explicit network fact"),
@@ -271,20 +266,15 @@ impl Store {
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let world = author_context(&tx, view)?;
-        let rev = append_revision(
-            &tx,
-            &world,
-            world.main,
-            view.revision,
-            command_id,
-            ("Local author", "Withdraw network fact"),
-        )?;
-        let changed = tx.execute("UPDATE network_facts SET withdrawn_revision=?3 WHERE world_id=?1 AND id=?2 AND withdrawn_revision IS NULL",
-            params![view.world.0.as_bytes(),id.as_bytes(),rev])?;
-        if changed != 1 {
-            return Err(Error::NotFound);
-        }
+        let world = metadata_world(&tx, view, true)?;
+        let exists: bool = tx.query_row(
+            &format!("{METADATA_CTE} SELECT EXISTS(SELECT 1 FROM active_network WHERE id=?5)"),
+            params![view.world.0.as_bytes(),view.branch.0.as_bytes(),view.revision.0,view.day.0,id.as_bytes()],
+            |row| row.get(0))?;
+        if !exists { return Err(Error::NotFound); }
+        let rev = append_revision(&tx,&world,view.branch,view.revision,command_id,("Local author","Withdraw network fact"))?;
+        tx.execute("INSERT INTO metadata_withdrawals(world_id,branch_id,kind,fact_id,revision) VALUES(?1,?2,'network',?3,?4)",
+            params![view.world.0.as_bytes(),view.branch.0.as_bytes(),id.as_bytes(),rev])?;
         tx.commit()?;
         Ok(())
     }
@@ -294,21 +284,10 @@ impl Store {
         view: ViewContext,
         focus: ObjectRef,
     ) -> Result<Vec<NetworkFact>, Error> {
-        let (revision, cutoff) = inherited_metadata(&self.conn, view)?;
+        metadata_world(&self.conn, view, false)?;
         resolved(&self.conn, view, focus)?;
-        let mut stmt = self.conn.prepare(
-            "SELECT id,subject_id,target_id,source_id,kind,role,starts_at,ends_before
-            FROM network_facts WHERE world_id=?1 AND (subject_id=?2 OR target_id=?2)
-            AND recorded_revision<=?3 AND (withdrawn_revision IS NULL OR withdrawn_revision>?3)
-            AND starts_at<=?4 AND (ends_before IS NULL OR ends_before>?5) ORDER BY id LIMIT 501",
-        )?;
-        let mut rows = stmt.query(params![
-            view.world.0.as_bytes(),
-            focus.id.0.as_bytes(),
-            revision.0,
-            cutoff.0,
-            view.day.0
-        ])?;
+        let mut stmt=self.conn.prepare(&format!("{METADATA_CTE} SELECT id,subject_id,target_id,source_id,kind,role,starts_at,ends_before FROM active_network WHERE (subject_id=?5 OR target_id=?5) AND starts_at<=?4 AND (ends_before IS NULL OR ends_before>?4) ORDER BY id LIMIT 501"))?;
+        let mut rows=stmt.query(params![view.world.0.as_bytes(),view.branch.0.as_bytes(),view.revision.0,view.day.0,focus.id.0.as_bytes()])?;
         let mut result = Vec::new();
         let mut count = 0;
         while let Some(row) = rows.next()? {
@@ -358,20 +337,9 @@ impl Store {
         max_depth: u8,
         max_visited: usize,
     ) -> Result<crate::conflict::Impact, Error> {
-        let (revision, cutoff) = inherited_metadata(&self.conn, view)?;
-        let mut stmt = self.conn.prepare(
-            "SELECT subject_id,target_id,source_id FROM network_facts
-             WHERE world_id=?1 AND kind='confirmed_cause'
-             AND recorded_revision<=?2 AND (withdrawn_revision IS NULL OR withdrawn_revision>?2)
-             AND starts_at<=?3 AND (ends_before IS NULL OR ends_before>?4)
-             ORDER BY id LIMIT 4001",
-        )?;
-        let mut rows = stmt.query(params![
-            view.world.0.as_bytes(),
-            revision.0,
-            cutoff.0,
-            view.day.0
-        ])?;
+        metadata_world(&self.conn, view, false)?;
+        let mut stmt=self.conn.prepare(&format!("{METADATA_CTE} SELECT subject_id,target_id,source_id FROM active_network WHERE kind='confirmed_cause' AND starts_at<=?4 AND (ends_before IS NULL OR ends_before>?4) ORDER BY id LIMIT 4001"))?;
+        let mut rows=stmt.query(params![view.world.0.as_bytes(),view.branch.0.as_bytes(),view.revision.0,view.day.0])?;
         let mut links = Vec::new();
         while let Some(row) = rows.next()? {
             self.check_query_control()?;
