@@ -2388,6 +2388,7 @@ test("semantic inspection invalidates pending replies and stale actions when foc
     let release: (() => void) | undefined;
     Object.assign(window, {
       isTauri: true, __releaseSemantic: () => release?.(), __semanticPending: false,
+      __selectionRequests: [] as Record<string, unknown>[],
       __TAURI_INTERNALS__: {
         invoke: async (command: string, args: Record<string, unknown>) => {
           switch (command) {
@@ -2397,7 +2398,11 @@ test("semantic inspection invalidates pending replies and stale actions when foc
             case "workspace_snapshot": return { world, day: args.day, view_revision: 4,
               people: [], relationships: [], events: [], definitions: [] };
             case "workspace_saved_queries": return [];
-            case "workspace_semantic_candidates": return { rows: [{id:"new",label:"Estuary Speech"}], truncated:false };
+            case "workspace_semantic_candidates": {
+              (window as unknown as { __selectionRequests: Record<string, unknown>[] }).__selectionRequests.push(args);
+              if (args.kind === "culture") return { rows: [{id:"culture",label:"Estuary Culture"}], truncated:false };
+              return { rows: [{id:"new",label:"Estuary Speech"}], truncated:false };
+            }
             case "workspace_classifications": {
               if (args.subjectId === "old") {
                 await new Promise<void>(resolve => {
@@ -2438,4 +2443,38 @@ test("semantic inspection invalidates pending replies and stale actions when foc
   await focus.fill("different");
   await expect(results).toBeEmpty();
   await expect(results.getByRole("button", { name: "Withdraw classification" })).toHaveCount(0);
+
+  const fact = studio.locator("[data-fact]");
+  await fact.getByLabel("Fact type").selectOption("culture_language");
+  await fact.getByLabel("Starts at day").fill("7");
+  await studio.getByLabel("Selection destination").selectOption({label:"Semantic network target"});
+  await studio.getByLabel("Identity name or phrase").fill("Estuary");
+  await studio.getByRole("button", {name:"Find compatible identities",exact:true}).click();
+  const language = studio.getByRole("button", {name:"Estuary Speech · new",exact:true});
+  await expect(language).toBeVisible();
+  const requests = await page.evaluate(() =>
+    (window as unknown as { __selectionRequests: Record<string, unknown>[] }).__selectionRequests);
+  expect(requests.at(-1)).toMatchObject({kind:"language", phrase:"Estuary", request:{world_id:"archive",revision:4,day:7}});
+  if (process.env.ATLAS_CAPTURE_PHASE3 === "1") {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-").replace(/-\d{3}Z$/, "Z").replace("T", "_");
+    await studio.locator("[data-semantic-picker]").screenshot({
+      path: "../../Development-Screenshots/" + timestamp + "_phase-03_semantic_mock-native-profile-picker_01.png",
+      animations: "disabled",
+    });
+  }
+  // Changing the effective day makes the old result unusable.
+  await fact.getByLabel("Starts at day").fill("8");
+  await expect(language).toHaveCount(0);
+  await studio.getByRole("button", {name:"Find compatible identities",exact:true}).click();
+  await language.click();
+  await expect(fact.getByLabel("Target identity")).toHaveValue("new");
+
+  await studio.getByLabel("Selection destination").selectOption({label:"Semantic network subject"});
+  await studio.getByRole("button", {name:"Find compatible identities",exact:true}).click();
+  await studio.getByRole("button", {name:"Estuary Culture · culture",exact:true}).click();
+  await expect(fact.getByLabel("Subject identity")).toHaveValue("culture");
+  await fact.getByLabel("Fact type").selectOption("membership");
+  await studio.getByRole("button", {name:"Find compatible identities",exact:true}).click();
+  await expect(studio.locator("[data-status]")).toContainText("Select Culture documented language");
+  await expect(studio.locator("[data-picker-results]")).toBeEmpty();
 });

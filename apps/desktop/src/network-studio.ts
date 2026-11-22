@@ -30,7 +30,7 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
       <label>Identity type <select name="kind"><option value="organization">Organization</option><option value="household">Household</option><option value="family_house">Family house</option><option value="faction">Faction</option><option value="conflict">Conflict</option><option value="office">Office</option><option value="title">Hereditary or legal title</option><option value="asset">Asset</option><option value="population">Fictional population</option><option value="conflict_issue">Conflict issue</option><option value="conflict_phase">Conflict phase</option><option value="succession_rule">Succession rule</option><option value="concept">Concept</option><option value="place">Place</option><option value="person">Person</option></select></label>
       <button>Create identity</button></fieldset></form>
     <form data-semantic-picker class="editor-form"><fieldset><legend>Find compatible identities</legend>
-      <p class="hint">Search by a word or phrase in the selected branch and revision. Select a result to fill the chosen field; nothing is created or edited.</p>
+      <p class="hint">Search by a word or phrase in the selected branch and revision. For semantic network endpoints, choose the fact type and start day first; the search matches names containing the text and requires the corresponding profile on that day. Selecting a result only fills a field.</p>
       <label>Selection destination <select name="destination"></select></label>
       <label>Identity name or phrase <input name="phrase" required maxlength="800"></label>
       <button>Find compatible identities</button><button type="button" data-cancel-picker hidden>Cancel identity search</button>
@@ -149,6 +149,8 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
     ["Area inspector", "[data-area-focus]", "place", "place", false],
     ["Annotation claim", "[data-fact-annotation]", "claim", "claim", true],
     ["Retirement descriptor", "[data-retire-descriptor]", "descriptor", "tag", true],
+    ["Semantic network subject", "[data-fact]", "subject", "relation_subject", true],
+    ["Semantic network target", "[data-fact]", "target", "relation_target", true],
   ] as const;
   const destination = picker.elements.namedItem("destination") as HTMLSelectElement;
   destinations.forEach(([label,,,, needsWrite], index) => {
@@ -177,6 +179,13 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
   ] as const) {
     form(selector).addEventListener("input", () => {
       ++inspection; cancelPicker(); clear(...results); status.textContent = "";
+    });
+  }
+  // A different fact type or effective day changes compatible endpoints.
+  // Invalidate the old picker result before any late IPC reply can fill it.
+  for (const event of ["input", "change"]) {
+    form("[data-fact]").addEventListener(event, () => {
+      ++inspection; cancelPicker(); clear("[data-picker-results]"); status.textContent = "";
     });
   }
   const choose=(id:string | undefined)=>{
@@ -231,12 +240,32 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
     const chosen = destinations[Number(destination.value)];
     if (!chosen || (chosen[4] && !editable)) return;
     const {ctx,current}=beginInspection("[data-picker-results]");
+    let kind: string = chosen[3];
+    let selectionContext = ctx;
+    if (kind === "relation_subject" || kind === "relation_target") {
+      const relation = form("[data-fact]");
+      const factKind = value(relation, "kind");
+      const subject = kind === "relation_subject";
+      if (factKind === "culture_language") kind = subject ? "culture" : "language";
+      else if (factKind === "working_material") kind = subject ? "technology" : "material";
+      else {
+        status.textContent = "Select Culture documented language or Technology working material as the fact type.";
+        return;
+      }
+      const raw = value(relation, "start").trim();
+      const day = Number(raw);
+      if (!raw || !Number.isSafeInteger(day)) {
+        status.textContent = "Enter a valid integer fact start day.";
+        return;
+      }
+      selectionContext = { ...ctx, day };
+    }
     const requestId=crypto.randomUUID();
     pickerRequest=requestId;
     host.querySelector<HTMLButtonElement>("[data-cancel-picker]")!.hidden=false;
     try {
       const result = await invoke<{rows: {id: string; label: string}[]; truncated: boolean}>(
-        "workspace_semantic_candidates", {request:ctx,requestId,kind:chosen[3],phrase});
+        "workspace_semantic_candidates", {request:selectionContext,requestId,kind,phrase});
       if (!current()) return;
       const list=host.querySelector("[data-picker-results]")!;
       for (const row of result.rows) {

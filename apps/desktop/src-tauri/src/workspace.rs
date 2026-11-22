@@ -2505,6 +2505,36 @@ pub struct SemanticCandidates {
     truncated: bool,
 }
 
+fn semantic_selection_filter(kind: &str, phrase: String) -> Result<QueryFilter, String> {
+    use atlas_store::semantic::ConceptProfile;
+
+    let profile = match kind {
+        "culture" => Some(ConceptProfile::Culture),
+        "language" => Some(ConceptProfile::Language),
+        "material" => Some(ConceptProfile::Material),
+        "technology" => Some(ConceptProfile::Technology),
+        _ => None,
+    };
+    if let Some(profile) = profile {
+        return Ok(QueryFilter::And(vec![
+            QueryFilter::ClassifiedAs(profile),
+            QueryFilter::LabelContains(phrase),
+        ]));
+    }
+    let filter = match kind {
+        "concept" => ObjectKindFilter::Concept,
+        "place" => ObjectKindFilter::Place,
+        "source" => ObjectKindFilter::Source,
+        "tag" => ObjectKindFilter::Definition,
+        "claim" => ObjectKindFilter::Claim,
+        _ => return Err("Unsupported semantic selection kind".into()),
+    };
+    Ok(QueryFilter::And(vec![
+        QueryFilter::Kind(filter),
+        QueryFilter::FullTextPhrase(phrase),
+    ]))
+}
+
 /// A bounded, branch-aware selection search over the existing query authority.
 /// The write service still validates all reference kinds and sources.
 #[tauri::command]
@@ -2518,22 +2548,12 @@ pub async fn workspace_semantic_candidates(
     run_query_job(app, request_id, move |workspace, control| {
         let store = workspace.lock()?;
         let view = request.resolve(&store)?;
-        let filter = match kind.as_str() {
-            "concept" => ObjectKindFilter::Concept,
-            "place" => ObjectKindFilter::Place,
-            "source" => ObjectKindFilter::Source,
-            "tag" => ObjectKindFilter::Definition,
-            "claim" => ObjectKindFilter::Claim,
-            _ => return Err("Unsupported semantic selection kind".into()),
-        };
+        let filter = semantic_selection_filter(&kind, phrase)?;
         let result = store
             .execute_query_controlled(
                 &QuerySpec {
                     schema_version: QUERY_SCHEMA_VERSION,
-                    filter: QueryFilter::And(vec![
-                        QueryFilter::Kind(filter),
-                        QueryFilter::FullTextPhrase(phrase),
-                    ]),
+                    filter,
                     limit: 100,
                 },
                 view,
@@ -3339,6 +3359,33 @@ mod tests {
 
     fn test_control() -> QueryControl {
         QueryControl::new(Duration::from_secs(10)).expect("test query timeout")
+    }
+
+    #[test]
+    fn semantic_selection_uses_profile_predicates_without_changing_core_kind_search() {
+        use atlas_store::semantic::ConceptProfile;
+        for (kind, profile) in [
+            ("culture", ConceptProfile::Culture),
+            ("language", ConceptProfile::Language),
+            ("material", ConceptProfile::Material),
+            ("technology", ConceptProfile::Technology),
+        ] {
+            assert_eq!(
+                semantic_selection_filter(kind, "Estuary".into()).unwrap(),
+                QueryFilter::And(vec![
+                    QueryFilter::ClassifiedAs(profile),
+                    QueryFilter::LabelContains("Estuary".into()),
+                ])
+            );
+        }
+        assert_eq!(
+            semantic_selection_filter("concept", "Estuary".into()).unwrap(),
+            QueryFilter::And(vec![
+                QueryFilter::Kind(ObjectKindFilter::Concept),
+                QueryFilter::FullTextPhrase("Estuary".into()),
+            ])
+        );
+        assert!(semantic_selection_filter("unsupported", "Estuary".into()).is_err());
     }
 
     #[test]

@@ -97,7 +97,35 @@ export async function verifyOntologySmoke(): Promise<OntologyObservation> {
     await classify(10, "culture", descriptor);
     await classify(11, "language", descriptor);
     await classify(12, "material", descriptor);
-    await relation(10, 11, "culture_language", "documented_language");
+    // Both names contain Estuary, but each endpoint must offer only its
+    // authorized profile. Exercise the real selector before recording the fact.
+    const currentStudio = document.querySelector<HTMLDetailsElement>("[data-network-studio]")!;
+    currentStudio.open = true;
+    const currentPicker = currentStudio.querySelector<HTMLFormElement>("[data-semantic-picker]")!;
+    const currentDestination = currentPicker.elements.namedItem("destination") as HTMLSelectElement;
+    const relationForm = currentStudio.querySelector<HTMLFormElement>("[data-fact]")!;
+    const relationKind = relationForm.elements.namedItem("kind") as HTMLSelectElement;
+    relationKind.value = "culture_language";
+    relationKind.dispatchEvent(new Event("change", { bubbles: true }));
+    const pickEndpoint = async (field: "subject" | "target", expected: number) => {
+      const option = Array.from(currentDestination.options).find(item => item.text === "Semantic network " + field);
+      assert(option, "semantic endpoint destination missing");
+      form("[data-semantic-picker]", { destination: option.value, phrase: "Estuary" });
+      await waitFor(() => currentPicker.querySelector("[data-picker-results] button") !== null,
+        "native profile-filtered endpoint did not render");
+      const matches = currentPicker.querySelectorAll<HTMLButtonElement>("[data-picker-results] button");
+      assert(matches.length === 1 && matches[0].textContent?.includes(object(expected)),
+        "native compatible profile did not exclude the other Estuary concept");
+      matches[0].click();
+      const input = relationForm.elements.namedItem(field) as HTMLInputElement;
+      assert(document.activeElement === input && input.value === object(expected),
+        "native endpoint selection did not preserve ID and focus");
+    };
+    // A write refresh replaces the studio; resolve its current picker rather
+    // than retaining the DOM captured before the classification submissions.
+    await pickEndpoint("subject", 10);
+    await pickEndpoint("target", 11);
+    await write("[data-fact]", { source, kind: "culture_language", role: "documented_language", start: "0", end: "" });
     const language = await invoke<Fact[]>("workspace_network_facts", { request: request(), focus: object(10) });
     assert(language.some(f => f.input.kind === "culture_language" && f.input.target.id === object(11)),
       "culture/language stable relation missing");
