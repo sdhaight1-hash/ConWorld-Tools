@@ -2514,15 +2514,28 @@ pub fn workspace_enact_succession(
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
-pub fn workspace_media_assets(workspace:State<'_,AuthorWorkspace>,request:NetworkContext)->Result<Vec<atlas_store::MediaSummary>,String>{
-    let store=workspace.lock()?;
-    store.media_assets(request.resolve(&store)?).map_err(|e|e.to_string())
+pub fn workspace_media_assets(
+    workspace: State<'_, AuthorWorkspace>,
+    request: NetworkContext,
+) -> Result<Vec<atlas_store::MediaSummary>, String> {
+    let store = workspace.lock()?;
+    store
+        .media_assets(request.resolve(&store)?)
+        .map_err(|e| e.to_string())
 }
 #[tauri::command]
-pub fn workspace_import_png(workspace:State<'_,AuthorWorkspace>,request:NetworkContext,name:String,bytes:Vec<u8>)->Result<(),String>{
-    let mut store=workspace.lock()?;
-    let context=request.resolve(&store)?;
-    store.import_png(context,&name,&bytes,Uuid::new_v4()).map(|_|()).map_err(|e|e.to_string())
+pub fn workspace_import_png(
+    workspace: State<'_, AuthorWorkspace>,
+    request: NetworkContext,
+    name: String,
+    bytes: Vec<u8>,
+) -> Result<(), String> {
+    let mut store = workspace.lock()?;
+    let context = request.resolve(&store)?;
+    store
+        .import_png(context, &name, &bytes, Uuid::new_v4())
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 #[tauri::command]
 pub fn workspace_custom_templates(

@@ -20,9 +20,9 @@ use crate::*;
 pub(crate) const APPLICATION_ID: i64 = 0x4357_4c44; // CWLD
 mod entries;
 mod family;
+pub(crate) mod media;
 mod network;
 mod templates;
-pub(crate) mod media;
 
 // Version 29 adds version-pinned template layout variants without changing tables.
 pub(crate) const SCHEMA_VERSION: i64 = 36;

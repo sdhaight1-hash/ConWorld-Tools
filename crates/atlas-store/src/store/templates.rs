@@ -177,7 +177,9 @@ fn fresh_elements(element: &mut LayoutElement, source: ObjectRef, destination: O
             }
         }
         ElementContent::Image(image) => {
-            for hotspot in &mut image.hotspots { hotspot.id = ElementId(Uuid::new_v4()); }
+            for hotspot in &mut image.hotspots {
+                hotspot.id = ElementId(Uuid::new_v4());
+            }
         }
         ElementContent::FamilyTable(target)
         | ElementContent::NetworkTable(target)

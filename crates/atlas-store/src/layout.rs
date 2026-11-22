@@ -271,18 +271,29 @@ impl LayoutDocument {
                     return Err(Error::InvalidInput("layout text length"));
                 }
                 ElementContent::Image(image) => {
-                    if image.alt.trim().is_empty() || image.alt.len() > 800 || image.hotspots.len() > 32 {
+                    if image.alt.trim().is_empty()
+                        || image.alt.len() > 800
+                        || image.hotspots.len() > 32
+                    {
                         return Err(Error::InvalidInput("image text or hotspot count"));
                     }
                     for hotspot in &image.hotspots {
-                        if hotspot.x > 10000 || hotspot.y > 10000 || hotspot.link.label.trim().is_empty()
-                            || hotspot.link.label.len() > 800 || !visited.insert(hotspot.id) {
+                        if hotspot.x > 10000
+                            || hotspot.y > 10000
+                            || hotspot.link.label.trim().is_empty()
+                            || hotspot.link.label.len() > 800
+                            || !visited.insert(hotspot.id)
+                        {
                             return Err(Error::InvalidInput("image hotspot"));
                         }
-                        if hotspot.link.target.world != self.entry.world || matches!(hotspot.audience, ClaimAudience::Character(reader) if reader.world != self.entry.world) {
+                        if hotspot.link.target.world != self.entry.world
+                            || matches!(hotspot.audience, ClaimAudience::Character(reader) if reader.world != self.entry.world)
+                        {
                             return Err(Error::WrongWorld);
                         }
-                        if visited.len() > MAX_ELEMENTS { return Err(Error::QueryBudgetExceeded); }
+                        if visited.len() > MAX_ELEMENTS {
+                            return Err(Error::QueryBudgetExceeded);
+                        }
                     }
                 }
                 ElementContent::ObjectLink(link) => {
@@ -412,7 +423,9 @@ impl LayoutDocument {
                 ElementContent::ObjectLink(link) => links.push((element.id, link)),
                 ElementContent::Image(image) => {
                     for hotspot in &image.hotspots {
-                        if can_view(scope, hotspot.audience) { links.push((hotspot.id, &hotspot.link)); }
+                        if can_view(scope, hotspot.audience) {
+                            links.push((hotspot.id, &hotspot.link));
+                        }
                     }
                 }
                 _ => {}
@@ -604,14 +617,33 @@ fn project(
         ElementContent::Image(image) => {
             let (width, height, png_base64, bytes) = store.project_png(view, image.asset)?;
             budget.media_bytes += bytes;
-            if budget.media_bytes > 6 * 1024 * 1024 { return Err(Error::QueryBudgetExceeded); }
+            if budget.media_bytes > 6 * 1024 * 1024 {
+                return Err(Error::QueryBudgetExceeded);
+            }
             let mut hotspots = Vec::new();
             for hotspot in &image.hotspots {
-                if !can_view(view.scope, hotspot.audience) || !store.entry_link_target_visible(view, hotspot.link.target)? { continue; }
-                if budget.seen.len() >= MAX_ELEMENTS || !budget.seen.insert(hotspot.id) { return Err(Error::QueryBudgetExceeded); }
-                hotspots.push(DisplayHotspot { id: hotspot.id, x: hotspot.x, y: hotspot.y, link: hotspot.link.clone() });
+                if !can_view(view.scope, hotspot.audience)
+                    || !store.entry_link_target_visible(view, hotspot.link.target)?
+                {
+                    continue;
+                }
+                if budget.seen.len() >= MAX_ELEMENTS || !budget.seen.insert(hotspot.id) {
+                    return Err(Error::QueryBudgetExceeded);
+                }
+                hotspots.push(DisplayHotspot {
+                    id: hotspot.id,
+                    x: hotspot.x,
+                    y: hotspot.y,
+                    link: hotspot.link.clone(),
+                });
             }
-            DisplayContent::Image(DisplayImage { width, height, png_base64, alt: image.alt.clone(), hotspots })
+            DisplayContent::Image(DisplayImage {
+                width,
+                height,
+                png_base64,
+                alt: image.alt.clone(),
+                hotspots,
+            })
         }
         ElementContent::PublishedStatements(target) => {
             if budget.queries == MAX_QUERIES {
