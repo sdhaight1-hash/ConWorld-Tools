@@ -14,7 +14,10 @@ fn author_context(conn: &Connection, view: ViewContext) -> Result<World, Error> 
 }
 
 fn institution(data: &ObjectData) -> bool {
-    matches!(data, ObjectData::Organization | ObjectData::Household | ObjectData::FamilyHouse)
+    matches!(
+        data,
+        ObjectData::Organization | ObjectData::Household | ObjectData::FamilyHouse
+    )
 }
 
 fn bounded_text(value: &str) -> Result<(), Error> {
@@ -25,7 +28,10 @@ fn bounded_text(value: &str) -> Result<(), Error> {
 }
 
 fn ref_id(world: WorldId, bytes: [u8; 16]) -> ObjectRef {
-    ObjectRef { world, id: ObjectId(Uuid::from_bytes(bytes)) }
+    ObjectRef {
+        world,
+        id: ObjectId(Uuid::from_bytes(bytes)),
+    }
 }
 
 fn resolved(conn: &Connection, view: ViewContext, object: ObjectRef) -> Result<Version, Error> {
@@ -37,33 +43,59 @@ fn resolved(conn: &Connection, view: ViewContext, object: ObjectRef) -> Result<V
 
 impl Store {
     pub fn create_identity(
-        &mut self, view: ViewContext, kind: IdentityKind, label: &str, command_id: Uuid,
+        &mut self,
+        view: ViewContext,
+        kind: IdentityKind,
+        label: &str,
+        command_id: Uuid,
     ) -> Result<ObjectRef, Error> {
         author_context(&self.conn, view)?;
         bounded_text(label)?;
         let object = ObjectRef::new(view.world);
         self.apply(&Command {
-            world: view.world, branch: view.branch, expected: view.revision,
-            id: command_id, author: "Local author".into(), rationale: "Create typed identity".into(),
+            world: view.world,
+            branch: view.branch,
+            expected: view.revision,
+            id: command_id,
+            author: "Local author".into(),
+            rationale: "Create typed identity".into(),
             scope: Scope::Author,
-            changes: vec![Change::Create(object, Record {
-                label: label.trim().into(), valid: ValidInterval { start: Some(view.day), end_exclusive: None },
-                data: kind.data(), source: None,
-            })],
+            changes: vec![Change::Create(
+                object,
+                Record {
+                    label: label.trim().into(),
+                    valid: ValidInterval {
+                        start: Some(view.day),
+                        end_exclusive: None,
+                    },
+                    data: kind.data(),
+                    source: None,
+                },
+            )],
         })?;
         Ok(object)
     }
 
     pub fn record_network_fact(
-        &mut self, view: ViewContext, input: &NetworkInput, command_id: Uuid,
+        &mut self,
+        view: ViewContext,
+        input: &NetworkInput,
+        command_id: Uuid,
     ) -> Result<Uuid, Error> {
         bounded_text(&input.role)?;
-        if input.subject == input.target || input.ends_before.is_some_and(|end| end <= input.starts_at) {
+        if input.subject == input.target
+            || input.ends_before.is_some_and(|end| end <= input.starts_at)
+        {
             return Err(Error::InvalidInterval);
         }
-        let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let world = author_context(&tx, view)?;
-        let effective = ViewContext { day: WorldDay(input.starts_at), ..view };
+        let effective = ViewContext {
+            day: WorldDay(input.starts_at),
+            ..view
+        };
         let subject = resolved(&tx, effective, input.subject)?;
         let target = resolved(&tx, effective, input.target)?;
         let source = resolved(&tx, effective, input.source)?;
@@ -71,15 +103,27 @@ impl Store {
             return Err(Error::WrongKind);
         }
         match input.kind {
-            NetworkKind::Membership if matches!(subject.record.data, ObjectData::Person) && institution(&target.record.data) => {}
-            NetworkKind::Marriage if matches!(subject.record.data, ObjectData::Person) && matches!(target.record.data, ObjectData::Person) => {}
-            NetworkKind::Succession if institution(&subject.record.data) && institution(&target.record.data) => {}
+            NetworkKind::Membership
+                if matches!(subject.record.data, ObjectData::Person)
+                    && institution(&target.record.data) => {}
+            NetworkKind::Marriage
+                if matches!(subject.record.data, ObjectData::Person)
+                    && matches!(target.record.data, ObjectData::Person) => {}
+            NetworkKind::Succession
+                if institution(&subject.record.data) && institution(&target.record.data) => {}
             NetworkKind::ConfirmedCause | NetworkKind::AllegedCause => {
-                let (ObjectData::HistoricalEvent { occurrence: cause }, ObjectData::HistoricalEvent { occurrence: effect }) =
-                    (&subject.record.data, &target.record.data) else { return Err(Error::WrongKind); };
+                let (
+                    ObjectData::HistoricalEvent { occurrence: cause },
+                    ObjectData::HistoricalEvent { occurrence: effect },
+                ) = (&subject.record.data, &target.record.data)
+                else {
+                    return Err(Error::WrongKind);
+                };
                 if input.kind == NetworkKind::ConfirmedCause {
                     let (Some(a), Some(b)) = (cause.exact_day(), effect.exact_day()) else {
-                        return Err(Error::InvalidInput("confirmed causes require exact event dates"));
+                        return Err(Error::InvalidInput(
+                            "confirmed causes require exact event dates",
+                        ));
                     };
                     if a > b {
                         return Err(Error::InvalidInput("invalid causal order"));
@@ -100,24 +144,41 @@ impl Store {
             return Err(Error::InvalidInput("overlapping network fact"));
         }
         // Conservative whole-history DAG: never allow a confirmed cause or succession cycle.
-        if matches!(input.kind, NetworkKind::ConfirmedCause | NetworkKind::Succession) {
+        if matches!(
+            input.kind,
+            NetworkKind::ConfirmedCause | NetworkKind::Succession
+        ) {
             let mut edges = HashMap::<ObjectRef, Vec<ObjectRef>>::new();
-            let mut stmt = tx.prepare("SELECT subject_id,target_id FROM network_facts
+            let mut stmt = tx.prepare(
+                "SELECT subject_id,target_id FROM network_facts
                 WHERE world_id=?1 AND kind=?2 AND recorded_revision<=?3
-                AND (withdrawn_revision IS NULL OR withdrawn_revision>?3) LIMIT 4001")?;
-            let mut rows = stmt.query(params![view.world.0.as_bytes(),kind,view.revision.0])?;
+                AND (withdrawn_revision IS NULL OR withdrawn_revision>?3) LIMIT 4001",
+            )?;
+            let mut rows = stmt.query(params![view.world.0.as_bytes(), kind, view.revision.0])?;
             let mut count = 0;
             while let Some(row) = rows.next()? {
                 count += 1;
-                if count > 4000 { return Err(Error::QueryBudgetExceeded); }
-                edges.entry(ref_id(view.world,row.get(0)?)).or_default().push(ref_id(view.world,row.get(1)?));
+                if count > 4000 {
+                    return Err(Error::QueryBudgetExceeded);
+                }
+                edges
+                    .entry(ref_id(view.world, row.get(0)?))
+                    .or_default()
+                    .push(ref_id(view.world, row.get(1)?));
             }
             edges.entry(input.subject).or_default().push(input.target);
             if !crate::graph::acyclic(&edges) {
                 return Err(Error::InvalidInput("network cycle"));
             }
         }
-        let rev = append_revision(&tx,&world,world.main,view.revision,command_id,("Local author","Record explicit network fact"))?;
+        let rev = append_revision(
+            &tx,
+            &world,
+            world.main,
+            view.revision,
+            command_id,
+            ("Local author", "Record explicit network fact"),
+        )?;
         let id = Uuid::new_v4();
         tx.execute("INSERT INTO network_facts(world_id,id,subject_id,target_id,source_id,kind,role,starts_at,ends_before,recorded_revision)
             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
@@ -127,63 +188,141 @@ impl Store {
         Ok(id)
     }
 
-    pub fn withdraw_network_fact(&mut self, view: ViewContext, id: Uuid, command_id: Uuid) -> Result<(), Error> {
-        let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let world = author_context(&tx,view)?;
-        let rev = append_revision(&tx,&world,world.main,view.revision,command_id,("Local author","Withdraw network fact"))?;
+    pub fn withdraw_network_fact(
+        &mut self,
+        view: ViewContext,
+        id: Uuid,
+        command_id: Uuid,
+    ) -> Result<(), Error> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let world = author_context(&tx, view)?;
+        let rev = append_revision(
+            &tx,
+            &world,
+            world.main,
+            view.revision,
+            command_id,
+            ("Local author", "Withdraw network fact"),
+        )?;
         let changed = tx.execute("UPDATE network_facts SET withdrawn_revision=?3 WHERE world_id=?1 AND id=?2 AND withdrawn_revision IS NULL",
             params![view.world.0.as_bytes(),id.as_bytes(),rev])?;
-        if changed != 1 { return Err(Error::NotFound); }
+        if changed != 1 {
+            return Err(Error::NotFound);
+        }
         tx.commit()?;
         Ok(())
     }
 
-    pub fn network_facts(&self, view: ViewContext, focus: ObjectRef) -> Result<Vec<NetworkFact>, Error> {
-        author_context(&self.conn,view)?;
-        resolved(&self.conn,view,focus)?;
-        let mut stmt = self.conn.prepare("SELECT id,subject_id,target_id,source_id,kind,role,starts_at,ends_before
+    pub fn network_facts(
+        &self,
+        view: ViewContext,
+        focus: ObjectRef,
+    ) -> Result<Vec<NetworkFact>, Error> {
+        author_context(&self.conn, view)?;
+        resolved(&self.conn, view, focus)?;
+        let mut stmt = self.conn.prepare(
+            "SELECT id,subject_id,target_id,source_id,kind,role,starts_at,ends_before
             FROM network_facts WHERE world_id=?1 AND (subject_id=?2 OR target_id=?2)
             AND recorded_revision<=?3 AND (withdrawn_revision IS NULL OR withdrawn_revision>?3)
-            AND starts_at<=?4 AND (ends_before IS NULL OR ends_before>?4) ORDER BY id LIMIT 501")?;
-        let mut rows = stmt.query(params![view.world.0.as_bytes(),focus.id.0.as_bytes(),view.revision.0,view.day.0])?;
+            AND starts_at<=?4 AND (ends_before IS NULL OR ends_before>?4) ORDER BY id LIMIT 501",
+        )?;
+        let mut rows = stmt.query(params![
+            view.world.0.as_bytes(),
+            focus.id.0.as_bytes(),
+            view.revision.0,
+            view.day.0
+        ])?;
         let mut result = Vec::new();
         let mut count = 0;
         while let Some(row) = rows.next()? {
             self.check_query_control()?;
             count += 1;
-            if count > 500 { return Err(Error::QueryBudgetExceeded); }
-            let subject = ref_id(view.world,row.get(1)?);
-            let target = ref_id(view.world,row.get(2)?);
-            let source = ref_id(view.world,row.get(3)?);
-            let Some(a) = resolve_object(&self.conn,subject,view.branch,view.revision,view.day)? else { continue; };
-            let Some(b) = resolve_object(&self.conn,target,view.branch,view.revision,view.day)? else { continue; };
-            if resolve_object(&self.conn,source,view.branch,view.revision,view.day)?.is_none() { continue; }
+            if count > 500 {
+                return Err(Error::QueryBudgetExceeded);
+            }
+            let subject = ref_id(view.world, row.get(1)?);
+            let target = ref_id(view.world, row.get(2)?);
+            let source = ref_id(view.world, row.get(3)?);
+            let Some(a) =
+                resolve_object(&self.conn, subject, view.branch, view.revision, view.day)?
+            else {
+                continue;
+            };
+            let Some(b) = resolve_object(&self.conn, target, view.branch, view.revision, view.day)?
+            else {
+                continue;
+            };
+            if resolve_object(&self.conn, source, view.branch, view.revision, view.day)?.is_none() {
+                continue;
+            }
             result.push(NetworkFact {
                 id: Uuid::from_bytes(row.get(0)?),
-                input: NetworkInput { subject,target,source,kind:NetworkKind::parse(&row.get::<_,String>(4)?)?,
-                    role:row.get(5)?,starts_at:row.get(6)?,ends_before:row.get(7)? },
-                subject_label:a.record.label,target_label:b.record.label,
+                input: NetworkInput {
+                    subject,
+                    target,
+                    source,
+                    kind: NetworkKind::parse(&row.get::<_, String>(4)?)?,
+                    role: row.get(5)?,
+                    starts_at: row.get(6)?,
+                    ends_before: row.get(7)?,
+                },
+                subject_label: a.record.label,
+                target_label: b.record.label,
             });
         }
         Ok(result)
     }
 
     /// A proposal is explicitly selected from an exact claim version and UTF-8 byte span.
-    pub fn propose_ghost(&mut self, view: ViewContext, claim: ObjectRef, span: (usize,usize),
-        kind: IdentityKind, command_id: Uuid) -> Result<Uuid, Error> {
-        let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let world = author_context(&tx,view)?;
-        let version = resolved(&tx,view,claim)?;
-        let ObjectData::Claim { statement, .. } = &version.record.data else { return Err(Error::WrongKind); };
-        let label = statement.get(span.0..span.1).ok_or(Error::InvalidInput("ghost source span"))?;
+    pub fn propose_ghost(
+        &mut self,
+        view: ViewContext,
+        claim: ObjectRef,
+        span: (usize, usize),
+        kind: IdentityKind,
+        command_id: Uuid,
+    ) -> Result<Uuid, Error> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let world = author_context(&tx, view)?;
+        let version = resolved(&tx, view, claim)?;
+        let ObjectData::Claim { statement, .. } = &version.record.data else {
+            return Err(Error::WrongKind);
+        };
+        let label = statement
+            .get(span.0..span.1)
+            .ok_or(Error::InvalidInput("ghost source span"))?;
         bounded_text(label)?;
-        if label.trim()!=label { return Err(Error::InvalidInput("ghost span whitespace")); }
-        let duplicate: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM ghost_proposals WHERE world_id=?1 AND claim_id=?2
+        if label.trim() != label {
+            return Err(Error::InvalidInput("ghost span whitespace"));
+        }
+        let duplicate: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM ghost_proposals WHERE world_id=?1 AND claim_id=?2
             AND claim_revision=?3 AND start_byte=?4 AND end_byte=?5 AND reviewed_revision IS NULL)",
-            params![view.world.0.as_bytes(),claim.id.0.as_bytes(),version.recorded_at.0,span.0,span.1],|row|row.get(0))?;
-        if duplicate { return Err(Error::InvalidInput("existing ghost proposal")); }
-        let revision=append_revision(&tx,&world,world.main,view.revision,command_id,("Local author","Propose draft identity"))?;
-        let id=Uuid::new_v4();
+            params![
+                view.world.0.as_bytes(),
+                claim.id.0.as_bytes(),
+                version.recorded_at.0,
+                span.0,
+                span.1
+            ],
+            |row| row.get(0),
+        )?;
+        if duplicate {
+            return Err(Error::InvalidInput("existing ghost proposal"));
+        }
+        let revision = append_revision(
+            &tx,
+            &world,
+            world.main,
+            view.revision,
+            command_id,
+            ("Local author", "Propose draft identity"),
+        )?;
+        let id = Uuid::new_v4();
         tx.execute("INSERT INTO ghost_proposals(world_id,id,claim_id,claim_branch,claim_state_revision,claim_revision,start_byte,end_byte,label,kind,day,recorded_revision)
             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",params![view.world.0.as_bytes(),id.as_bytes(),claim.id.0.as_bytes(),
             version.source_branch.0.as_bytes(),version.state_revision.0,version.recorded_at.0,span.0,span.1,label,kind.name(),view.day.0,revision])?;
@@ -191,61 +330,114 @@ impl Store {
         Ok(id)
     }
 
-    pub fn ghost_proposals(&self,view:ViewContext)->Result<Vec<GhostProposal>,Error>{
-        author_context(&self.conn,view)?;
+    pub fn ghost_proposals(&self, view: ViewContext) -> Result<Vec<GhostProposal>, Error> {
+        author_context(&self.conn, view)?;
         let mut stmt=self.conn.prepare("SELECT id,claim_id,label,kind,day,recorded_revision,
             CASE WHEN reviewed_revision<=?2 THEN 1 ELSE 0 END,
             CASE WHEN reviewed_revision<=?2 THEN promoted_id ELSE NULL END
             FROM ghost_proposals WHERE world_id=?1 AND recorded_revision<=?2 ORDER BY recorded_revision,id LIMIT 501")?;
-        let mut rows=stmt.query(params![view.world.0.as_bytes(),view.revision.0])?;
-        let mut result=Vec::new();
-        while let Some(row)=rows.next()?{
-            if result.len()==500{return Err(Error::QueryBudgetExceeded);}
-            result.push(GhostProposal{id:Uuid::from_bytes(row.get(0)?),claim:ref_id(view.world,row.get(1)?),
-                label:row.get(2)?,kind:IdentityKind::parse(&row.get::<_,String>(3)?)?,day:row.get(4)?,
-                recorded_revision:row.get(5)?,reviewed:row.get(6)?,promoted:row.get::<_,Option<[u8;16]>>(7)?.map(|id|ref_id(view.world,id))});
+        let mut rows = stmt.query(params![view.world.0.as_bytes(), view.revision.0])?;
+        let mut result = Vec::new();
+        while let Some(row) = rows.next()? {
+            if result.len() == 500 {
+                return Err(Error::QueryBudgetExceeded);
+            }
+            result.push(GhostProposal {
+                id: Uuid::from_bytes(row.get(0)?),
+                claim: ref_id(view.world, row.get(1)?),
+                label: row.get(2)?,
+                kind: IdentityKind::parse(&row.get::<_, String>(3)?)?,
+                day: row.get(4)?,
+                recorded_revision: row.get(5)?,
+                reviewed: row.get(6)?,
+                promoted: row
+                    .get::<_, Option<[u8; 16]>>(7)?
+                    .map(|id| ref_id(view.world, id)),
+            });
         }
         Ok(result)
     }
 
     /// Promote a new identity or dismiss. Reject stale source evidence and exact duplicate names.
-    pub fn review_ghost(&mut self,view:ViewContext,id:Uuid,promote:bool,command_id:Uuid)->Result<Option<ObjectRef>,Error>{
-        let tx=self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let world=author_context(&tx,view)?;
+    pub fn review_ghost(
+        &mut self,
+        view: ViewContext,
+        id: Uuid,
+        promote: bool,
+        command_id: Uuid,
+    ) -> Result<Option<ObjectRef>, Error> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let world = author_context(&tx, view)?;
         let (claim,branch,state,recorded,label,kind,day):([u8;16],[u8;16],i64,i64,String,String,i64)=tx.query_row(
             "SELECT claim_id,claim_branch,claim_state_revision,claim_revision,label,kind,day FROM ghost_proposals
              WHERE world_id=?1 AND id=?2 AND reviewed_revision IS NULL",
             params![view.world.0.as_bytes(),id.as_bytes()],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?)))
             .optional()?.ok_or(Error::NotFound)?;
-        let revision=append_revision(&tx,&world,world.main,view.revision,command_id,("Local author","Review draft identity"))?;
-        let object=if promote {
-            let effective=ViewContext{day:WorldDay(day),..view};
-            let latest=resolved(&tx,effective,ref_id(view.world,claim))?;
-            if latest.source_branch.0.as_bytes()!=&branch || latest.state_revision.0!=state || latest.recorded_at.0!=recorded {
+        let revision = append_revision(
+            &tx,
+            &world,
+            world.main,
+            view.revision,
+            command_id,
+            ("Local author", "Review draft identity"),
+        )?;
+        let object = if promote {
+            let effective = ViewContext {
+                day: WorldDay(day),
+                ..view
+            };
+            let latest = resolved(&tx, effective, ref_id(view.world, claim))?;
+            if latest.source_branch.0.as_bytes() != &branch
+                || latest.state_revision.0 != state
+                || latest.recorded_at.0 != recorded
+            {
                 return Err(Error::InvalidInput("ghost source changed"));
             }
             // Registry scan is deliberately bounded, and never silently drops possible duplicates.
-            let mut stmt=tx.prepare("SELECT id FROM objects WHERE world_id=?1 AND kind=?2 LIMIT 10001")?;
-            let mut rows=stmt.query(params![view.world.0.as_bytes(),kind])?;
-            let mut count=0;
-            while let Some(row)=rows.next()?{
-                count+=1;
-                if count>10000{return Err(Error::QueryBudgetExceeded);}
-                let candidate=ref_id(view.world,row.get(0)?);
-                if resolve_object(&tx,candidate,view.branch,view.revision,WorldDay(day))?
-                    .is_some_and(|v|v.record.label.trim().to_lowercase()==label.to_lowercase()){
+            let mut stmt =
+                tx.prepare("SELECT id FROM objects WHERE world_id=?1 AND kind=?2 LIMIT 10001")?;
+            let mut rows = stmt.query(params![view.world.0.as_bytes(), kind])?;
+            let mut count = 0;
+            while let Some(row) = rows.next()? {
+                count += 1;
+                if count > 10000 {
+                    return Err(Error::QueryBudgetExceeded);
+                }
+                let candidate = ref_id(view.world, row.get(0)?);
+                if resolve_object(&tx, candidate, view.branch, view.revision, WorldDay(day))?
+                    .is_some_and(|v| v.record.label.trim().to_lowercase() == label.to_lowercase())
+                {
                     return Err(Error::InvalidInput("duplicate identity requires review"));
                 }
             }
-            let object=ObjectRef::new(view.world);
-            write_version(&tx,world.main,revision,revision,object,&Record{
-                label,valid:ValidInterval{start:Some(WorldDay(day)),end_exclusive:None},data:IdentityKind::parse(&kind)?.data(),
-                source:latest.record.source,
-            },true)?;
-            tx.execute("INSERT INTO invalidations(world_id,revision,object_id) VALUES(?1,?2,?3)",
-                params![view.world.0.as_bytes(),revision,object.id.0.as_bytes()])?;
+            let object = ObjectRef::new(view.world);
+            write_version(
+                &tx,
+                world.main,
+                revision,
+                revision,
+                object,
+                &Record {
+                    label,
+                    valid: ValidInterval {
+                        start: Some(WorldDay(day)),
+                        end_exclusive: None,
+                    },
+                    data: IdentityKind::parse(&kind)?.data(),
+                    source: latest.record.source,
+                },
+                true,
+            )?;
+            tx.execute(
+                "INSERT INTO invalidations(world_id,revision,object_id) VALUES(?1,?2,?3)",
+                params![view.world.0.as_bytes(), revision, object.id.0.as_bytes()],
+            )?;
             Some(object)
-        }else{None};
+        } else {
+            None
+        };
         tx.execute("UPDATE ghost_proposals SET reviewed_revision=?3,promoted_id=?4 WHERE world_id=?1 AND id=?2",
             params![view.world.0.as_bytes(),id.as_bytes(),revision,object.map(|v|*v.id.0.as_bytes())])?;
         tx.commit()?;

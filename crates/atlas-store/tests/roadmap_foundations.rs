@@ -1808,7 +1808,8 @@ fn institutional_network_ghost_and_public_projection() -> Result<(), Error> {
     let mut store = Store::open(":memory:")?;
     let world = seed(&mut store)?;
     let mut author = view(&world, 13);
-    let group = store.create_identity(author, IdentityKind::Organization, "Guild", Uuid::new_v4())?;
+    let group =
+        store.create_identity(author, IdentityKind::Organization, "Guild", Uuid::new_v4())?;
     author.revision = AuthorRevision(2);
     let kind = query(QueryFilter::Kind(ObjectKindFilter::Organization));
     assert_eq!(store.execute_query(&kind, author)?.rows[0].object, group);

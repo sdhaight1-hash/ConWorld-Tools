@@ -181,53 +181,53 @@ impl Store {
         target: ObjectRef,
         limit: usize,
     ) -> Result<EntryBacklinks, Error> {
-    let mut result = EntryBacklinks {
-        matches: Vec::new(),
-        truncated: false,
-    };
-    if !self.entry_link_target_visible(view, target)? {
-        return Ok(result);
-    }
-    let mut stmt = self.conn.prepare(
-        "SELECT DISTINCT l.entry_id FROM entry_link_index l
+        let mut result = EntryBacklinks {
+            matches: Vec::new(),
+            truncated: false,
+        };
+        if !self.entry_link_target_visible(view, target)? {
+            return Ok(result);
+        }
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT l.entry_id FROM entry_link_index l
          WHERE l.world_id=?1 AND l.target_id=?2 AND l.revision<=?3
            AND l.revision=(SELECT MAX(v.revision) FROM entry_layout_versions v
                WHERE v.world_id=l.world_id AND v.entry_id=l.entry_id AND v.revision<=?3)
          ORDER BY l.entry_id",
-    )?;
-    let ids = stmt.query_map(
-        params![
-            view.world.0.as_bytes(),
-            target.id.0.as_bytes(),
-            view.revision.0
-        ],
-        |row| row.get::<_, [u8; 16]>(0),
-    )?;
-    for id in ids {
-        self.check_query_control()?;
-        let source = ObjectRef {
-            world: view.world,
-            id: ObjectId(Uuid::from_bytes(id?)),
-        };
-        let Some((document, _)) = read_layout_at(&self.conn, view, source)? else {
-            continue;
-        };
-        for (element, link) in document.visible_links(view.scope) {
-            if link.target != target {
+        )?;
+        let ids = stmt.query_map(
+            params![
+                view.world.0.as_bytes(),
+                target.id.0.as_bytes(),
+                view.revision.0
+            ],
+            |row| row.get::<_, [u8; 16]>(0),
+        )?;
+        for id in ids {
+            self.check_query_control()?;
+            let source = ObjectRef {
+                world: view.world,
+                id: ObjectId(Uuid::from_bytes(id?)),
+            };
+            let Some((document, _)) = read_layout_at(&self.conn, view, source)? else {
                 continue;
+            };
+            for (element, link) in document.visible_links(view.scope) {
+                if link.target != target {
+                    continue;
+                }
+                if result.matches.len() == limit {
+                    result.truncated = true;
+                    return Ok(result);
+                }
+                result.matches.push(EntryBacklink {
+                    source,
+                    element,
+                    label: link.label.clone(),
+                });
             }
-            if result.matches.len() == limit {
-                result.truncated = true;
-                return Ok(result);
-            }
-            result.matches.push(EntryBacklink {
-                source,
-                element,
-                label: link.label.clone(),
-            });
         }
-    }
-    Ok(result)
+        Ok(result)
     }
 
     /// Dynamic reader component exposes only already-released explicit references.
