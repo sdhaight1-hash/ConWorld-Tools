@@ -3737,6 +3737,101 @@ fn site_area_preserves_unknown_zero_units_corrections_and_archive() -> Result<()
         ),
         Err(Error::CapabilityDenied)
     ));
+    // A fork-local correction must agree in the point and query paths
+    // without invalidating the main or an earlier historical result.
+    let fork = store.fork(&ForkCommand {
+        world: world.id,
+        parent: world.main,
+        day: WorldDay(20),
+        expected: author.revision,
+        id: Uuid::new_v4(),
+        author: "Fixture".into(),
+        rationale: "Alternative survey".into(),
+        scope: Scope::Author,
+    })?;
+    let inherited = ViewContext {
+        branch: fork.id,
+        revision: fork.created_revision,
+        ..later
+    };
+    let inherited_fact = store.site_area(inherited, place)?.unwrap();
+    let branch_input = SiteAreaInput {
+        descriptor: DefinitionPin {
+            version: store.get_object(descriptor, inherited)?.unwrap().reference(),
+        },
+        reading: AreaReading::Known {
+            amount: 5,
+            unit: AreaUnit::Hectare,
+        },
+        ..next
+    };
+    store.record_site_area(
+        inherited,
+        branch_input,
+        Some(inherited_fact.id),
+        Uuid::new_v4(),
+    )?;
+    let branch = ViewContext {
+        revision: AuthorRevision(fork.created_revision.0 + 1),
+        ..inherited
+    };
+    let current_main = ViewContext {
+        branch: world.main,
+        ..branch
+    };
+    for (context, expected) in [
+        (inherited, next),
+        (branch, branch_input),
+        (current_main, next),
+    ] {
+        assert_eq!(store.site_area(context, place)?.unwrap().input, expected);
+        let unknown_rows = store.execute_query(&unknown, context)?.rows;
+        let known_rows = store.execute_query(&zero, context)?.rows;
+        assert_eq!(
+            unknown_rows.iter().any(|row| row.object == place),
+            expected.reading == AreaReading::Unknown
+        );
+        assert_eq!(
+            known_rows.iter().any(|row| row.object == place),
+            matches!(
+                expected.reading,
+                AreaReading::Known {
+                    unit: AreaUnit::Hectare,
+                    ..
+                }
+            )
+        );
+    }
+    let control = atlas_store::query::QueryControl::new(std::time::Duration::from_secs(30))?;
+    control.cancel();
+    assert!(matches!(
+        store.execute_query_controlled(&unknown, current_main, &control),
+        Err(Error::QueryCancelled)
+    ));
+    assert_eq!(
+        store.execute_query(&unknown, current_main)?.rows[0].object,
+        place
+    );
+    let unsupported = QuerySpec {
+        schema_version: QUERY_SCHEMA_VERSION + 1,
+        ..unknown.clone()
+    };
+    assert!(matches!(
+        store.execute_query(&unsupported, current_main),
+        Err(Error::InvalidInput("query schema or result limit"))
+    ));
+    for scope in [Scope::Public, Scope::Character(id(&world, 1))] {
+        assert!(matches!(
+            store.execute_query(
+                &unknown,
+                ViewContext {
+                    scope,
+                    ..current_main
+                }
+            ),
+            Err(Error::CapabilityDenied)
+        ));
+    }
     let backup = dir.path().join("backup.sqlite");
     let restored = dir.path().join("restored.sqlite");
     store.backup_to(&backup, Scope::Author)?;
@@ -3749,6 +3844,14 @@ fn site_area_preserves_unknown_zero_units_corrections_and_archive() -> Result<()
     assert_eq!(
         reopened.site_area(later, place)?,
         store.site_area(later, place)?
+    );
+    assert_eq!(
+        reopened.site_area(branch, place)?,
+        store.site_area(branch, place)?
+    );
+    assert_eq!(
+        reopened.execute_query(&zero, branch)?.rows,
+        store.execute_query(&zero, branch)?.rows
     );
     Ok(())
 }

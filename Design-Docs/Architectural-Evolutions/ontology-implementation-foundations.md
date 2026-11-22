@@ -103,3 +103,5 @@ The desktop regression writes chronological UTC annotation form/list captures to
 ## AE-05/06 inspection invalidation
 
 The network/semantic inspector now invalidates stale results and action controls on focus edits, branch switches, new reads and writes. Each read has a generation token and historical context; late replies cannot overwrite a newer result. Pinned historical annotation inspection remains enabled while mutation is disabled. Added deferred mock-native response regression. Exact-head CI pending.
+
+AE-05 regression now checks area point/query parity through a branch-local correction, inherited and main history, cancellation followed by successful read, unsupported query version and both public and character scope denial. Archive replay verifies the branch correction's query output. Annotation selection and branch-list responses also use invalidation. New tests await CI.

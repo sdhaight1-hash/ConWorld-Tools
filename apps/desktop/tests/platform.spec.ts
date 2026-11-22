@@ -2404,6 +2404,7 @@ test("semantic inspection invalidates pending replies and stale actions when foc
                   Object.assign(window, { __semanticPending: true });
                 });
               }
+              if (args.subjectId === "old") Object.assign(window, { __semanticReleased: true });
               return [{ id: String(args.subjectId), profile: String(args.subjectId), descriptor_id: "tag",
                 descriptor_revision: 3, source_id: "folio", starts_at: 0, ends_before: null, recorded_at: 4 }];
             }
@@ -2426,6 +2427,8 @@ test("semantic inspection invalidates pending replies and stale actions when foc
   await inspect.click();
   await expect(results).toContainText("new");
   await page.evaluate(() => (window as unknown as { __releaseSemantic: () => void }).__releaseSemantic());
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __semanticReleased?: boolean }).__semanticReleased)).toBe(true);
+  await expect(results).toContainText("new");
   await expect(results).not.toContainText("old");
   await focus.fill("different");
   await expect(results).toBeEmpty();

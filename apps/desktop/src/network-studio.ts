@@ -155,8 +155,9 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
   };
   host.querySelector<HTMLButtonElement>("[data-load-branches]")!.onclick=async()=>{
     try {
-      const branches=await invoke<{id:string;day:number|null;created_revision:number}[]>("workspace_metadata_branches",{request});
-      if(!valid())return;
+      const {ctx,current}=beginInspection();
+      const branches=await invoke<{id:string;day:number|null;created_revision:number}[]>("workspace_metadata_branches",{request:ctx});
+      if(!current())return;
       chooser.replaceChildren();
       for(const branch of branches)chooser.add(new Option(branch.day===null?"Main history":"Fork day "+branch.day+" · "+branch.id,branch.day===null?"":branch.id));
       chooser.value=request.branch_id??"";chooser.hidden=false;
@@ -249,8 +250,10 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
         annotate.onclick = () => {
           const f = form("[data-fact-annotation]");
           (f.elements.namedItem("family") as HTMLSelectElement).value = fact.reference.family;
-          (f.elements.namedItem("fact") as HTMLInputElement).value = fact.reference.id;
-          (f.elements.namedItem("claim") as HTMLInputElement).focus();
+          const input = f.elements.namedItem("fact") as HTMLInputElement;
+          input.value = fact.reference.id;
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          (editable ? f.elements.namedItem("claim") as HTMLInputElement : input).focus();
         };
         row.append(inspect, annotate); list.append(row);
       }
