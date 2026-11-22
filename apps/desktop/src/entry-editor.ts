@@ -4,10 +4,11 @@ import type { ParameterValue, SavedQuery } from "./author-workspace";
 import { publicReader, layoutContainer, type ObjectLink, type Backlinks } from "./public-reader";
 import { editCanvasTree } from "./canvas-tree";
 
-type Binding = { world: string; query_id: string; definition_revision: number;
+export type Binding = { world: string; query_id: string; definition_revision: number;
   bindings: { name: string; value: ParameterValue }[] };
 export type Block = { id: string; audience: string; content: { Text?: string; Stack?: Block[]; Panel?: Block[];
-  Grid?: { columns: number; children: Block[] }; SavedQuery?: Binding; ObjectLink?: ObjectLink; Query?: unknown } };
+  Grid?: { columns: number; children: Block[] }; Template?: { key: string; version: number; children: Block[] };
+  SavedQuery?: Binding; ObjectLink?: ObjectLink; Query?: unknown } };
 type Document = { schema_version: number; entry: { world: string; id: string }; root: Block };
 type Display = { content: { Text?: string; Stack?: Display[]; Panel?: Display[];
   Grid?: { columns: number; children: Display[] }; ObjectLink?: ObjectLink;
@@ -144,7 +145,7 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
       simpleFields.hidden = true;
       treeButton.hidden = true;
       treeHost.hidden = false;
-      const tree = editCanvasTree(treeHost, document.root, worldId, editable, clearAuthorPreview);
+      const tree = editCanvasTree(treeHost, document.root, worldId, entryId, revision, editable, clearAuthorPreview);
       currentDraft = () => ({ ...document, root: tree.root() });
     }
     function installEditorActions() {

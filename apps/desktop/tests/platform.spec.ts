@@ -1968,3 +1968,78 @@ test("Canvas tree nests and moves stable components without widening inherited a
   await inspector.getByRole("button", { name: "Open character page" }).click();
   await expect(inspector.getByRole("button", { name: "Save page" })).toBeDisabled();
 });
+
+test("Canvas template instances and multiple query bindings save together without rewriting earlier pins", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "archive", name: "Archive", revision: 4 };
+    const writes: unknown[] = [];
+    let saved: unknown = null;
+    Object.assign(window, {
+      isTauri: true, __templateWrites: writes,
+      __TAURI_INTERNALS__: {
+        invoke: async (command: string, args: Record<string, unknown>) => {
+          if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+          if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+          if (command === "workspace_worlds") return [{ ...world }];
+          if (command === "workspace_snapshot") return {
+            world: { ...world }, day: args.day, view_revision: args.revision ?? world.revision,
+            people: [{ id: "alice", label: "Alice" }], relationships: [], events: [], definitions: [],
+          };
+          if (command === "workspace_saved_queries") return [
+            { id: "query", name: "People", mode: "contains", term: "Alice", limit: 20, recorded_at: 2,
+              parameters: [{ name: "name", default: { type: "text", value: "Alice" } }] },
+          ];
+          if (command === "workspace_entry_layout") return saved;
+          if (command === "workspace_save_layout") {
+            writes.push(args.document);
+            saved = [args.document, args.published];
+            world.revision++;
+            return null;
+          }
+          if (command === "workspace_preview_author_layout") return { content: { Text: "Compiled preview" } };
+          throw new Error("Unexpected mock command: " + command);
+        },
+      },
+    });
+  });
+  await page.goto("/");
+  const graph = page.getByRole("region", { name: "Saved world graph" });
+  const inspector = graph.getByRole("complementary", { name: "Node inspector" });
+  await graph.locator("#nodes button[data-node=alice]").click();
+  await inspector.getByRole("button", { name: "Open character page" }).click();
+  await inspector.getByRole("textbox", { name: "Page text", exact: true }).fill("Biography");
+  await inspector.getByRole("button", { name: "Open Canvas tree" }).click();
+  const root = inspector.getByRole("button", { name: /^Stack ·/ }).first();
+  await inspector.getByLabel("Canvas template").selectOption("character");
+  await inspector.getByRole("button", { name: "Insert template" }).click();
+  await expect(inspector.getByText("Template: character · version 1")).toBeVisible();
+  await root.click();
+  await inspector.getByLabel("New component kind").selectOption("SavedQuery");
+  await inspector.getByRole("button", { name: "Add child" }).click();
+  await inspector.getByLabel("Query parameter name").fill("First");
+  await root.click();
+  await inspector.getByLabel("New component kind").selectOption("SavedQuery");
+  await inspector.getByRole("button", { name: "Add child" }).click();
+  await inspector.getByLabel("Query parameter name").fill("Second");
+  if (process.env.ATLAS_CAPTURE_PHASE3 === "1") {
+    const timestamp = new Date().toISOString().slice(0, 19).replace("T", "_").replaceAll(":", "-") + "Z";
+    await inspector.screenshot({
+      path: "../../Development-Screenshots/" + timestamp + "_phase-04_canvas_mock-native-template-query_01.png",
+      animations: "disabled",
+    });
+  }
+  await inspector.getByRole("button", { name: "Save page" }).click();
+  await inspector.getByRole("button", { name: "Open character page" }).click();
+  await expect(inspector.getByRole("button", { name: "Template · character" })).toBeVisible();
+  const writes = await page.evaluate(() => (window as unknown as { __templateWrites: unknown[] }).__templateWrites);
+  expect(writes).toMatchObject([{ root: { content: { Stack: [
+    { content: { Text: "Biography" } }, { content: { Text: "" } },
+    { audience: "Author", content: { Template: { key: "character", version: 1 } } },
+    { audience: "Author", content: { SavedQuery: { definition_revision: 2, bindings: [
+      { name: "name", value: { type: "text", value: "First" } },
+    ] } } },
+    { audience: "Author", content: { SavedQuery: { definition_revision: 2, bindings: [
+      { name: "name", value: { type: "text", value: "Second" } },
+    ] } } },
+  ] } } }]);
+});

@@ -1619,3 +1619,82 @@ fn grid_and_panel_preserve_visibility_search_backlinks_and_moved_bindings() -> R
     );
     Ok(())
 }
+
+#[test]
+fn versioned_template_keeps_queries_private_and_persists_independent_instances() -> Result<(), Error> {
+    use atlas_store::layout::TemplateKind;
+
+    let mut store = Store::open(":memory:")?;
+    let world = seed(&mut store)?;
+    let mut author = view(&world, 13);
+    let block = |audience, content| LayoutElement {
+        id: ElementId(Uuid::new_v4()),
+        audience,
+        content,
+    };
+    let template = block(
+        ClaimAudience::Author,
+        ElementContent::Template {
+            key: TemplateKind::Character,
+            version: 1,
+            children: vec![
+                block(
+                    ClaimAudience::Public,
+                    ElementContent::Text("Private template biography".into()),
+                ),
+                block(
+                    ClaimAudience::Public,
+                    ElementContent::Query(query(QueryFilter::ExactLabel("Alice Vale".into()))),
+                ),
+            ],
+        },
+    );
+    let mut document = LayoutDocument {
+        schema_version: LAYOUT_SCHEMA_VERSION,
+        entry: id(&world, 1),
+        root: block(
+            ClaimAudience::Public,
+            ElementContent::Stack(vec![template]),
+        ),
+    };
+    let mut invalid = document.clone();
+    if let ElementContent::Stack(children) = &mut invalid.root.content
+        && let ElementContent::Template { version, .. } = &mut children[0].content
+    {
+        *version = 2;
+    }
+    assert!(matches!(invalid.validate(), Err(Error::InvalidInput(_))));
+    if let ElementContent::Stack(children) = &mut invalid.root.content
+        && let ElementContent::Template { version, .. } = &mut children[0].content
+    {
+        *version = 1;
+        children[0].audience = ClaimAudience::Public;
+    }
+    assert!(matches!(
+        store.save_entry_layout(author, &invalid, true, Uuid::new_v4()),
+        Err(Error::CapabilityDenied)
+    ));
+    author.revision = store.save_entry_layout(author, &document, true, Uuid::new_v4())?;
+    let public = ViewContext {
+        scope: Scope::Public,
+        ..author
+    };
+    let page = store.display_entry(public, document.entry)?.unwrap();
+    assert_eq!(page.content, DisplayContent::Stack(vec![]));
+    assert_eq!(
+        store.entry_layout(author, document.entry)?,
+        Some((document.clone(), true))
+    );
+    let prior = author;
+    if let ElementContent::Stack(children) = &mut document.root.content
+        && let ElementContent::Template { children, .. } = &mut children[0].content
+    {
+        children[0].content = ElementContent::Text("Revised private biography".into());
+    }
+    author.revision = store.save_entry_layout(author, &document, true, Uuid::new_v4())?;
+    assert_ne!(
+        store.entry_layout(prior, document.entry)?,
+        store.entry_layout(author, document.entry)?
+    );
+    Ok(())
+}

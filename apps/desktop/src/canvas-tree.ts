@@ -1,9 +1,12 @@
-import type { Block } from "./entry-editor";
+import { invoke } from "@tauri-apps/api/core";
+import type { Block, Binding } from "./entry-editor";
+import type { SavedQuery, ParameterValue } from "./author-workspace";
+import { templates, instantiateTemplate, historicalComponent } from "./canvas-templates";
 
 // This is a draft-only editor. The Rust compiler/store validates the entire tree
 // before save and owns publication; no new persistence or authority lives here.
 function children(block: Block): Block[] | undefined {
-  return block.content.Stack ?? block.content.Panel ?? block.content.Grid?.children;
+  return block.content.Stack ?? block.content.Panel ?? block.content.Grid?.children ?? block.content.Template?.children;
 }
 
 function kind(block: Block): string {
@@ -19,9 +22,27 @@ function restrict(audience: string, enclosing: string): string {
 type Row = { block: Block; parent?: Row; depth: number; effective: string };
 
 export function editCanvasTree(host: HTMLElement, original: Block, worldId: string,
-  editable: boolean, changed: () => void) {
+  entryId: string, revision: number, editable: boolean, changed: () => void) {
   const root = structuredClone(original);
   let selected = root.id;
+  const definitions = new Map<string, SavedQuery>();
+  const loaded = new Set<number>();
+  const key = (id: string, rev: number) => id + "@" + rev;
+  let queryError = "";
+  async function loadQueries(at: number) {
+    if (loaded.has(at)) return;
+    loaded.add(at);
+    try {
+      const queries = await invoke<SavedQuery[]>("workspace_saved_queries", { worldId, revision: at });
+      for (const query of queries) definitions.set(key(query.id, query.recorded_at), query);
+    } catch (error) {
+      queryError = String(error);
+    }
+    if (host.isConnected) render();
+  }
+  function newBinding(query: SavedQuery): Binding {
+    return { world: worldId, query_id: query.id, definition_revision: query.recorded_at, bindings: [] };
+  }
   const message = document.createElement("p");
   message.setAttribute("role", "status");
   const heading = document.createElement("h4");
@@ -79,7 +100,8 @@ export function editCanvasTree(host: HTMLElement, original: Block, worldId: stri
     controls.replaceChildren();
     for (const item of all) {
       const line = button(kind(item.block) + " · " +
-        (item.block.content.Text?.slice(0, 38) || item.block.content.ObjectLink?.label || item.block.id.slice(0, 8)), () => {
+        (item.block.content.Text?.slice(0, 38) || item.block.content.ObjectLink?.label
+          || item.block.content.Template?.key || item.block.id.slice(0, 8)), () => {
         selected = item.block.id;
         render();
       });
@@ -124,6 +146,65 @@ export function editCanvasTree(host: HTMLElement, original: Block, worldId: stri
       columns.addEventListener("change", () => { node.content.Grid!.columns = Number(columns.value); changed(); });
       field("Grid columns", columns);
     }
+    if (node.content.Template) {
+      const pin = document.createElement("p");
+      pin.textContent = "Template: " + node.content.Template.key + " · version " + node.content.Template.version;
+      controls.append(pin);
+    }
+    if (node.content.Query) {
+      const description = document.createElement("p");
+      description.textContent = "Historical query · follows the selected day and revision. Author only.";
+      controls.append(description);
+    }
+    if (node.content.SavedQuery) {
+      const binding = node.content.SavedQuery;
+      const pinned = key(binding.query_id, binding.definition_revision);
+      if (!definitions.has(pinned)) void loadQueries(binding.definition_revision);
+      const choices = document.createElement("select");
+      if (!definitions.has(pinned)) choices.add(new Option("Unavailable pin · " + pinned, pinned));
+      for (const [value, definition] of definitions) {
+        choices.add(new Option(definition.name + " · revision " + definition.recorded_at, value));
+      }
+      choices.value = pinned;
+      choices.disabled = !editable;
+      choices.addEventListener("change", () => {
+        const definition = definitions.get(choices.value);
+        if (!definition) return;
+        node.content.SavedQuery = newBinding(definition);
+        node.audience = "Author";
+        commit("Query definition changed explicitly.");
+      });
+      field("Saved query definition", choices);
+      for (const parameter of definitions.get(pinned)?.parameters ?? []) {
+        const value = binding.bindings.find(item => item.name === parameter.name)?.value ?? parameter.default;
+        let input: HTMLInputElement | HTMLSelectElement;
+        if (parameter.default.type === "object_kind") {
+          input = document.createElement("select");
+          for (const kind of ["person", "definition", "relationship", "event_involvement", "actor_action",
+            "historical_event", "source", "claim"]) input.add(new Option(kind.replaceAll("_", " "), kind));
+        } else {
+          input = document.createElement("input");
+          input.maxLength = parameter.default.type === "source" ? 36 : 800;
+        }
+        input.value = value.type === "source" ? value.source_id : value.value;
+        input.required = true;
+        input.disabled = !editable;
+        input.addEventListener("input", () => {
+          const bound: ParameterValue = parameter.default.type === "source"
+            ? { type: "source", world_id: worldId, source_id: input.value }
+            : { type: parameter.default.type, value: input.value };
+          binding.bindings = binding.bindings.filter(item => item.name !== parameter.name);
+          binding.bindings.push({ name: parameter.name, value: bound });
+          changed();
+        });
+        field("Query parameter " + parameter.name, input);
+      }
+    }
+    if (queryError) {
+      const warning = document.createElement("p");
+      warning.textContent = "Saved query definitions unavailable: " + queryError;
+      controls.append(warning);
+    }
     const audience = document.createElement("select");
     audience.add(new Option("Private", "Author"));
     audience.add(new Option("Public", "Public"));
@@ -131,7 +212,7 @@ export function editCanvasTree(host: HTMLElement, original: Block, worldId: stri
       audience.add(new Option("Existing character audience", "character"));
       audience.value = "character";
     } else audience.value = node.audience;
-    audience.disabled = !editable || node === root;
+    audience.disabled = !editable || node === root || !!node.content.SavedQuery || !!node.content.Query;
     audience.addEventListener("change", () => {
       if (audience.value === "character") return;
       node.audience = audience.value;
@@ -144,9 +225,12 @@ export function editCanvasTree(host: HTMLElement, original: Block, worldId: stri
     if (slot) {
       const add = document.createElement("select");
       for (const label of ["Text", "Stack", "Panel", "Grid", "ObjectLink"]) add.add(new Option(label, label));
+      if (definitions.size) add.add(new Option("Saved query table", "SavedQuery"));
       field("New component kind", add);
       controls.append(button("Add child", () => {
-        const content: Block["content"] = add.value === "Text" ? { Text: "" } :
+        const first = definitions.values().next().value;
+        const content: Block["content"] = add.value === "SavedQuery" && first ? { SavedQuery: newBinding(first) } :
+          add.value === "Text" ? { Text: "" } :
           add.value === "Stack" ? { Stack: [] } : add.value === "Panel" ? { Panel: [] } :
             add.value === "Grid" ? { Grid: { columns: 2, children: [] } } :
               { ObjectLink: { target: { world: worldId, id: "" }, label: "" } };
@@ -154,6 +238,29 @@ export function editCanvasTree(host: HTMLElement, original: Block, worldId: stri
         slot.push(child);
         selected = child.id;
         commit("Added private " + add.value + ".");
+      }, all.length >= 512 || row.depth >= 16));
+      const templateChoice = document.createElement("select");
+      for (const item of templates) templateChoice.add(new Option(item.label + " · v1", item.key));
+      field("Canvas template", templateChoice);
+      controls.append(button("Insert template", () => {
+        const template = instantiateTemplate(templateChoice.value, worldId, entryId);
+        if (!template) return;
+        slot.push(template);
+        selected = template.id;
+        commit("Inserted version-pinned template; existing components unchanged.");
+      }, all.length > 494 || row.depth > 12));
+      const history = document.createElement("select");
+      for (const [value, label] of [["person_events", "Person event history"], ["actors", "Event actors"],
+        ["witnesses", "Event witnesses"], ["victims", "Event victims"], ["stakeholders", "Event stakeholders"]]) {
+        history.add(new Option(label, value));
+      }
+      field("Historical component", history);
+      controls.append(button("Add historical component", () => {
+        const child = historicalComponent(history.value, worldId, entryId);
+        if (!child) return;
+        slot.push(child);
+        selected = child.id;
+        commit("Added private live historical query.");
       }, all.length >= 512 || row.depth >= 16));
     }
     if (!siblings || !row.parent) return;
@@ -199,5 +306,6 @@ export function editCanvasTree(host: HTMLElement, original: Block, worldId: stri
   }
 
   render();
+  void loadQueries(revision);
   return { root: () => structuredClone(root) };
 }
