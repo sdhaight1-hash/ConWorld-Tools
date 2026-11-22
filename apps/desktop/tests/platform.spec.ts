@@ -2351,6 +2351,17 @@ test("classification authoring and evidence backlinks use historical author comm
   await studio.getByLabel("Annotation fact UUID").fill("classification");
   await studio.getByRole("button", { name: "Inspect annotations" }).click();
   await expect(studio.locator("[data-annotations]")).toContainText("Claim claim");
+  if (process.env.ATLAS_CAPTURE_PHASE3 === "1") {
+    const timestamp = new Date().toISOString().slice(0, 19).replace("T", "_").replaceAll(":", "-") + "Z";
+    await studio.locator("[data-fact-annotation]").screenshot({
+      path: "../../Development-Screenshots/" + timestamp + "_phase-03_semantic_mock-native-annotation-form_01.png",
+      animations: "disabled",
+    });
+    await studio.locator("[data-annotations]").screenshot({
+      path: "../../Development-Screenshots/" + timestamp + "_phase-03_semantic_mock-native-annotation-list_02.png",
+      animations: "disabled",
+    });
+  }
   await studio.getByLabel("Retire Tag definition UUID").fill("tag");
   await studio.getByLabel("Confirm retirement").check();
   await studio.getByRole("button", { name: "Retire descriptor", exact: true }).click();

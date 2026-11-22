@@ -180,3 +180,11 @@ jobs:
           path: Development-Screenshots/*_phase-04_canvas_mock-native-image-hotspots_01.png
           if-no-files-found: error
           retention-days: 30
+      - name: Upload semantic authoring browser captures
+        if: runner.os == 'Linux' && success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: phase-03-semantic-annotation
+          path: Development-Screenshots/*_phase-03_semantic_mock-native-annotation-*.png
+          if-no-files-found: error
+          retention-days: 30
