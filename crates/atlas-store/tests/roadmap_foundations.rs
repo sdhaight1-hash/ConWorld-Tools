@@ -4094,11 +4094,147 @@ fn site_area_preserves_unknown_zero_units_corrections_and_archive() -> Result<()
             Err(Error::CapabilityDenied)
         ));
     }
+    // Bind the same canonical site-area predicate to a published Place page.
+    // The query remains author-only; the reader sees only released prose,
+    // including at a day where the typed area is unknown.
+    use atlas_store::{layout::SavedQueryBinding, query::SaveNamedLabelQuery};
+    let saved = store.save_named_label_query(SaveNamedLabelQuery {
+        world_id: world.id,
+        expected: current_main.revision,
+        query_id: None,
+        name: "Sites with explicitly unknown area",
+        spec: &unknown,
+        command_id: Uuid::new_v4(),
+        scope: Scope::Author,
+    })?;
+    let layout_view = ViewContext {
+        revision: saved.recorded_at,
+        ..current_main
+    };
+    let binding = SavedQueryBinding {
+        world: world.id,
+        query_id: saved.id,
+        definition_revision: saved.recorded_at.0,
+        bindings: vec![],
+    };
+    let query_element = ElementId(Uuid::new_v4());
+    let text_element = ElementId(Uuid::new_v4());
+    let document = LayoutDocument {
+        schema_version: LAYOUT_SCHEMA_VERSION,
+        entry: place,
+        root: LayoutElement {
+            id: ElementId(Uuid::new_v4()),
+            audience: ClaimAudience::Public,
+            content: ElementContent::Stack(vec![
+                LayoutElement {
+                    id: text_element,
+                    audience: ClaimAudience::Public,
+                    content: ElementContent::Text("Historic workshop".into()),
+                },
+                LayoutElement {
+                    id: query_element,
+                    audience: ClaimAudience::Author,
+                    content: ElementContent::SavedQuery(binding.clone()),
+                },
+            ]),
+        },
+    };
+    let table_rows = |page: atlas_store::layout::DisplayElement| {
+        let DisplayContent::Stack(children) = page.content else {
+            panic!("expected layout stack")
+        };
+        assert_eq!(children.len(), 2);
+        assert_eq!(children[1].id, query_element);
+        let DisplayContent::QueryRows { records, truncated } = &children[1].content else {
+            panic!("expected bound site area query")
+        };
+        assert!(!truncated);
+        records.clone()
+    };
+    let preview_control =
+        atlas_store::query::QueryControl::new(std::time::Duration::from_secs(5))?;
+    let preview = store
+        .preview_author_layout(layout_view, &document, &preview_control)?
+        .unwrap();
+    let direct = store.execute_query(&binding.resolve(&store, layout_view)?, layout_view)?;
+    assert_eq!(direct.rows.len(), 1);
+    assert_eq!(direct.rows[0].object, place);
+    assert_eq!(
+        table_rows(preview),
+        vec![(place, "Estuary workshop".into())]
+    );
+    let mut exposed = document.clone();
+    if let ElementContent::Stack(children) = &mut exposed.root.content {
+        children[1].audience = ClaimAudience::Public;
+    }
+    assert!(matches!(
+        store.save_entry_layout(layout_view, &exposed, true, Uuid::new_v4()),
+        Err(Error::CapabilityDenied)
+    ));
+    let released = ViewContext {
+        revision: store.save_entry_layout(layout_view, &document, true, Uuid::new_v4())?,
+        ..layout_view
+    };
+    let historical = ViewContext {
+        day: WorldDay(13),
+        ..released
+    };
+    assert!(table_rows(store.display_entry(historical, place)?.unwrap()).is_empty());
+    assert_eq!(
+        table_rows(store.display_entry(released, place)?.unwrap()),
+        vec![(place, "Estuary workshop".into())]
+    );
+    for scope in [Scope::Public, Scope::Character(id(&world, 1))] {
+        let reader = ViewContext { scope, ..released };
+        let page = store.display_entry(reader, place)?.unwrap();
+        let DisplayContent::Stack(children) = page.content else {
+            panic!("expected public layout stack")
+        };
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].id, text_element);
+        assert_eq!(
+            children[0].content,
+            DisplayContent::Text("Historic workshop".into())
+        );
+        assert!(matches!(
+            binding.resolve(&store, reader),
+            Err(Error::CapabilityDenied)
+        ));
+    }
+    let alternate = ViewContext {
+        branch: fork.id,
+        ..released
+    };
+    assert!(matches!(
+        store.preview_author_layout(alternate, &document, &preview_control),
+        Err(Error::CapabilityDenied)
+    ));
     let backup = dir.path().join("backup.sqlite");
     let restored = dir.path().join("restored.sqlite");
     store.backup_to(&backup, Scope::Author)?;
     restore_archive(&backup, &restored, Scope::Author)?;
     let reopened = Store::open(&restored)?;
+    for context in [
+        released,
+        historical,
+        ViewContext {
+            scope: Scope::Public,
+            ..released
+        },
+        ViewContext {
+            scope: Scope::Character(id(&world, 1)),
+            ..released
+        },
+    ] {
+        assert_eq!(
+            reopened.display_entry(context, place)?,
+            store.display_entry(context, place)?
+        );
+    }
+    assert_eq!(
+        reopened.entry_layout(released, place)?,
+        Some((document, true))
+    );
     assert_eq!(
         reopened.site_area(prior, place)?,
         store.site_area(prior, place)?
