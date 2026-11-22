@@ -1,5 +1,8 @@
 # 10 — Delivery Roadmap: Numbered Design and Implementation Phases
 
+> **Feature-scope hold (2026-11-22 UTC):** Owner directed the formal [New Feature #68](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/68) process before any further development. The reconciled spatial/cartographic extension is a technical direction, not an accepted feature scope. SPA/MAP requirements, SP gates and cross-phase integration additions are provisional for #68; they do not change the original roadmap's exit criteria before explicit feature approval. Preserve original research and design record; no code/merge authorization from this document. Draft #67 is held pending approval and a feature-specific design under `Design-Docs/Features/`.
+
+
 **Status:** Accepted sequence; each phase has one GitHub issue titled exactly \`Roadmap Phase N — ...\`. Issue bodies contain accountable design deliverables and exit gates. Links to those issues are added once created.
 
 The roadmap is **dependency ordered**, not an invitation to build all systems in parallel. Every phase first settles its architecture, then implements a tested narrow vertical slice. Preserve the full future model without implementing speculative flexibility.

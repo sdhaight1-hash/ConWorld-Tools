@@ -1,5 +1,8 @@
 # ADR-013 — One historical spatial authority, procedural proposals and derived cartography
 
+> **Feature-scope hold (2026-11-22 UTC):** Owner directed the formal [New Feature #68](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/68) process before any further development. The reconciled spatial/cartographic extension is a technical direction, not an accepted feature scope. SPA/MAP requirements, SP gates and cross-phase integration additions are provisional for #68; they do not change the original roadmap's exit criteria before explicit feature approval. Preserve original research and design record; no code/merge authorization from this document. Draft #67 is held pending approval and a feature-specific design under `Design-Docs/Features/`.
+
+
 **Status:** Accepted design direction, 2026-11-21 local / 2026-11-22 UTC; production verification pending. Owner approved reconciliation of research #65 and #66. Baseline main [5d29ff2](https://github.com/sdhaight1-hash/ConWorld-Tools/tree/5d29ff24146c6b30a12558e1444404f756893432), schema 33 before open #62/#63. No code changes.
 
 ## Context and evidence

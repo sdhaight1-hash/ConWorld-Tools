@@ -1,5 +1,8 @@
 # 13 — Historical Spatial Model & Procedural Vector Cartography
 
+> **Feature-scope hold (2026-11-22 UTC):** Owner directed the formal [New Feature #68](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/68) process before any further development. The reconciled spatial/cartographic extension is a technical direction, not an accepted feature scope. SPA/MAP requirements, SP gates and cross-phase integration additions are provisional for #68; they do not change the original roadmap's exit criteria before explicit feature approval. Preserve original research and design record; no code/merge authorization from this document. Draft #67 is held pending approval and a feature-specific design under `Design-Docs/Features/`.
+
+
 **Status:** Accepted architectural direction (owner-approved reconciliation, 2026-11-21 local / 2026-11-22 UTC). Implementation and detailed library/schema choices remain unverified.  
 **Authority:** [D-017–D-020](12-Decisions-and-Reconciliation.md), [requirements](01-Requirements-and-Invariants.md), [ADR-013](ADRs/cross-phase-spatial-cartography.md).  
 **Research:** [#65 NestedLocations](Research-Studies/nested-locations.md) and [#66 Procedural Vector Cartography](Research-Studies/procedural-vector-cartography.md). This contract supersedes conflicting *recommendations* in both studies, not their recorded observations. No new standalone database, studio or roadmap phase.
