@@ -155,3 +155,11 @@ jobs:
           path: Development-Screenshots/*_phase-04_canvas_mock-native-template-query_01.png
           if-no-files-found: error
           retention-days: 30
+      - name: Upload cross-phase institution and discovery browser capture
+        if: runner.os == 'Linux' && success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: phase-05-browser-institution-ghost
+          path: Development-Screenshots/*_phase-05_network_mock-native-institution-ghost_01.png
+          if-no-files-found: error
+          retention-days: 30

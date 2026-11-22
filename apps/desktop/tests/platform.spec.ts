@@ -2043,3 +2043,68 @@ test("Canvas template instances and multiple query bindings save together withou
     ] } } },
   ] } } }]);
 });
+
+test("institution studio records a sourced fact and reviews a separate draft", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "archive", name: "Archive", revision: 4 };
+    const writes: { command: string; args: unknown }[] = [];
+    Object.assign(window, {
+      isTauri: true, __networkWrites: writes,
+      __TAURI_INTERNALS__: {
+        invoke: async (command: string, args: Record<string, unknown>) => {
+          if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+          if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+          if (command === "workspace_worlds") return [{ ...world }];
+          if (command === "workspace_snapshot") return {
+            world: { ...world }, day: args.day, view_revision: args.revision ?? world.revision,
+            people: [{ id: "alice", label: "Alice" }], relationships: [], events: [], definitions: [],
+          };
+          if (command === "workspace_saved_queries") return [];
+          if (command === "workspace_network_facts") return [{
+            id: "fact", input: { kind: "membership", role: "Treasurer" },
+            subject_label: "Alice", target_label: "Guild",
+          }];
+          if (command === "workspace_ghost_proposals") return [{
+            id: "proposal", claim: {world: "archive", id: "claim"}, label: "New Society",
+            kind: "organization", reviewed: false, promoted: null,
+          }];
+          if (["workspace_create_identity", "workspace_record_network_fact", "workspace_propose_ghost", "workspace_review_ghost"].includes(command)) {
+            writes.push({ command, args }); world.revision++; return null;
+          }
+          throw new Error("Unexpected mock command: " + command);
+        },
+      },
+    });
+  });
+  await page.goto("/");
+  const studio = page.locator("[data-network-studio]");
+  await studio.locator("summary").click();
+  await studio.getByLabel("Identity label").fill("Guild");
+  await studio.getByRole("button", { name: "Create identity" }).click();
+  await expect(page.locator("#author-world-info")).toContainText("Author revision 5 / 5");
+  await studio.locator("summary").click();
+  await studio.getByLabel("Subject identity").fill("alice");
+  await studio.getByLabel("Target identity").fill("guild");
+  await studio.getByLabel("Evidence source identity").fill("folio");
+  await studio.getByLabel("Role or causal rationale").fill("Treasurer");
+  await studio.getByRole("button", { name: "Record network fact" }).click();
+  await expect(page.locator("#author-world-info")).toContainText("Author revision 6 / 6");
+  await studio.locator("summary").click();
+  await studio.getByLabel("Network focus identity").fill("guild");
+  await studio.getByRole("button", { name: "Inspect network facts" }).click();
+  await expect(studio.getByText(/Alice → Guild · membership · Treasurer/)).toBeVisible();
+  await studio.getByRole("button", { name: "Review draft identities" }).click();
+  await expect(studio.getByText(/New Society · organization/)).toBeVisible();
+  if (process.env.ATLAS_CAPTURE_PHASE3 === "1") {
+    const timestamp = new Date().toISOString().slice(0, 19).replace("T", "_").replaceAll(":", "-") + "Z";
+    await studio.screenshot({ path: "../../Development-Screenshots/" + timestamp + "_phase-05_network_mock-native-institution-ghost_01.png", animations: "disabled" });
+  }
+  await studio.getByRole("button", { name: "Promote draft" }).click();
+  await expect(page.locator("#author-world-info")).toContainText("Author revision 7 / 7");
+  const writes = await page.evaluate(() => (window as unknown as { __networkWrites: unknown[] }).__networkWrites);
+  expect(writes).toMatchObject([
+    {command: "workspace_create_identity", args: {request: {revision: 4}, kind: "organization", label: "Guild"}},
+    {command: "workspace_record_network_fact", args: {request: {revision: 5}, input: {kind: "membership", source: {id: "folio"}}}},
+    {command: "workspace_review_ghost", args: {request: {revision: 6}, proposalId: "proposal", promote: true}},
+  ]);
+});

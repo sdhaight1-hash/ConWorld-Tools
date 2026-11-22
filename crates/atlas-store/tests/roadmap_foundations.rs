@@ -1796,3 +1796,171 @@ fn family_canvas_component_uses_accepted_parentage_at_selected_day_and_revision(
     );
     Ok(())
 }
+
+#[test]
+fn institutional_network_ghost_and_public_projection() -> Result<(), Error> {
+    use atlas_store::{
+        layout::ObjectLink,
+        network::{IdentityKind, NetworkInput, NetworkKind},
+        query::ObjectKindFilter,
+    };
+
+    let mut store = Store::open(":memory:")?;
+    let world = seed(&mut store)?;
+    let mut author = view(&world, 13);
+    let group = store.create_identity(author, IdentityKind::Organization, "Guild", Uuid::new_v4())?;
+    author.revision = AuthorRevision(2);
+    let kind = query(QueryFilter::Kind(ObjectKindFilter::Organization));
+    assert_eq!(store.execute_query(&kind, author)?.rows[0].object, group);
+    let member = NetworkInput {
+        subject: id(&world, 1),
+        target: group,
+        source: id(&world, 9),
+        kind: NetworkKind::Membership,
+        role: "Treasurer".into(),
+        starts_at: 13,
+        ends_before: Some(20),
+    };
+    let membership = store.record_network_fact(author, &member, Uuid::new_v4())?;
+    author.revision = AuthorRevision(3);
+    assert_eq!(store.network_facts(author, group)?[0].input, member);
+    assert!(matches!(
+        store.record_network_fact(author, &member, Uuid::new_v4()),
+        Err(Error::InvalidInput(_))
+    ));
+    let cause = NetworkInput {
+        subject: id(&world, 7),
+        target: id(&world, 11),
+        source: id(&world, 9),
+        kind: NetworkKind::ConfirmedCause,
+        role: "Recorded adjournment".into(),
+        starts_at: 13,
+        ends_before: None,
+    };
+    store.record_network_fact(author, &cause, Uuid::new_v4())?;
+    author.revision = AuthorRevision(4);
+    let reversed = NetworkInput {
+        subject: cause.target,
+        target: cause.subject,
+        ..cause
+    };
+    assert!(matches!(
+        store.record_network_fact(author, &reversed, Uuid::new_v4()),
+        Err(Error::InvalidInput(_))
+    ));
+    let claim = ObjectRef::new(world.id);
+    author.revision = store.apply(&Command {
+        world: world.id,
+        branch: world.main,
+        expected: author.revision,
+        id: Uuid::new_v4(),
+        author: "Fixture author".into(),
+        rationale: "Record claim source".into(),
+        scope: Scope::Author,
+        changes: vec![Change::Create(
+            claim,
+            Record {
+                label: "Minute excerpt".into(),
+                valid: ValidInterval::default(),
+                data: ObjectData::Claim {
+                    subject: group,
+                    predicate: "mention".into(),
+                    statement: "New Society convened.".into(),
+                    audience: ClaimAudience::Author,
+                },
+                source: Some(id(&world, 9)),
+            },
+        )],
+    })?;
+    let proposal = store.propose_ghost(
+        author,
+        claim,
+        (0, 11),
+        IdentityKind::Organization,
+        Uuid::new_v4(),
+    )?;
+    author.revision = AuthorRevision(6);
+    let prior = author;
+    assert_eq!(store.execute_query(&kind, author)?.rows.len(), 1);
+    let promoted = store
+        .review_ghost(author, proposal, true, Uuid::new_v4())?
+        .unwrap();
+    author.revision = AuthorRevision(7);
+    assert_eq!(store.execute_query(&kind, author)?.rows.len(), 2);
+    assert!(!store.ghost_proposals(prior)?[0].reviewed);
+    assert_eq!(store.ghost_proposals(author)?[0].promoted, Some(promoted));
+    let block = |audience, content| LayoutElement {
+        id: ElementId(Uuid::new_v4()),
+        audience,
+        content,
+    };
+    let document = |entry, children| LayoutDocument {
+        schema_version: LAYOUT_SCHEMA_VERSION,
+        entry,
+        root: block(ClaimAudience::Public, ElementContent::Stack(children)),
+    };
+    let destination = document(
+        group,
+        vec![
+            block(
+                ClaimAudience::Public,
+                ElementContent::PublishedReferences(group),
+            ),
+            block(ClaimAudience::Author, ElementContent::NetworkTable(group)),
+        ],
+    );
+    author.revision = store.save_entry_layout(author, &destination, true, Uuid::new_v4())?;
+    let source = document(
+        id(&world, 1),
+        vec![block(
+            ClaimAudience::Public,
+            ElementContent::ObjectLink(ObjectLink {
+                target: group,
+                label: "Guild charter".into(),
+            }),
+        )],
+    );
+    author.revision = store.save_entry_layout(author, &source, true, Uuid::new_v4())?;
+    let public = |context| ViewContext {
+        scope: Scope::Public,
+        ..context
+    };
+    let page = store.display_entry(public(author), group)?.unwrap();
+    let DisplayContent::Stack(rows) = page.content else {
+        panic!("expected stack")
+    };
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0].content,
+        DisplayContent::ReferenceRows {
+            links: vec![ObjectLink {
+                target: source.entry,
+                label: "Guild charter".into(),
+            }],
+            truncated: false,
+        }
+    );
+    assert!(matches!(
+        store.network_facts(public(author), group),
+        Err(Error::CapabilityDenied)
+    ));
+    author.revision = store.save_entry_layout(author, &source, false, Uuid::new_v4())?;
+    let page = store.display_entry(public(author), group)?.unwrap();
+    let DisplayContent::Stack(rows) = page.content else {
+        panic!("expected stack")
+    };
+    assert_eq!(
+        rows[0].content,
+        DisplayContent::ReferenceRows {
+            links: vec![],
+            truncated: false,
+        }
+    );
+    let old = author;
+    store.withdraw_network_fact(author, membership, Uuid::new_v4())?;
+    author.revision = AuthorRevision(author.revision.0 + 1);
+    assert!(store.network_facts(author, group)?.is_empty());
+    assert_eq!(store.network_facts(old, group)?.len(), 1);
+    store.verify_foreign_keys(Scope::Author)?;
+    Ok(())
+}
