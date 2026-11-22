@@ -1720,3 +1720,90 @@ test("authored links save stable targets and reader navigation reauthorizes each
     { worldId: "archive", day: 0, entryId: "beatrice" },
   ]);
 });
+
+test("event and search-only source entries use the same persistent editor and historical scope", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "archive", name: "Archive", revision: 4 };
+    const calls: { command: string; args: Record<string, unknown> }[] = [];
+    const pages = new Map<string, unknown>();
+    Object.assign(window, {
+      isTauri: true, __generalEntryCalls: calls,
+      __TAURI_INTERNALS__: {
+        invoke: async (command: string, args: Record<string, unknown>) => {
+          if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+          if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+          if (command === "workspace_worlds") return [{ ...world }];
+          if (command === "workspace_snapshot") return {
+            world: { ...world }, day: args.day, view_revision: args.revision ?? world.revision,
+            people: [{ id: "alice", label: "Alice" }], relationships: [], definitions: [],
+            events: [{ id: "meeting", label: "Guild meeting", day: 0, citation: null, participants: [], actions: [] }],
+          };
+          if (command === "workspace_saved_queries" || command === "workspace_evidence") return [];
+          if (command === "workspace_search") return {
+            revision: args.revision, truncated: false,
+            rows: [{ id: "folio", label: "Guild minutes", kind: "source" }],
+          };
+          if (command === "workspace_entry_layout") {
+            calls.push({ command, args });
+            return pages.get(String(args.entryId)) ?? null;
+          }
+          if (command === "workspace_save_layout") {
+            calls.push({ command, args });
+            const document = args.document as { entry: { id: string } };
+            pages.set(document.entry.id, [document, args.published]);
+            world.revision++;
+            return null;
+          }
+          throw new Error("Unexpected mock command: " + command);
+        },
+      },
+    });
+  });
+  await page.goto("/");
+  const graph = page.getByRole("region", { name: "Saved world graph" });
+  const inspector = graph.getByRole("complementary", { name: "Node inspector" });
+  await graph.locator("#nodes button[data-node=meeting]").click();
+  await inspector.getByRole("button", { name: "Open event page" }).click();
+  await expect(inspector.getByRole("heading", { name: "Entry page · Guild meeting · event" })).toBeVisible();
+  await inspector.getByRole("textbox", { name: "Page text", exact: true }).fill("The guild convened.");
+  await inspector.getByRole("button", { name: "Add entry link" }).click();
+  await expect(inspector.locator('datalist option[value="meeting"]')).toHaveCount(1);
+  await inspector.getByLabel("Link target identity").fill("folio");
+  await inspector.getByLabel("Link caption").fill("Council source");
+  await inspector.getByRole("button", { name: "Save page" }).click();
+  await inspector.getByRole("button", { name: "Open event page" }).click();
+  await expect(inspector.getByRole("textbox", { name: "Page text", exact: true })).toHaveValue("The guild convened.");
+  const query = page.locator("#author-query-form");
+  const results = page.locator("#author-query-results");
+  await query.getByLabel("Find name").fill("Guild minutes");
+  await query.getByRole("button", { name: "Search history" }).click();
+  await results.getByRole("button", { name: "Open entry page" }).click();
+  await expect(results.getByRole("heading", { name: "Entry page · Guild minutes" })).toBeVisible();
+  await results.getByRole("textbox", { name: "Page text", exact: true }).fill("Folio 14.");
+  if (process.env.ATLAS_CAPTURE_PHASE3 === "1") {
+    const timestamp = new Date().toISOString().slice(0, 19).replace("T", "_").replaceAll(":", "-") + "Z";
+    await results.screenshot({
+      path: "../../Development-Screenshots/" + timestamp + "_phase-04_canvas_mock-native-source-entry_01.png",
+      animations: "disabled",
+    });
+  }
+  await results.getByRole("button", { name: "Save page" }).click();
+  await expect(page.locator("#author-world-info")).toContainText("Author revision 6 / 6");
+  const revision = page.locator("#author-revision");
+  await revision.fill("4");
+  await revision.blur();
+  await expect(page.locator("#author-world-info")).toContainText("Author revision 4 / 6");
+  await query.getByRole("button", { name: "Search history" }).click();
+  await results.getByRole("button", { name: "Open entry page" }).click();
+  await expect(results.getByRole("button", { name: "Save page" })).toBeDisabled();
+  const calls = await page.evaluate(() => (window as unknown as {
+    __generalEntryCalls: { command: string; args: Record<string, unknown> }[];
+  }).__generalEntryCalls);
+  expect(calls.filter(call => call.command === "workspace_save_layout").map(call => call.args)).toMatchObject([
+    { worldId: "archive", expectedRevision: 4, document: { entry: { world: "archive", id: "meeting" } } },
+    { worldId: "archive", expectedRevision: 5, document: { entry: { world: "archive", id: "folio" } } },
+  ]);
+  expect(calls.at(-1)).toMatchObject({
+    command: "workspace_entry_layout", args: { worldId: "archive", entryId: "folio", revision: 4, day: 0 },
+  });
+});

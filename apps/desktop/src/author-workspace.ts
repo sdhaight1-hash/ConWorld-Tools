@@ -437,6 +437,17 @@ export async function showAuthorWorkspace(
     void refreshAccounts();
   }
 
+  function entryTargets(view: Snapshot, extra?: Option): Option[] {
+    const targets = [
+      ...view.people,
+      ...view.events.map(event => ({ id: event.id, label: event.label + " · event" })),
+      ...view.relationships.map(bond => ({ id: bond.id, label: bondLabel(bond) + " · relationship" })),
+      ...view.definitions.map(definition => ({ id: definition.id, label: definition.label + " · definition" })),
+    ];
+    if (extra && !targets.some(target => target.id === extra.id)) targets.push(extra);
+    return targets;
+  }
+
   function inspector(id: string, panel: HTMLElement) {
     const bond = snapshot?.relationships.find((record) => record.id === id);
     const event = snapshot?.events.find((record) => record.id === id);
@@ -454,12 +465,22 @@ export async function showAuthorWorkspace(
         void openFamilyHistory(panel, { world_id: current.world.id, person_id: id, day: current.day, revision: current.view_revision },
           people, !revisionInput.value.trim(), async () => { await refresh(); selectNode(id); });
       });
-      button("Open character page", () => {
+    }
+    if (current && (event || bond || people.some(person => person.id === id))) {
+      const targets = entryTargets(current);
+      const label = event ? "Open event page" : bond ? "Open relationship page" : "Open character page";
+      button(label, () => {
         const open = (target: string) => {
           if (snapshot !== current) return;
           panel.replaceChildren();
           void openEntryEditor(panel, current.world.id, target, current.day, current.view_revision,
-            !revisionInput.value.trim(), async () => { await refresh(); selectNode(target); }, current.people, open);
+            !revisionInput.value.trim(), async () => {
+              await refresh();
+              const next = snapshot as Snapshot | undefined;
+              if (next?.world.id !== current.world.id || next.day !== current.day || next.scene_limited) return;
+              const onGraph = [...next.people, ...next.events, ...next.relationships].some(node => node.id === target);
+              selectNode(onGraph ? target : id);
+            }, targets, open);
         };
         open(id);
       });
@@ -784,23 +805,24 @@ export async function showAuthorWorkspace(
               syncButtons();
               field(pathForm, "kind").focus();
             });
-            const pageButton = document.createElement("button");
-            pageButton.type = "button";
-            pageButton.textContent = "Open character page";
-            pageButton.addEventListener("click", () => {
-              const current = snapshot;
-              if (!current || sequence !== querySequence) return;
-              const open = (target: string) => {
-                if (sequence !== querySequence || snapshot !== current) return;
-                item.replaceChildren();
-                void openEntryEditor(item, current.world.id, target, current.day, current.view_revision,
-                  !revisionInput.value.trim(), refresh, current.people, open);
-              };
-              open(row.id);
-            });
-            item.append(pageButton);
             item.append(focus);
           }
+          const pageButton = document.createElement("button");
+          pageButton.type = "button";
+          pageButton.textContent = row.kind === "person" && snapshot.scene_limited ? "Open character page" : "Open entry page";
+          pageButton.addEventListener("click", () => {
+            const current = snapshot;
+            if (!current || sequence !== querySequence) return;
+            const targets = entryTargets(current, { id: row.id, label: row.label });
+            const open = (target: string) => {
+              if (sequence !== querySequence || snapshot !== current || !item.isConnected) return;
+              item.replaceChildren();
+              void openEntryEditor(item, current.world.id, target, current.day, current.view_revision,
+                !revisionInput.value.trim(), refresh, targets, open);
+            };
+            open(row.id);
+          });
+          item.append(pageButton);
           const references = document.createElement("button");
           references.type = "button";
           references.className = "query-references";
@@ -832,7 +854,7 @@ export async function showAuthorWorkspace(
                     if (sequence !== querySequence || snapshot !== current) return;
                     item.replaceChildren();
                     void openEntryEditor(item, current.world.id, target, current.day,
-                      current.view_revision, !revisionInput.value.trim(), refresh, current.people, navigate);
+                      current.view_revision, !revisionInput.value.trim(), refresh, entryTargets(current, { id: row.id, label: row.label }), navigate);
                   };
                   navigate(match.source.id);
                 });

@@ -13,11 +13,11 @@ type EntrySearch = { matches: [string, string][]; truncated: boolean };
 
 export async function openEntryEditor(panel: HTMLElement, worldId: string, entryId: string,
   day: number, revision: number, editable: boolean, afterSave: () => Promise<void>,
-  people: { id: string; label: string }[] = [],
+  targets: { id: string; label: string }[] = [],
   openAuthor?: (id: string) => void) {
   const host = document.createElement("section");
   panel.append(host);
-  host.innerHTML = `<h3>Character page</h3><form class="editor-form"><fieldset disabled>
+  host.innerHTML = `<h3 data-entry-heading></h3><p data-entry-identity class="hint"></p><form class="editor-form"><fieldset disabled>
     <label>Page text <textarea name="body" required></textarea></label>
     <label>Author notes <textarea name="notes"></textarea></label>
     <label>Private saved query <select name="saved_query"><option value="">No query table</option></select></label>
@@ -37,6 +37,9 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
       <label>Find in public page <input name="text" required maxlength="256"></label>
       <button>Find</button>
     </form><div data-public-result aria-live="polite"></div>`;
+  host.querySelector("[data-entry-heading]")!.textContent =
+    "Entry page · " + (targets.find(target => target.id === entryId)?.label ?? entryId);
+  host.querySelector("[data-entry-identity]")!.textContent = "Stable identity: " + entryId;
   const form = host.querySelector("form")!;
   const fields = host.querySelector("fieldset")!;
   const body = form.elements.namedItem("body") as HTMLTextAreaElement;
@@ -128,7 +131,7 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
         savedQueries.length > 1 || extras.some(block => block.content.SavedQuery
           ? block.audience !== "Author"
           : !block.content.ObjectLink || !["Public", "Author"].includes(block.audience))) {
-      result.textContent = "This layout uses components outside the character page editor.";
+      result.textContent = "This layout uses components outside the entry page editor.";
       return;
     }
     body.value = children[0].content.Text;
@@ -141,7 +144,7 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
     const listId = "link-targets-" + crypto.randomUUID();
     const datalist = document.createElement("datalist");
     datalist.id = listId;
-    for (const person of people) datalist.append(new Option(person.label, person.id));
+    for (const target of targets) datalist.append(new Option(target.label, target.id));
     linkHost.append(datalist);
     function addLinkRow(block?: Block) {
       const id = block?.id ?? crypto.randomUUID();
