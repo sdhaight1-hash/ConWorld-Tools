@@ -35,3 +35,7 @@ The fixture is generated via Store commands, not direct SQL. Local object UUIDs 
 - Actual on-disk reopen and standalone restored archive replay exact IDs and branch results.
 
 Next slices: assert explicit parentage paths, dated succession, conflict impact, saved query and Canvas/Display bindings, author workflow measurements, then native screenshots of the retained fixture. Do not mark complete without execution; test failures identify product or fixture gaps. No production semantic expansion, extra migration, UI mock or screenshot claimed.
+
+## Follow-on author workflows (staged; not yet verified)
+
+Base 8a451ac passed native persistence on Linux (0.69 s) and Windows (5.91 s), run 45019173223. This branch adds four objects (two treaty roles, title, rule), four network facts (title, succession rule, designation, enacted succession) and a saved-query definition. Moves the first generation's birth 20 synthetic years before the treaty so the witness is an adult; still four cohorts, 12 people at treaty day and 48 at final view. Adds explicit family and institutional link checks, dated event search, two-hop impact, vacant/occupied historical succession, character-specific testimony and stable saved-query/fact/parentage IDs after restoration. These are actual API scenarios to prepare #70 Gate A, not comparative human UI workflow measurements or evidence that recipes are needed. Staged separately with skip-ci to avoid invalidating the running base matrix; validate in native CI before merging. No production code, schema or visual change.

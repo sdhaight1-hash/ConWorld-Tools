@@ -3,7 +3,7 @@ use atlas_store::{
     archive::{inspect_archive, restore_archive},
     genealogy::{ParentageKind, RecordParentage},
     network::{NetworkInput, NetworkKind},
-    query::{ObjectKindFilter, QUERY_SCHEMA_VERSION, QueryFilter, QuerySpec},
+    query::{ObjectKindFilter, QUERY_SCHEMA_VERSION, QueryFilter, QuerySpec, SaveNamedLabelQuery},
     semantic::{
         AreaReading, AreaTest, AreaUnit, ClassificationInput, ConceptProfile, DefinitionPin,
         FactFamily, FactRef, SiteAreaInput,
@@ -126,6 +126,8 @@ fn alder_basin_persists_interconnected_history_and_authorized_replay()
     let founding = object(20);
     let charter = object(21);
     let treaty = object(22);
+    let title = object(23);
+    let rule = object(24);
     let tag = |description: &str| ObjectData::Definition {
         definition: Definition::Tag,
         description: description.into(),
@@ -164,6 +166,8 @@ fn alder_basin_persists_interconnected_history_and_authorized_replay()
             None,
         ),
         create(object(15), "Salt commodity", ObjectData::Concept, None),
+        create(title, "River warden", ObjectData::Title, None),
+        create(rule, "Warden charter", ObjectData::SuccessionRule, None),
     ];
     for (event, label, day) in [
         (founding, "First settlement", 0),
@@ -207,7 +211,7 @@ fn alder_basin_persists_interconnected_history_and_authorized_replay()
             None,
         ));
         for g in 0..4 {
-            let born = 73_000 + 10_950 * g as i64;
+            let born = 65_700 + 10_950 * g as i64;
             changes.push(create(
                 object(1000 + i * 10 + g),
                 &format!("House {i:02} generation {g}"),
@@ -216,6 +220,26 @@ fn alder_basin_persists_interconnected_history_and_authorized_replay()
             ));
         }
     }
+    changes.push(create(
+        object(43),
+        "Register witness",
+        ObjectData::EventInvolvement {
+            event: treaty,
+            participant: object(1000),
+            role: EventRole::Witness,
+        },
+        Some(73_000),
+    ));
+    changes.push(create(
+        object(44),
+        "Treaty negotiator",
+        ObjectData::EventInvolvement {
+            event: treaty,
+            participant: object(1010),
+            role: EventRole::Actor,
+        },
+        Some(73_000),
+    ));
     for (id, audience, statement) in [
         (40, ClaimAudience::Public, "A toll agreement was announced."),
         (
@@ -382,7 +406,7 @@ fn alder_basin_persists_interconnected_history_and_authorized_replay()
         view.revision.0 += 1;
         for g in 0..4 {
             let person = object(1000 + i * 10 + g);
-            let born = 73_000 + 10_950 * g as i64;
+            let born = 65_700 + 10_950 * g as i64;
             edge(
                 &mut store,
                 &mut view,
@@ -467,6 +491,56 @@ fn alder_basin_persists_interconnected_history_and_authorized_replay()
         )?;
     }
 
+    for (subject, target, kind, role) in [
+        (title, guild, NetworkKind::TitleOf, "guild title"),
+        (rule, title, NetworkKind::RuleOf, "designated_heir"),
+        (object(1003), title, NetworkKind::HeirDesignation, "designated heir"),
+    ] {
+        edge(
+            &mut store,
+            &mut view,
+            input(subject, target, kind, role, 105_850),
+        )?;
+    }
+    let vacant = view;
+    let preview = store.succession_preview(view, title)?;
+    assert!(preview.eligible);
+    assert_eq!(preview.designated, Some(object(1003)));
+    let succession = FactRef {
+        world: world.id,
+        family: FactFamily::Network,
+        id: store.enact_designated_succession(view, title, source, Uuid::new_v4())?,
+    };
+    view.revision.0 += 1;
+    assert!(store.succession_preview(vacant, title)?.eligible);
+    let occupied = store.succession_preview(view, title)?;
+    assert!(!occupied.eligible);
+    assert_eq!(occupied.incumbent, Some(object(1003)));
+
+    let saved_spec = QuerySpec {
+        schema_version: QUERY_SCHEMA_VERSION,
+        limit: 100,
+        filter: QueryFilter::And(vec![
+            QueryFilter::Kind(ObjectKindFilter::Claim),
+            QueryFilter::HasSource(source),
+            QueryFilter::ClaimFullTextPhrase("concealed payment".into()),
+        ]),
+    };
+    let saved = store.save_named_label_query(SaveNamedLabelQuery {
+        world_id: world.id,
+        expected: view.revision,
+        query_id: None,
+        name: "Disputed treaty testimony",
+        spec: &saved_spec,
+        command_id: Uuid::new_v4(),
+        scope: Scope::Author,
+    })?;
+    view.revision = saved.recorded_at;
+    assert_eq!(
+        rows(&store, view, saved_spec.filter.clone())?,
+        HashSet::from([object(42)])
+    );
+
     let expected_places: HashSet<_> = (0..3)
         .map(|d| object(30 + d))
         .chain((0..SETTLEMENTS).map(|i| object(100 + i)))
@@ -524,6 +598,38 @@ fn alder_basin_persists_interconnected_history_and_authorized_replay()
         .len(),
         11
     );
+    let family = store.family_links(view, object(1003))?;
+    assert_eq!(family.len(), 1);
+    assert_eq!(family[0].parent, object(1002));
+    assert_eq!(family[0].kind, ParentageKind::Biological);
+    let family_id = family[0].id;
+    let house = store.network_facts(view, object(200))?;
+    assert_eq!(
+        house
+            .iter()
+            .filter(|fact| fact.input.kind == NetworkKind::Membership)
+            .count(),
+        4
+    );
+    let impact = store.persisted_impact(view, founding, 2, 10)?;
+    assert_eq!(impact.events, vec![charter, treaty]);
+    assert!(!impact.truncated);
+    let witness = QueryFilter::ParticipantEvents {
+        participant: object(1000),
+        role: Some(EventRole::Witness),
+    };
+    assert_eq!(rows(&store, view, witness.clone())?, HashSet::from([treaty]));
+    assert!(
+        rows(
+            &store,
+            ViewContext {
+                day: WorldDay(72_999),
+                ..view
+            },
+            witness.clone(),
+        )?
+        .is_empty()
+    );
     let evidence = store.evidence_at(treaty, view)?;
     assert_eq!(evidence.len(), 3);
     assert!(evidence.iter().all(|row| row.source.is_some()));
@@ -535,6 +641,19 @@ fn alder_basin_persists_interconnected_history_and_authorized_replay()
     assert_eq!(reader.len(), 1);
     assert_eq!(reader[0].statement, "A toll agreement was announced.");
     assert!(reader[0].source.is_none());
+    let witness_view = ViewContext {
+        scope: Scope::Character(object(1000)),
+        ..view
+    };
+    let negotiator_view = ViewContext {
+        scope: Scope::Character(object(1010)),
+        ..view
+    };
+    let private = store.evidence_at(treaty, witness_view)?;
+    assert_eq!(private.len(), 2);
+    assert!(private.iter().all(|row| row.source.is_none()));
+    assert!(private.iter().any(|row| row.statement.contains("concealed payment")));
+    assert_eq!(store.evidence_at(treaty, negotiator_view)?, reader);
     assert!(matches!(
         store.resolve_semantic_fact(linguistic_fact, public),
         Err(Error::CapabilityDenied)
@@ -619,8 +738,23 @@ fn alder_basin_persists_interconnected_history_and_authorized_replay()
             Some(branch_record.clone())
         );
         assert!(reopened.resolve_semantic_fact(branch_fact, view)?.is_none());
+        assert_eq!(reopened.family_links(view, object(1003))?[0].id, family_id);
+        assert_eq!(
+            reopened.succession_preview(view, title)?.incumbent,
+            Some(object(1003))
+        );
+        assert!(reopened.resolve_semantic_fact(succession, view)?.is_some());
+        assert_eq!(rows(&reopened, view, witness.clone())?, HashSet::from([treaty]));
+        let definitions = reopened.saved_label_queries(world.id, view.revision, Scope::Author)?;
+        assert_eq!(definitions.len(), 1);
+        assert_eq!(definitions[0].id, saved.id);
+        assert_eq!(definitions[0].spec, saved_spec);
+        assert_eq!(
+            rows(&reopened, view, definitions[0].spec.filter.clone())?,
+            HashSet::from([object(42)])
+        );
         reopened.verify_foreign_keys(Scope::Author)?;
     }
-    println!("Alder Basin fixture: 108 objects, 300 years, 48 people, 12 settlements");
+    println!("Alder Basin fixture: 112 objects, 300 years, 48 people, 12 settlements");
     Ok(())
 }
