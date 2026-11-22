@@ -26,7 +26,7 @@ mod semantic;
 mod templates;
 
 // Version 29 adds version-pinned template layout variants without changing tables.
-pub(crate) const SCHEMA_VERSION: i64 = 36;
+pub(crate) const SCHEMA_VERSION: i64 = 37;
 
 // Candidate queries bind world (?1), focus/phrase (?2), author revision (?3),
 // limit (?4) and branch (?5). Follow only immutable inherited revisions.
@@ -218,6 +218,9 @@ impl Store {
         }
         if version < 36 {
             tx.execute_batch(include_str!("../migrations/0036.sql"))?;
+        }
+        if version < 37 {
+            tx.execute_batch(include_str!("../migrations/0037.sql"))?;
         }
         if version < SCHEMA_VERSION {
             verify_foreign_keys(&tx)?;
@@ -3244,6 +3247,7 @@ fn write_version(
     }
     let (kind, occurrence, citation) = match &record.data {
         ObjectData::Person => ("person", &EventDate::Unknown, None),
+        ObjectData::Concept => ("concept", &EventDate::Unknown, None),
         ObjectData::Organization => ("organization", &EventDate::Unknown, None),
         ObjectData::Household => ("household", &EventDate::Unknown, None),
         ObjectData::FamilyHouse => ("family_house", &EventDate::Unknown, None),
@@ -3625,6 +3629,7 @@ fn read_version(
 ) -> rusqlite::Result<Version> {
     let data = match row.get::<_, String>(1)?.as_str() {
         "person" => ObjectData::Person,
+        "concept" => ObjectData::Concept,
         "organization" => ObjectData::Organization,
         "household" => ObjectData::Household,
         "family_house" => ObjectData::FamilyHouse,

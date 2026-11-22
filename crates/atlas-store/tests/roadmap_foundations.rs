@@ -2988,3 +2988,37 @@ fn semantic_definition_pin_rejects_stale_and_incompatible_versions() -> Result<(
     );
     Ok(())
 }
+
+#[test]
+fn canonical_concept_identity_is_searchable_and_historical() -> Result<(), Error> {
+    use atlas_store::{network::IdentityKind, query::ObjectKindFilter};
+    let mut store = Store::open(":memory:")?;
+    let world = seed(&mut store)?;
+    let mut author = view(&world, 13);
+    let before = author;
+    let concept = store.create_identity(
+        author,
+        IdentityKind::Concept,
+        "River language",
+        Uuid::new_v4(),
+    )?;
+    author.revision = AuthorRevision(author.revision.0 + 1);
+    assert!(store.get_object(concept, before)?.is_none());
+    let version = store.get_object(concept, author)?.unwrap();
+    assert_eq!(version.record.data, ObjectData::Concept);
+    let spec = query(QueryFilter::Kind(ObjectKindFilter::Concept));
+    assert!(store.execute_query(&spec, before)?.rows.is_empty());
+    assert_eq!(store.execute_query(&spec, author)?.rows[0].object, concept);
+    assert!(matches!(
+        store.get_object(
+            concept,
+            ViewContext {
+                scope: Scope::Public,
+                ..author
+            }
+        ),
+        Err(Error::CapabilityDenied)
+    ));
+    store.verify_foreign_keys(Scope::Author)?;
+    Ok(())
+}

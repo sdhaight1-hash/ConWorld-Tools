@@ -127,6 +127,7 @@ impl Store {
                             | ObjectData::ConflictIssue
                             | ObjectData::ConflictPhase
                             | ObjectData::SuccessionRule
+                            | ObjectData::Concept
                     ) => {}
             NetworkKind::Alliance
                 if matches!(subject.record.data, ObjectData::Faction)
@@ -585,6 +586,7 @@ impl Store {
                             | ObjectData::ConflictIssue
                             | ObjectData::ConflictPhase
                             | ObjectData::SuccessionRule
+                            | ObjectData::Concept
                     )
                 })
                 .map(|item| item.object)

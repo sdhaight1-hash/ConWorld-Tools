@@ -62,6 +62,7 @@ pub enum QueryFilter {
 #[serde(rename_all = "snake_case")]
 pub enum ObjectKindFilter {
     Person,
+    Concept,
     Organization,
     Household,
     FamilyHouse,
@@ -87,6 +88,7 @@ impl From<&ObjectData> for ObjectKindFilter {
     fn from(data: &ObjectData) -> Self {
         match data {
             ObjectData::Person => Self::Person,
+            ObjectData::Concept => Self::Concept,
             ObjectData::Organization => Self::Organization,
             ObjectData::Household => Self::Household,
             ObjectData::FamilyHouse => Self::FamilyHouse,

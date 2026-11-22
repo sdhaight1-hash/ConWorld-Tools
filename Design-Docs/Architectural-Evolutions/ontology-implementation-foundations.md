@@ -27,3 +27,7 @@ Prior reference-vocabulary commit `9086041` passed Windows and Ubuntu build/test
 ## Definition-pin validation foundation
 
 AE-03 adds validation of exact existing Definition versions within a historical author view. Wrong kind, stale version and unauthorized reads fail closed. This is deliberately not descriptor persistence or historical classification assignment; pinned historical replay must supply the original view. The Concept registry migration overlaps spatial PR #67's schema 37 and remains to be reconciled. Regression tests cover correction and prior-revision replay. CI pending; no visual changes.
+
+## Canonical Concept vertical slice
+
+Adds Concept to the canonical object registry, identity creation, ghost proposal vocabulary, historical read/write, typed search and desktop authoring choices. Migration 37 is provisional on this branch; spatial PR #67 must be reconciled before either migration is released together (renumber the spatial migration and preserve Concept in both registry constraints). No existing IDs are rewritten. Tests cover historical visibility, kind search, scope and FK integrity. CI and actual desktop screenshots remain pending. This does not complete governed classification persistence.

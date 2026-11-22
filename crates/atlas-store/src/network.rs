@@ -8,6 +8,7 @@ use crate::ObjectRef;
 #[serde(rename_all = "snake_case")]
 pub enum IdentityKind {
     Person,
+    Concept,
     Organization,
     Household,
     FamilyHouse,
@@ -26,6 +27,7 @@ impl IdentityKind {
     pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Person => "person",
+            Self::Concept => "concept",
             Self::Organization => "organization",
             Self::Household => "household",
             Self::FamilyHouse => "family_house",
@@ -44,6 +46,7 @@ impl IdentityKind {
     pub(crate) fn data(self) -> crate::ObjectData {
         match self {
             Self::Person => crate::ObjectData::Person,
+            Self::Concept => crate::ObjectData::Concept,
             Self::Organization => crate::ObjectData::Organization,
             Self::Household => crate::ObjectData::Household,
             Self::FamilyHouse => crate::ObjectData::FamilyHouse,
@@ -62,6 +65,7 @@ impl IdentityKind {
     pub(crate) fn parse(value: &str) -> Result<Self, crate::Error> {
         match value {
             "person" => Ok(Self::Person),
+            "concept" => Ok(Self::Concept),
             "organization" => Ok(Self::Organization),
             "household" => Ok(Self::Household),
             "family_house" => Ok(Self::FamilyHouse),
