@@ -337,7 +337,7 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
         let control: HTMLInputElement | HTMLSelectElement;
         if (parameter.default.type === "object_kind") {
           control = document.createElement("select");
-          for (const kind of ["person", "definition", "relationship", "event_involvement", "actor_action",
+          for (const kind of ["person", "organization", "household", "family_house", "definition", "relationship", "event_involvement", "actor_action",
             "historical_event", "source", "claim"]) control.add(new Option(kind.replaceAll("_", " "), kind));
         } else {
           control = document.createElement("input");

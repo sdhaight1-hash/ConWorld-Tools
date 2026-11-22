@@ -191,7 +191,7 @@ export function editCanvasTree(host: HTMLElement, original: Block, worldId: stri
         let input: HTMLInputElement | HTMLSelectElement;
         if (parameter.default.type === "object_kind") {
           input = document.createElement("select");
-          for (const kind of ["person", "definition", "relationship", "event_involvement", "actor_action",
+          for (const kind of ["person", "organization", "household", "family_house", "definition", "relationship", "event_involvement", "actor_action",
             "historical_event", "source", "claim"]) input.add(new Option(kind.replaceAll("_", " "), kind));
         } else {
           input = document.createElement("input");

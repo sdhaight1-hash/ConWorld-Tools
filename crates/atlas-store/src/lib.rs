@@ -8,6 +8,7 @@ pub mod genealogy;
 mod graph;
 pub mod inheritance;
 pub mod layout;
+pub mod network;
 pub mod query;
 mod store;
 
@@ -163,6 +164,9 @@ pub struct EvidenceStatement {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ObjectData {
     Person,
+    Organization,
+    Household,
+    FamilyHouse,
     Definition {
         definition: Definition,
         description: String,

@@ -1,4 +1,5 @@
 import { openFamilyHistory } from "./family-history";
+import { openNetworkStudio } from "./network-studio";
 import { openEntryEditor } from "./entry-editor";
 import { publicReader, type Backlinks } from "./public-reader";
 import { invoke } from "@tauri-apps/api/core";
@@ -673,6 +674,8 @@ export async function showAuthorWorkspace(
       aliasForm.reset();
       field<HTMLSelectElement>(aliasForm, "alias_id").value = "";
     }
+    openNetworkStudio(content, { world_id: next.world.id, revision: next.view_revision, day: next.day },
+      !revisionInput.value.trim(), refresh, () => snapshot === next);
     info.textContent = `Author revision ${next.view_revision} / ${next.world.revision} · historical day ${next.day}` +
       (next.scene_limited ? " · Search-only mode: the complete scene exceeds its budget. Indexed search remains available." : "");
     const subject = field<HTMLSelectElement>(relationshipForm, "subject");
@@ -1102,7 +1105,7 @@ export async function showAuthorWorkspace(
       let control: HTMLInputElement | HTMLSelectElement;
       if (parameter.default.type === "object_kind") {
         control = document.createElement("select");
-        for (const kind of ["person", "definition", "relationship", "event_involvement", "actor_action", "historical_event", "source", "claim"]) {
+        for (const kind of ["person", "organization", "household", "family_house", "definition", "relationship", "event_involvement", "actor_action", "historical_event", "source", "claim"]) {
           control.add(new Option(kind.replaceAll("_", " "), kind));
         }
       } else {
