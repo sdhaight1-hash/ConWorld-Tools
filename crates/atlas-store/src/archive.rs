@@ -41,6 +41,7 @@ pub fn inspect_archive(path: impl AsRef<Path>, scope: Scope) -> Result<ArchiveMa
     if schema > SCHEMA_VERSION {
         return Err(Error::SchemaTooNew(schema));
     }
+    crate::store::verify_semantic_schema_lineage(&tx, schema)?;
     let integrity: String = tx.pragma_query_value(None, "quick_check", |row| row.get(0))?;
     if integrity != "ok" {
         return Err(Error::Integrity(integrity));

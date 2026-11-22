@@ -69,3 +69,7 @@ Canvas parameter editing now also supports stable descriptor references and cura
 ## Native semantic scale harness
 
 The new semantic_workload example creates real canonical Concept identities and source-backed classification facts through the Rust Store. At 1k/10k/50k it exercises sparse (1%) and dense (99%) profile search, explicit truncation/budget rejection, stable fact point lookup, subject backlinks and cancellation; reports observed setup and repeated read times, plus Linux process high-water RSS when available. The Rust CI workflow runs the workloads on Windows and Ubuntu. This is a native in-memory benchmark, not a human desktop workflow or measured disk-write benchmark. Actual results must be read from CI before AE-08 can pass.
+
+## Release lineage guard
+
+Schema 37 was assigned independently by #67 and #73 before release. Store open and standalone archive inspection now reject the incompatible spatial registry at versions 37–40 before migration, including empty development databases. The regression reconstructs that registry and confirms no schema version mutation. Released schema 36 remains the supported migration baseline; incompatible experimental databases require their original branch or a verified schema-36 backup. The held combined candidate must inherit this guard while advancing to schemas 41/42.

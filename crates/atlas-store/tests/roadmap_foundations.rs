@@ -3442,3 +3442,41 @@ fn semantic_network_relations_require_curated_endpoint_profiles() -> Result<(), 
     store.verify_foreign_keys(Scope::Author)?;
     Ok(())
 }
+
+#[test]
+fn schema_37_spatial_lineage_is_rejected_without_mutating_archive() -> Result<(), Error> {
+    let dir = tempfile::tempdir()?;
+    let path = dir.path().join("legacy.sqlite");
+    let mut store = Store::open(&path)?;
+    seed(&mut store)?;
+    drop(store);
+
+    // Reproduce the held branch's conflicting schema marker and registry.
+    let conn = rusqlite::Connection::open(&path)?;
+    conn.execute_batch(
+        "PRAGMA foreign_keys=OFF;
+         CREATE TABLE objects_spatial (
+             world_id BLOB NOT NULL REFERENCES worlds(id),
+             id BLOB NOT NULL,
+             kind TEXT NOT NULL CHECK(kind IN ('person','historical_event','source','claim',
+                'relationship','event_involvement','actor_action','definition','organization',
+                'household','family_house','faction','conflict','office','title','asset',
+                'population','conflict_issue','conflict_phase','succession_rule','place')),
+             PRIMARY KEY(world_id,id), UNIQUE(world_id,id,kind)
+         ) STRICT;
+         INSERT INTO objects_spatial SELECT * FROM objects;
+         DROP TABLE objects;
+         ALTER TABLE objects_spatial RENAME TO objects;
+         PRAGMA user_version=37;",
+    )?;
+    drop(conn);
+    assert!(matches!(Store::open(&path), Err(Error::Integrity(_))));
+    assert!(matches!(
+        inspect_archive(&path, Scope::Author),
+        Err(Error::Integrity(_))
+    ));
+    let conn = rusqlite::Connection::open(&path)?;
+    let schema: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    assert_eq!(schema, 37);
+    Ok(())
+}
