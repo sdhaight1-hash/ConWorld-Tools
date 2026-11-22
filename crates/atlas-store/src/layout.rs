@@ -341,7 +341,9 @@ fn find_container(element: &mut LayoutElement, id: ElementId) -> Option<&mut Vec
     if element.id == id {
         Some(children)
     } else {
-        children.iter_mut().find_map(|child| find_container(child, id))
+        children
+            .iter_mut()
+            .find_map(|child| find_container(child, id))
     }
 }
 
