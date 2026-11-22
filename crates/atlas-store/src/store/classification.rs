@@ -378,10 +378,10 @@ impl Store {
                     pending.extend(children.iter());
                 }
                 QueryFilter::Not(inner) => pending.push(inner),
-                QueryFilter::ClassifiedBy(descriptor) => {
-                    if !visible_tag_descriptor(&tx, view, *descriptor)? {
-                        invisible.insert(*descriptor);
-                    }
+                QueryFilter::ClassifiedBy(descriptor)
+                    if !visible_tag_descriptor(&tx, view, *descriptor)? =>
+                {
+                    invisible.insert(*descriptor);
                 }
                 _ => {}
             }
