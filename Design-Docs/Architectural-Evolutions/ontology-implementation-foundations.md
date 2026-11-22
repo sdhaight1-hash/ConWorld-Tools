@@ -83,3 +83,7 @@ Added native measurement commands with explicit source, descriptor and interval,
 ## Release lineage guard
 
 Schema 37 was assigned independently by #67 and #73 before release. Store open and standalone archive inspection now reject the incompatible spatial registry at versions 37–40 before migration, including empty development databases. The regression reconstructs that registry and confirms no schema version mutation. Released schema 36 remains the supported migration baseline; incompatible experimental databases require their original branch or a verified schema-36 backup. The held combined candidate must inherit this guard while advancing to schemas 41/42.
+
+## Schema-36 migration and failure rollback regression
+
+Added a representative reconstructed schema-36 fixture using the original 0032 registry DDL and 0035 network DDL while preserving seeded world, person, source, family-house, membership and accepted-parentage records. Tests inspect the old archive, restore to a separate destination, compare exact historical fact UUIDs/payloads and person version, verify no classification backfill, and demonstrate that a deliberately orphaned object fails migration without changing the old schema version or creating the new tables. This is a reconstructed fixture, not a separately executed old binary or a production archive; exact-head CI remains required.
