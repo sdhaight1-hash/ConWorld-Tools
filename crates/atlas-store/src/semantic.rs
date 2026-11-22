@@ -151,6 +151,58 @@ pub struct Classification {
     pub source_branch: crate::BranchId,
 }
 
+/// Fixed, version-one units for a recorded site-area measurement.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AreaUnit {
+    Hectare,
+    SquareMetre,
+}
+
+impl AreaUnit {
+    pub(crate) fn key(self) -> &'static str {
+        match self {
+            Self::Hectare => "ha",
+            Self::SquareMetre => "m2",
+        }
+    }
+
+    pub(crate) fn parse(key: &str) -> Result<Self, Error> {
+        match key {
+            "ha" => Ok(Self::Hectare),
+            "m2" => Ok(Self::SquareMetre),
+            _ => Err(Error::InvalidInput("site area unit")),
+        }
+    }
+}
+
+/// A missing fact, an explicit unknown reading, and a known zero are distinct.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AreaReading {
+    Unknown,
+    Known { amount: i64, unit: AreaUnit },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SiteAreaInput {
+    pub place: ObjectRef,
+    pub descriptor: DefinitionPin,
+    pub source: ObjectRef,
+    pub reading: AreaReading,
+    pub starts_at: crate::WorldDay,
+    pub ends_before: Option<crate::WorldDay>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SiteAreaFact {
+    pub id: Uuid,
+    pub input: SiteAreaInput,
+    pub recorded_at: crate::AuthorRevision,
+    pub source_branch: crate::BranchId,
+    pub corrects: Option<Uuid>,
+}
+
 /// A governed descriptor pins the exact historical definition, not its label.
 /// This is an author-side reference check, not a persisted classification.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
