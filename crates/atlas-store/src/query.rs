@@ -83,6 +83,33 @@ pub enum ObjectKindFilter {
     Claim,
 }
 
+impl From<&ObjectData> for ObjectKindFilter {
+    fn from(data: &ObjectData) -> Self {
+        match data {
+            ObjectData::Person => Self::Person,
+            ObjectData::Organization => Self::Organization,
+            ObjectData::Household => Self::Household,
+            ObjectData::FamilyHouse => Self::FamilyHouse,
+            ObjectData::Faction => Self::Faction,
+            ObjectData::Conflict => Self::Conflict,
+            ObjectData::Office => Self::Office,
+            ObjectData::Title => Self::Title,
+            ObjectData::Asset => Self::Asset,
+            ObjectData::Population => Self::Population,
+            ObjectData::ConflictIssue => Self::ConflictIssue,
+            ObjectData::ConflictPhase => Self::ConflictPhase,
+            ObjectData::SuccessionRule => Self::SuccessionRule,
+            ObjectData::Definition { .. } => Self::Definition,
+            ObjectData::Relationship { .. } => Self::Relationship,
+            ObjectData::EventInvolvement { .. } => Self::EventInvolvement,
+            ObjectData::ActorAction { .. } => Self::ActorAction,
+            ObjectData::HistoricalEvent { .. } => Self::HistoricalEvent,
+            ObjectData::Source { .. } => Self::Source,
+            ObjectData::Claim { .. } => Self::Claim,
+        }
+    }
+}
+
 /// Versioned, allowlisted wire/persistence shape for composite predicates.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
@@ -841,41 +868,7 @@ fn predicate_matches(filter: &QueryFilter, version: &Version, plan: &PredicatePl
         QueryFilter::ExactLabel(text) => {
             version.record.label.to_lowercase() == text.trim().to_lowercase()
         }
-        QueryFilter::Kind(kind) => matches!(
-            (&version.record.data, kind),
-            (ObjectData::Person, ObjectKindFilter::Person)
-                | (ObjectData::Organization, ObjectKindFilter::Organization)
-                | (ObjectData::Household, ObjectKindFilter::Household)
-                | (ObjectData::FamilyHouse, ObjectKindFilter::FamilyHouse)
-                | (ObjectData::Faction, ObjectKindFilter::Faction)
-                | (ObjectData::Conflict, ObjectKindFilter::Conflict)
-                | (ObjectData::Office, ObjectKindFilter::Office)
-                | (ObjectData::Title, ObjectKindFilter::Title)
-                | (ObjectData::Asset, ObjectKindFilter::Asset)
-                | (ObjectData::Population, ObjectKindFilter::Population)
-                | (ObjectData::ConflictIssue, ObjectKindFilter::ConflictIssue)
-                | (ObjectData::ConflictPhase, ObjectKindFilter::ConflictPhase)
-                | (ObjectData::SuccessionRule, ObjectKindFilter::SuccessionRule)
-                | (ObjectData::Definition { .. }, ObjectKindFilter::Definition)
-                | (
-                    ObjectData::Relationship { .. },
-                    ObjectKindFilter::Relationship
-                )
-                | (
-                    ObjectData::EventInvolvement { .. },
-                    ObjectKindFilter::EventInvolvement
-                )
-                | (
-                    ObjectData::ActorAction { .. },
-                    ObjectKindFilter::ActorAction
-                )
-                | (
-                    ObjectData::HistoricalEvent { .. },
-                    ObjectKindFilter::HistoricalEvent
-                )
-                | (ObjectData::Source { .. }, ObjectKindFilter::Source)
-                | (ObjectData::Claim { .. }, ObjectKindFilter::Claim)
-        ),
+        QueryFilter::Kind(kind) => ObjectKindFilter::from(&version.record.data) == *kind,
         QueryFilter::FullTextPhrase(text)
         | QueryFilter::ClaimFullTextPhrase(text)
         | QueryFilter::ExactAlias(text) => plan

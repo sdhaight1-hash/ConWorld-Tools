@@ -1312,8 +1312,8 @@ fn caption_search_reauthorizes_destinations_without_resaving_sources() -> Result
         scope: Scope::Public,
         ..view
     };
-    let control = QueryControl::new(std::time::Duration::from_secs(10))?;
     let find = |store: &Store, context, term, limit| {
+        let control = QueryControl::new(std::time::Duration::from_secs(10))?;
         store.search_public_pages(public(context), term, limit, &control)
     };
     author.revision = store.save_entry_layout(author, &source, true, Uuid::new_v4())?;

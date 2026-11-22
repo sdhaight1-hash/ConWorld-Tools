@@ -11,8 +11,8 @@ use atlas_store::{
     VersionRef, ViewContext, World, WorldDay, WorldId,
     discovery::{MentionDisposition, ReviewMention, SavePersonAlias},
     query::{
-        Direction, ParameterBinding, PredicateInput, QUERY_SCHEMA_VERSION, QueryControl,
-        QueryCursor, QueryFilter, QueryParameter, QuerySpec, SaveNamedLabelQuery,
+        Direction, ObjectKindFilter, ParameterBinding, PredicateInput, QUERY_SCHEMA_VERSION,
+        QueryControl, QueryCursor, QueryFilter, QueryParameter, QuerySpec, SaveNamedLabelQuery,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -179,7 +179,7 @@ pub struct MentionDiscoverySummary {
 pub struct SearchRow {
     id: String,
     label: String,
-    kind: &'static str,
+    kind: ObjectKindFilter,
     statement: Option<String>,
     source_citation: Option<String>,
 }
@@ -1056,28 +1056,7 @@ impl AuthorWorkspace {
                     } else {
                         None
                     };
-                    let kind = match version.record.data {
-                        ObjectData::Person => "person",
-                        ObjectData::Organization => "organization",
-                        ObjectData::Household => "household",
-                        ObjectData::FamilyHouse => "family_house",
-                        ObjectData::Faction => "faction",
-                        ObjectData::Conflict => "conflict",
-                        ObjectData::Office => "office",
-                        ObjectData::Title => "title",
-                        ObjectData::Asset => "asset",
-                        ObjectData::Population => "population",
-                        ObjectData::ConflictIssue => "conflict_issue",
-                        ObjectData::ConflictPhase => "conflict_phase",
-                        ObjectData::SuccessionRule => "succession_rule",
-                        ObjectData::Definition { .. } => "definition",
-                        ObjectData::Relationship { .. } => "relationship",
-                        ObjectData::EventInvolvement { .. } => "event_involvement",
-                        ObjectData::ActorAction { .. } => "actor_action",
-                        ObjectData::HistoricalEvent { .. } => "historical_event",
-                        ObjectData::Source { .. } => "source",
-                        ObjectData::Claim { .. } => "claim",
-                    };
+                    let kind = ObjectKindFilter::from(&version.record.data);
                     Ok(SearchRow {
                         id: version.object.id.0.to_string(),
                         label: version.record.label,
@@ -3376,7 +3355,13 @@ mod tests {
         assert_eq!(matches.revision, 3);
         assert_eq!(matches.rows.len(), 2);
         assert_ne!(matches.rows[0].id, matches.rows[1].id);
-        assert!(matches.rows.iter().all(|row| row.kind == "person"));
+        assert_eq!(serde_json::to_value(&matches.rows[0])?["kind"], "person");
+        assert!(
+            matches
+                .rows
+                .iter()
+                .all(|row| row.kind == ObjectKindFilter::Person)
+        );
         assert_eq!(
             workspace
                 .search(
