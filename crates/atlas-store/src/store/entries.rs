@@ -267,17 +267,27 @@ impl Store {
                 None
             };
             let sql = if phrase.is_some() {
-                "SELECT d.entry_id FROM public_page_search_fts
-                 JOIN public_page_search_documents d ON d.doc_id=public_page_search_fts.rowid
-                 WHERE d.world_id=?1 AND public_page_search_fts MATCH ?2
-                 ORDER BY d.entry_id"
+                "WITH candidates AS (
+                    SELECT d.entry_id,1 AS text_hit FROM public_page_search_fts
+                    JOIN public_page_search_documents d ON d.doc_id=public_page_search_fts.rowid
+                    WHERE d.world_id=?1 AND public_page_search_fts MATCH ?2
+                    UNION ALL
+                    SELECT c.entry_id,0 AS text_hit FROM entry_caption_fts
+                    JOIN entry_caption_candidates c ON c.doc_id=entry_caption_fts.rowid
+                    JOIN public_page_search_documents s ON s.world_id=c.world_id
+                        AND s.entry_id=c.entry_id AND s.revision=c.revision
+                    JOIN public_page_search_documents t ON t.world_id=c.world_id
+                        AND t.entry_id=c.target_id
+                    WHERE c.world_id=?1 AND entry_caption_fts MATCH ?2
+                 )
+                 SELECT entry_id,MAX(text_hit) FROM candidates GROUP BY entry_id ORDER BY entry_id"
             } else {
-                "SELECT entry_id FROM public_page_search_documents
+                "SELECT entry_id,1 FROM public_page_search_documents
                  WHERE world_id=?1 AND ?2 IS NULL ORDER BY entry_id"
             };
             let mut stmt = tx.prepare(sql)?;
             let ids = stmt.query_map(params![view.world.0.as_bytes(), phrase], |row| {
-                row.get::<_, [u8; 16]>(0)
+                Ok((row.get::<_, [u8; 16]>(0)?, row.get::<_, bool>(1)?))
             })?;
             let mut result = PublicPageSearch {
                 matches: Vec::new(),
@@ -286,9 +296,10 @@ impl Store {
             let mut visible_pages = 0;
             for id in ids {
                 store.check_query_control()?;
+                let (id, text_hit) = id?;
                 let entry = ObjectRef {
                     world: view.world,
-                    id: ObjectId(Uuid::from_bytes(id?)),
+                    id: ObjectId(Uuid::from_bytes(id)),
                 };
                 let Some((document, _)) = read_layout_at(&tx, view, entry)? else {
                     continue;
@@ -296,12 +307,16 @@ impl Store {
                 let Some(page) = document.compile(store, view)? else {
                     continue;
                 };
-                visible_pages += 1;
-                if visible_pages > 512 {
-                    return Err(Error::QueryBudgetExceeded);
-                }
                 let remaining = limit - result.matches.len();
                 let found = find_text_blocks(page, &needle, remaining);
+                // A hidden destination cannot consume the visible-page budget.
+                // Raw candidate work remains subject to query cancellation/deadline.
+                if text_hit || found.truncated || !found.matches.is_empty() {
+                    visible_pages += 1;
+                    if visible_pages > 512 {
+                        return Err(Error::QueryBudgetExceeded);
+                    }
+                }
                 for (element, text) in found.matches {
                     result.matches.push(PublicPageMatch {
                         entry,
@@ -392,16 +407,21 @@ fn find_text_blocks(page: DisplayElement, needle: &str, limit: usize) -> EntryTe
     };
     let mut pending = vec![page];
     while let Some(element) = pending.pop() {
-        match element.content {
-            DisplayContent::Stack(children) => pending.extend(children.into_iter().rev()),
-            DisplayContent::Text(text) if text.to_lowercase().contains(needle) => {
-                if result.matches.len() == limit {
-                    result.truncated = true;
-                    break;
-                }
-                result.matches.push((element.id, text));
+        let text = match element.content {
+            DisplayContent::Stack(children) => {
+                pending.extend(children.into_iter().rev());
+                continue;
             }
-            _ => {}
+            DisplayContent::Text(text) => text,
+            DisplayContent::ObjectLink(link) => link.label,
+            _ => continue,
+        };
+        if text.to_lowercase().contains(needle) {
+            if result.matches.len() == limit {
+                result.truncated = true;
+                break;
+            }
+            result.matches.push((element.id, text));
         }
     }
     result
@@ -415,6 +435,13 @@ fn replace_public_page_index(
     published: bool,
     revision: i64,
 ) -> Result<(), Error> {
+    conn.execute(
+        "DELETE FROM entry_caption_candidates WHERE world_id=?1 AND entry_id=?2",
+        params![
+            document.entry.world.0.as_bytes(),
+            document.entry.id.0.as_bytes()
+        ],
+    )?;
     conn.execute(
         "DELETE FROM public_page_search_documents WHERE world_id=?1 AND entry_id=?2",
         params![
@@ -433,11 +460,29 @@ fn replace_public_page_index(
                 text
             ],
         )?;
+        // This is an internal candidate index, never a publication corpus.
+        // Target release/day checks are performed on every search, not on source save.
+        for (element, link) in document.visible_links(Scope::Public) {
+            conn.execute(
+                "INSERT INTO entry_caption_candidates(
+                    world_id,entry_id,revision,element_id,target_id,caption)
+                 VALUES (?1,?2,?3,?4,?5,?6)",
+                params![
+                    document.entry.world.0.as_bytes(),
+                    document.entry.id.0.as_bytes(),
+                    revision,
+                    element.0.as_bytes(),
+                    link.target.id.0.as_bytes(),
+                    link.label.to_lowercase().replace('\0', " ")
+                ],
+            )?;
+        }
     }
     Ok(())
 }
 
 pub(super) fn rebuild_public_page_index(conn: &Connection) -> Result<(), Error> {
+    conn.execute("DELETE FROM entry_caption_candidates", [])?;
     conn.execute("DELETE FROM public_page_search_documents", [])?;
     let mut stmt = conn.prepare(
         "SELECT v.world_id,v.entry_id,v.revision,v.document
