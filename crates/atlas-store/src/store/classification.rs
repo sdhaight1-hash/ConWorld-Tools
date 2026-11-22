@@ -3,11 +3,13 @@ use super::*;
 use crate::query::{classification_candidate_matches, classification_seek_anchors};
 use crate::semantic::{Classification, ClassificationInput, ConceptProfile, DefinitionPin};
 
+// Keep the selective fact lookup ahead of revision and lineage joins. SQLite
+// otherwise scans the revision history per label in sparse candidate seeks.
 pub(super) const ACTIVE: &str = "
 , active_classification AS (
     SELECT p.*,r.branch_id FROM concept_classifications p
-    JOIN author_revisions r ON r.world_id=p.world_id AND r.revision=p.recorded_revision
-    JOIN eligible l ON l.branch_id=r.branch_id
+    CROSS JOIN author_revisions r ON r.world_id=p.world_id AND r.revision=p.recorded_revision
+    CROSS JOIN eligible l ON l.branch_id=r.branch_id
     WHERE p.world_id=?1 AND p.recorded_revision<=l.rev
       AND (l.depth=0 OR p.starts_at<=l.cutoff)
       AND NOT EXISTS (

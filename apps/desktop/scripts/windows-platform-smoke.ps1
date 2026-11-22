@@ -59,6 +59,8 @@ public static class AtlasNativeCapture {
     [DllImport("user32.dll")]
     public static extern bool GetWindowRect(IntPtr hwnd, out Rect rect);
     [DllImport("user32.dll")]
+    public static extern bool MoveWindow(IntPtr hwnd, int x, int y, int width, int height, bool repaint);
+    [DllImport("user32.dll")]
     public static extern bool SetForegroundWindow(IntPtr hwnd);
     [DllImport("user32.dll")]
     public static extern IntPtr GetForegroundWindow();
@@ -78,7 +80,32 @@ public static class AtlasNativeCapture {
             $width = $rect.Right - $rect.Left
             $height = $rect.Bottom - $rect.Top
             $bounds = New-Object System.Drawing.Rectangle($rect.Left, $rect.Top, $width, $height)
-            if ($width -lt 460 -or $height -lt 540 -or ![System.Windows.Forms.SystemInformation]::VirtualScreen.Contains($bounds)) {
+            $screen = [System.Windows.Forms.Screen]::FromHandle($hwnd)
+            Write-Output "ATLAS_CAPTURE_BOUNDS initial=$bounds monitor=$($screen.Bounds) work=$($screen.WorkingArea)"
+            # The default 1080x760 client area can exceed a small hosted desktop.
+            # Fit the real window, never crop the screenshot or waive visibility.
+            if (!$screen.Bounds.Contains($bounds)) {
+                $work = $screen.WorkingArea
+                $fitWidth = [Math]::Min($width, $work.Width)
+                $fitHeight = [Math]::Min($height, $work.Height)
+                if ($fitWidth -lt 460 -or $fitHeight -lt 540) {
+                    throw "Capture desktop cannot accommodate the minimum native window size."
+                }
+                $x = [Math]::Max($work.Left, [Math]::Min($rect.Left, $work.Right - $fitWidth))
+                $y = [Math]::Max($work.Top, [Math]::Min($rect.Top, $work.Bottom - $fitHeight))
+                if (![AtlasNativeCapture]::MoveWindow($hwnd, $x, $y, $fitWidth, $fitHeight, $true)) {
+                    throw "Cannot fit the native ontology window to the capture desktop."
+                }
+                Start-Sleep -Milliseconds 500
+                if (![AtlasNativeCapture]::GetWindowRect($hwnd, [ref]$rect)) { throw "Cannot obtain fitted native window bounds." }
+                $width = $rect.Right - $rect.Left
+                $height = $rect.Bottom - $rect.Top
+                $bounds = New-Object System.Drawing.Rectangle($rect.Left, $rect.Top, $width, $height)
+                $screen = [System.Windows.Forms.Screen]::FromHandle($hwnd)
+            }
+            Write-Output "ATLAS_CAPTURE_BOUNDS final=$bounds monitor=$($screen.Bounds)"
+            if ($width -lt 460 -or $height -lt 540 -or !$screen.Bounds.Contains($bounds) -or
+                [AtlasNativeCapture]::GetForegroundWindow() -ne $hwnd) {
                 throw "Native window is not fully visible on the capture desktop."
             }
             $bitmap = New-Object System.Drawing.Bitmap($width, $height)
@@ -93,6 +120,8 @@ public static class AtlasNativeCapture {
                 Write-Output "ATLAS_NATIVE_CAPTURE $capture"
             } finally { $bitmap.Dispose() }
             Set-Content -Encoding ascii -Path (Join-Path $handshake "captured") -Value "captured"
+        } else {
+            throw "Native ontology capture readiness was not acknowledged."
         }
     }
     $finished = $process.WaitForExit(60000)
