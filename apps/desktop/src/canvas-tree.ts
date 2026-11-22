@@ -311,7 +311,7 @@ export function editCanvasTree(host: HTMLElement, original: Block, worldId: stri
         let input: HTMLInputElement | HTMLSelectElement;
         if (parameter.default.type === "object_kind") {
           input = document.createElement("select");
-          for (const kind of ["person", "concept", "organization", "household", "family_house", "faction", "conflict", "office", "title", "asset", "population", "conflict_issue", "conflict_phase", "succession_rule", "definition", "relationship", "event_involvement", "actor_action",
+          for (const kind of ["person", "concept", "place", "organization", "household", "family_house", "faction", "conflict", "office", "title", "asset", "population", "conflict_issue", "conflict_phase", "succession_rule", "definition", "relationship", "event_involvement", "actor_action",
             "historical_event", "source", "claim"]) input.add(new Option(kind.replaceAll("_", " "), kind));
         } else if (parameter.default.type === "concept_profile") {
           input = document.createElement("select");

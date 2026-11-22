@@ -2107,6 +2107,29 @@ test("institution studio records a sourced fact and reviews a separate draft", a
     {command: "workspace_record_network_fact", args: {request: {revision: 5}, input: {kind: "membership", source: {id: "folio"}}}},
     {command: "workspace_review_ghost", args: {request: {revision: 6}, proposalId: "proposal", promote: true}},
   ]);
+  await studio.locator("summary").click();
+  await studio.getByLabel("Identity type").selectOption("place");
+  await studio.getByLabel("Identity label").fill("Northbridge Manor");
+  await studio.getByRole("button", { name: "Create identity" }).click();
+  await expect(page.locator("#author-world-info")).toContainText("Author revision 8 / 8");
+  await studio.locator("summary").click();
+  await studio.getByLabel("Subject identity").fill("manor");
+  await studio.getByLabel("Target identity").fill("town");
+  await studio.getByLabel("Evidence source identity").fill("folio");
+  await studio.getByLabel("Fact type").selectOption("proper_part_within");
+  await studio.getByLabel("Role or causal rationale").fill("physical");
+  await expect(studio.getByLabel("Fact type")).toHaveValue("proper_part_within");
+  if (process.env.ATLAS_CAPTURE_PHASE3 === "1") {
+    const timestamp = new Date().toISOString().slice(0, 19).replace("T", "_").replaceAll(":", "-") + "Z";
+    await studio.locator("[data-fact]").screenshot({ path: "../../Development-Screenshots/" + timestamp + "_phase-03_spatial_mock-native-containment-form_01.png", animations: "disabled" });
+  }
+  await studio.getByRole("button", { name: "Record network fact" }).click();
+  await expect(page.locator("#author-world-info")).toContainText("Author revision 9 / 9");
+  const spatialWrites = await page.evaluate(() => (window as unknown as { __networkWrites: unknown[] }).__networkWrites.slice(3));
+  expect(spatialWrites).toMatchObject([
+    {command: "workspace_create_identity", args: {request: {revision: 7}, kind: "place", label: "Northbridge Manor"}},
+    {command: "workspace_record_network_fact", args: {request: {revision: 8}, input: {kind: "proper_part_within", role: "physical", subject: {id: "manor"}, target: {id: "town"}}}}
+  ]);
 });
 
 test("custom template insertion uses exact pin and Canvas drag and undo preserve privacy", async ({ page }) => {
