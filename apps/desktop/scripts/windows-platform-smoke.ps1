@@ -36,8 +36,10 @@ if ($CaptureDirectory) {
 }
 $process = New-Object System.Diagnostics.Process
 $process.StartInfo = $startInfo
+$started = $false
 try {
     if (!$process.Start()) { throw "Could not launch the native platform test." }
+    $started = $true
     $stdout = $process.StandardOutput.ReadToEndAsync()
     $stderr = $process.StandardError.ReadToEndAsync()
     if ($handshake) {
@@ -124,7 +126,7 @@ public static class AtlasNativeCapture {
         throw "Windows scene, Canvas2D or history verification failed."
     }
 } finally {
-    if (!$process.HasExited) {
+    if ($started -and !$process.HasExited) {
         try { $process.Kill(); $process.WaitForExit() } catch { }
     }
     $process.Dispose()

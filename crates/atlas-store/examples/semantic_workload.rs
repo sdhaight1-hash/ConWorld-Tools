@@ -109,6 +109,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Uuid::new_v4(),
         )?);
         view.revision = AuthorRevision(view.revision.0 + 1);
+        if (i + 1) % 1000 == 0 {
+            println!(
+                "entities={count} classified={} elapsed_ms={}",
+                i + 1,
+                started.elapsed().as_millis()
+            );
+        }
     }
     let fact = FactRef {
         world: world.id,
@@ -155,12 +162,39 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             links.elapsed().as_micros()
         );
     }
+    // Verify actual pagination on the bounded workload; dense large queries
+    // must reject instead of silently disguising budget exhaustion as absence.
+    let spec = spec(ConceptProfile::Language);
+    if count == 1000 {
+        let first = store.execute_query_page(&spec, view, None)?;
+        assert_eq!(first.rows.len(), 500);
+        let second = store.execute_query_page(&spec, view, first.next_cursor.as_ref())?;
+        assert_eq!(second.rows.len(), 490);
+        assert!(second.next_cursor.is_none());
+        let mut ids = std::collections::HashSet::new();
+        for row in first.rows.iter().chain(&second.rows) {
+            assert!(ids.insert(row.object));
+        }
+        println!("dense_pages=2 distinct={}", ids.len());
+    } else {
+        assert!(matches!(
+            store.execute_query_page(&spec, view, None),
+            Err(Error::QueryBudgetExceeded)
+        ));
+        println!("dense_pages=budget_rejected");
+    }
     let control = QueryControl::new(Duration::from_secs(30))?;
     control.cancel();
     assert!(matches!(
-        store.execute_query_controlled(&spec(ConceptProfile::Culture), view, &control),
+        store.execute_query_controlled(&spec, view, &control),
         Err(Error::QueryCancelled)
     ));
+    let deadline = QueryControl::new(Duration::ZERO)?;
+    assert!(matches!(
+        store.execute_query_controlled(&spec, view, &deadline),
+        Err(Error::QueryDeadlineExceeded)
+    ));
+    println!("cancellation=verified deadline=verified");
     if let Ok(status) = std::fs::read_to_string("/proc/self/status")
         && let Some(peak) = status.lines().find(|line| line.starts_with("VmHWM:"))
     {
