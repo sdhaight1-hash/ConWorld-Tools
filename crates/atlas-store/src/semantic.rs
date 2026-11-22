@@ -101,7 +101,8 @@ impl Store {
 }
 
 /// Initial curated profiles. A profile is classification metadata, not a new object kind.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ConceptProfile {
     Culture,
     Language,

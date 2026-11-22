@@ -1,5 +1,5 @@
 -- Author-only, source-backed classification assignments; no inferred facts.
-CREATE TABLE concept_classifications (
+CREATE TABLE IF NOT EXISTS concept_classifications (
     world_id BLOB NOT NULL,
     id BLOB NOT NULL CHECK(length(id)=16),
     subject_id BLOB NOT NULL,
@@ -19,10 +19,10 @@ CREATE TABLE concept_classifications (
         REFERENCES object_versions(world_id,object_id,branch_id,state_revision,revision),
     FOREIGN KEY(world_id,recorded_revision) REFERENCES author_revisions(world_id,revision)
 ) STRICT;
-CREATE INDEX classification_subject ON concept_classifications(world_id,subject_id,starts_at,recorded_revision);
-CREATE INDEX classification_profile ON concept_classifications(world_id,profile,starts_at,recorded_revision);
+CREATE INDEX IF NOT EXISTS classification_subject ON concept_classifications(world_id,subject_id,starts_at,recorded_revision);
+CREATE INDEX IF NOT EXISTS classification_profile ON concept_classifications(world_id,profile,starts_at,recorded_revision);
 
-CREATE TABLE classification_withdrawals (
+CREATE TABLE IF NOT EXISTS classification_withdrawals (
     world_id BLOB NOT NULL,
     branch_id BLOB NOT NULL,
     fact_id BLOB NOT NULL,

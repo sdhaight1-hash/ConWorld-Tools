@@ -3097,8 +3097,22 @@ fn classifications_preserve_pins_and_branch_local_withdrawals() -> Result<(), Er
         Err(Error::WrongKind)
     ));
     let before = author;
+    let profile_query = query(QueryFilter::ClassifiedAs(ConceptProfile::Language));
+    assert!(store.execute_query(&profile_query, before)?.rows.is_empty());
     let assignment = store.record_classification(author, input, Uuid::new_v4())?;
     author.revision = AuthorRevision(4);
+    assert_eq!(
+        store.execute_query(&profile_query, author)?.rows[0].object,
+        concept
+    );
+    let compound = query(QueryFilter::And(vec![
+        profile_query.filter.clone(),
+        QueryFilter::ExactLabel("Estuary speech".into()),
+    ]));
+    assert_eq!(
+        store.execute_query(&compound, author)?.rows[0].object,
+        concept
+    );
     assert!(
         store
             .classifications(before, Some(concept), None)?
@@ -3173,11 +3187,16 @@ fn classifications_preserve_pins_and_branch_local_withdrawals() -> Result<(), Er
         store.classifications(inherited, None, Some(ConceptProfile::Language))?[0].id,
         assignment
     );
+    assert_eq!(
+        store.execute_query(&profile_query, inherited)?.rows[0].object,
+        concept
+    );
     store.withdraw_classification(inherited, assignment, Uuid::new_v4())?;
     let after = ViewContext {
         revision: AuthorRevision(fork.created_revision.0 + 1),
         ..inherited
     };
+    assert!(store.execute_query(&profile_query, after)?.rows.is_empty());
     assert!(
         store
             .classifications(after, Some(concept), None)?

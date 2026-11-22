@@ -185,12 +185,18 @@ impl Store {
         self.check_query_control()?;
         let tx = self.conn.unchecked_transaction()?;
         metadata_world(&tx, view, false)?;
+        let filter = match (subject, profile) {
+            (Some(_), Some(_)) => "subject_id=?5 AND profile=?6",
+            (Some(_), None) => "subject_id=?5 AND ?6 IS NULL",
+            (None, Some(_)) => "?5 IS NULL AND profile=?6",
+            (None, None) => unreachable!("filter required"),
+        };
         let mut statement = tx.prepare(&format!(
             "{METADATA_CTE} {ACTIVE}
              SELECT id,subject_id,profile,descriptor_id,descriptor_branch,descriptor_state_revision,
                     descriptor_revision,source_id,starts_at,ends_before,recorded_revision,branch_id
              FROM active_classification
-             WHERE (?5 IS NULL OR subject_id=?5) AND (?6 IS NULL OR profile=?6)
+             WHERE {filter}
                AND starts_at<=?4 AND (ends_before IS NULL OR ends_before>?4)
              ORDER BY id LIMIT 2001"
         ))?;

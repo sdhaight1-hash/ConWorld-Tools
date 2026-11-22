@@ -1130,6 +1130,7 @@ impl Store {
             QueryFilter::ClaimFullTextPhrase(text) => ("claimtext", text.trim().to_string()),
             QueryFilter::ExactAlias(_)
             | QueryFilter::Kind(_)
+            | QueryFilter::ClassifiedAs(_)
             | QueryFilter::HasSource(_)
             | QueryFilter::And(_)
             | QueryFilter::Or(_)

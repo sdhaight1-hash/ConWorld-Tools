@@ -35,3 +35,7 @@ Adds Concept to the canonical object registry, identity creation, ghost proposal
 ## Curated classification persistence
 
 Schema 38 adds author-only temporal classification assignments and branch-local withdrawals. The first four curated profiles are Culture, Language, Material and Technology, all compatible with Concept only. Assignments retain an exact Tag Definition version and source, reject overlapping same-profile assignments, and preserve the original author revision and branch. Reads are bounded, historical and scoped; corrected labels do not replace the recorded pin. No inferred membership, general field runtime or published projection. The held spatial migration must be renumbered after these migrations and retain Concept. CI pending; no UI capture applicable to this store slice.
+
+## Classification query integration
+
+AE-05: the existing typed query planner now accepts curated profile predicates, including boolean composition, persisted predicate encoding and typed parameter binding. The profile vocabulary is fixed, while each assignment retains its descriptor version. Queries remain author-only, reuse the bounded classification service and honor query control. Profile filtering now uses separate SQL shapes for subject/profile indexes. Schema 38 migration is repeatable for existing downgrade-simulation regression fixtures. Desktop parameter controls updated, including composite profile selection. CI and native UI captures pending.
