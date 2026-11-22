@@ -1,3 +1,4 @@
+import { canLeaveEntryDrafts } from "./entry-drafts";
 import { invoke } from "@tauri-apps/api/core";
 type Context = { world_id: string; branch_id?: string; day: number; revision: number };
 const selectedBranches = new Map<string, string>();
@@ -206,11 +207,11 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
       chooser.value=request.branch_id??"";chooser.hidden=false;
     }catch(error){if(valid())status.textContent=String(error);}
   };
-  chooser.onchange=()=>{ if (busy) { chooser.value=request.branch_id??""; return; } choose(chooser.value||undefined); };
+  chooser.onchange=()=>{ if (busy || !canLeaveEntryDrafts()) { chooser.value=request.branch_id??""; return; } choose(chooser.value||undefined); };
   const forkButton=host.querySelector<HTMLButtonElement>("[data-fork]")!;
   forkButton.disabled=!editable;
   forkButton.onclick=async()=>{
-    if(!valid()||busy||!editable)return;
+    if(!valid()||busy||!editable||!canLeaveEntryDrafts())return;
     busy=true;
     try{
       const id=await invoke<string>("workspace_fork_metadata",{request});
@@ -220,7 +221,7 @@ export function openNetworkStudio(parent: HTMLElement, request: Context, editabl
   };
   let busy = false;
   async function write(command: string, args: Record<string, unknown>) {
-    if (!valid() || busy || !editable) return;
+    if (!valid() || busy || !editable || !canLeaveEntryDrafts()) return;
     busy = true;
     ++inspection; cancelPicker();
     try { await invoke(command, { request, ...args }); if (valid()) await refresh(); }

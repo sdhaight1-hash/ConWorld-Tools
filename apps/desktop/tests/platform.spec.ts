@@ -2523,3 +2523,68 @@ test("creation commands use the loaded author revision and reject a changed day 
   const kinds = await page.locator('#author-composite-form select[name="kind"] option').evaluateAll(options => options.map(option => (option as HTMLOptionElement).value));
   expect(kinds).toEqual(["","person","concept","place","organization","household","family_house","faction","conflict","office","title","asset","population","conflict_issue","conflict_phase","succession_rule","definition","relationship","event_involvement","actor_action","historical_event","source","claim"]);
 });
+
+
+test("entry draft blocks view changes, retains a failed save and can be explicitly discarded", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "draft-world", name: "Draft safety", revision: 4 };
+    const people = [{ id: "alice", label: "Alice" }, { id: "beatrice", label: "Beatrice" }];
+    let saves = 0;
+    let release: (() => void) | undefined;
+    let saved: unknown = null;
+    Object.assign(window, { isTauri: true, __resolveDraftSave: () => release?.(), __TAURI_INTERNALS__: {
+      invoke: async (command: string, args: { day?: number; revision?: number; document?: unknown; published?: boolean }) => {
+        if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+        if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+        if (command === "workspace_worlds") return [world];
+        if (command === "workspace_saved_queries") return [];
+        if (command === "workspace_snapshot") return { world, day: args.day ?? 0, view_revision: args.revision ?? world.revision, people, relationships: [], events: [] };
+        if (command === "workspace_entry_layout") return saved;
+        if (command === "workspace_save_layout") {
+          saves++;
+          if (saves === 1) throw new Error("Simulated stale revision");
+          await new Promise<void>(resolve => { release = resolve; });
+          saved = [args.document, args.published]; world.revision++;
+          return null;
+        }
+        throw new Error("Unexpected mock command: " + command);
+      },
+    } });
+  });
+  await page.goto("/");
+  await expect(page.locator("#author-status")).toContainText("World loaded");
+  const graph = page.getByRole("region", { name: "Saved world graph" });
+  const inspector = graph.getByRole("complementary", { name: "Node inspector" });
+  await graph.locator("#nodes button[data-node=alice]").click();
+  await inspector.getByRole("button", { name: "Open character page" }).click();
+  const text = inspector.getByRole("textbox", { name: "Page text", exact: true });
+  await text.fill("Retain this draft");
+  await graph.locator("#nodes button[data-node=beatrice]").click();
+  await expect(text).toHaveValue("Retain this draft");
+  await expect(inspector.locator("[data-draft-status]")).toContainText("Save or discard");
+  const day = page.locator("#author-day");
+  await day.fill("42");
+  await day.blur();
+  await expect(day).toHaveValue("0");
+  await expect(text).toHaveValue("Retain this draft");
+  await inspector.getByRole("button", { name: "Save page" }).click();
+  await expect(inspector.locator("[data-draft-status]")).toContainText("Save failed");
+  await expect(text).toHaveValue("Retain this draft");
+  if (process.env.ATLAS_CAPTURE_PHASE3 === "1") {
+    const timestamp = new Date().toISOString().slice(0, 19).replace("T", "_").replaceAll(":", "-") + "Z";
+    await inspector.screenshot({ path: "../../Development-Screenshots/" + timestamp + "_phase-04_canvas_mock-native-draft-guard_01.png", animations: "disabled" });
+  }
+  await inspector.getByRole("button", { name: "Discard unsaved page changes" }).click();
+  await expect(text).toHaveValue("");
+  await text.fill("Save this instead");
+  await inspector.getByRole("button", { name: "Save page" }).click();
+  await expect(inspector.locator("[data-draft-status]")).toHaveText("Saving page…");
+  await graph.locator("#nodes button[data-node=beatrice]").click();
+  await expect(inspector.locator("[data-draft-status]")).toContainText("Wait for the result");
+  await page.evaluate(() => (window as unknown as { __resolveDraftSave: () => void }).__resolveDraftSave());
+  await expect(page.locator("#author-world-info")).toContainText("Author revision 5 / 5");
+  await inspector.getByRole("button", { name: "Open character page" }).click();
+  await expect(text).toHaveValue("Save this instead");
+  await graph.locator("#nodes button[data-node=beatrice]").click();
+  await expect(inspector.getByRole("button", { name: "Open character page" })).toBeVisible();
+});

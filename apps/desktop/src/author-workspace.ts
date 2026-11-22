@@ -1,3 +1,4 @@
+import { canLeaveEntryDrafts } from "./entry-drafts";
 import { objectKinds } from "./object-kinds";
 import { openFamilyHistory } from "./family-history";
 import { openNetworkStudio } from "./network-studio";
@@ -209,6 +210,7 @@ export async function showAuthorWorkspace(
   const value = (form: HTMLFormElement, name: string) => field(form, name).value;
   const score = (form: HTMLFormElement) => value(form, "trust") === "" ? null : Number(value(form, "trust"));
   let snapshot: Snapshot | undefined;
+  let loadedControls: { world: string; day: string; revision: string } | undefined;
   let requestSequence = 0;
   let querySequence = 0;
   let publicSequence = 0;
@@ -471,6 +473,7 @@ export async function showAuthorWorkspace(
     const current = snapshot;
     if (current && people.some(person => person.id === id)) {
       button("Family history", () => {
+        if (!canLeaveEntryDrafts()) return;
         panel.replaceChildren();
         void openFamilyHistory(panel, { world_id: current.world.id, person_id: id, day: current.day, revision: current.view_revision },
           people, !revisionInput.value.trim(), async () => { await refresh(); selectNode(id); });
@@ -481,7 +484,7 @@ export async function showAuthorWorkspace(
       button(label, () => {
         const targets = entryTargets(current);
         const open = (target: string) => {
-          if (snapshot !== current) return;
+          if (snapshot !== current || !canLeaveEntryDrafts()) return;
           panel.replaceChildren();
           void openEntryEditor(panel, current.world.id, target, current.day, current.view_revision,
             !revisionInput.value.trim(), async () => {
@@ -621,6 +624,14 @@ export async function showAuthorWorkspace(
   });
 
   async function refresh() {
+    if (!canLeaveEntryDrafts()) {
+      if (loadedControls) {
+        worldSelect.value = loadedControls.world;
+        dayInput.value = loadedControls.day;
+        revisionInput.value = loadedControls.revision;
+      }
+      return;
+    }
     clearPublicSearch();
     const sequence = ++requestSequence;
     ++querySequence;
@@ -665,6 +676,7 @@ export async function showAuthorWorkspace(
     }
     if (sequence !== requestSequence) return;
     snapshot = next;
+    loadedControls = { world: worldId, day: String(day), revision: revision === null ? "" : String(revision) };
     savedQueries = saved;
     options(savedSelect, [{ id: "", label: "New saved search" },
       ...savedQueries.map((query) => ({ id: query.id, label: query.name + " · " + query.id.slice(0, 8) }))],
@@ -686,7 +698,7 @@ export async function showAuthorWorkspace(
     openMediaStudio(content,{world_id:next.world.id,revision:next.view_revision,day:next.day},!revisionInput.value.trim(),refresh,()=>snapshot===next);
     openNetworkStudio(content, { world_id: next.world.id, revision: next.view_revision, day: next.day },
       !revisionInput.value.trim(), refresh, () => snapshot === next);
-    info.textContent = `Author revision ${next.view_revision} / ${next.world.revision} · historical day ${next.day}` +
+    info.textContent = `Author revision ${next.view_revision} / ${next.world.revision} · historical day ${next.day} · Main history (author graph, queries and Canvas)` +
       (next.scene_limited ? " · Search-only mode: the complete scene exceeds its budget. Indexed search remains available." : "");
     const subject = field<HTMLSelectElement>(relationshipForm, "subject");
     const target = field<HTMLSelectElement>(relationshipForm, "target");
@@ -769,7 +781,7 @@ export async function showAuthorWorkspace(
   }
 
   function runQuery(message: string, execute: (requestId: string) => Promise<SearchResult>, page = 1) {
-    if (!snapshot || saving) return;
+    if (!snapshot || saving || !canLeaveEntryDrafts()) return;
     const sequence = ++querySequence;
     cancelActiveQuery();
     const requestId = crypto.randomUUID();
@@ -828,7 +840,7 @@ export async function showAuthorWorkspace(
             if (!current || sequence !== querySequence) return;
             const targets = entryTargets(current, { id: row.id, label: row.label });
             const open = (target: string) => {
-              if (sequence !== querySequence || snapshot !== current || !item.isConnected) return;
+              if (sequence !== querySequence || snapshot !== current || !item.isConnected || !canLeaveEntryDrafts()) return;
               item.replaceChildren();
               void openEntryEditor(item, current.world.id, target, current.day, current.view_revision,
                 !revisionInput.value.trim(), refresh, targets, open);
@@ -864,7 +876,7 @@ export async function showAuthorWorkspace(
                 open.textContent = match.label + " · " + match.source.id;
                 open.addEventListener("click", () => {
                   const navigate = (target: string) => {
-                    if (sequence !== querySequence || snapshot !== current) return;
+                    if (sequence !== querySequence || snapshot !== current || !canLeaveEntryDrafts()) return;
                     item.replaceChildren();
                     void openEntryEditor(item, current.world.id, target, current.day,
                       current.view_revision, !revisionInput.value.trim(), refresh, entryTargets(current, { id: row.id, label: row.label }), navigate);
@@ -929,7 +941,7 @@ export async function showAuthorWorkspace(
   }
 
   function reviewCandidate(candidate: MentionDiscovery["rows"][number], decision: "approved" | "dismissed") {
-    if (!snapshot || saving || selectedRevision() !== null) return;
+    if (!snapshot || saving || selectedRevision() !== null || !canLeaveEntryDrafts()) return;
     const focus = discoveryFocus;
     const request = {
       world_id: snapshot.world.id,
@@ -1063,7 +1075,7 @@ export async function showAuthorWorkspace(
   }
 
   cancelSearch.addEventListener("click", () => {
-    if (!activeQuery) return;
+    if (!activeQuery || !canLeaveEntryDrafts()) return;
     ++querySequence;
     cancelActiveQuery();
     pageCursor = undefined;
@@ -1192,7 +1204,7 @@ export async function showAuthorWorkspace(
 
   saveQueryForm.addEventListener("submit", (event) => {
     event.preventDefault();
-    if (!snapshot || saving) return;
+    if (!snapshot || saving || !canLeaveEntryDrafts()) return;
     if (selectedRevision() !== null) {
       queryStatus.textContent = "Historical author revisions are read-only.";
       return;
@@ -1286,7 +1298,7 @@ export async function showAuthorWorkspace(
   });
 
   saveComposite.addEventListener("click", () => {
-    if (!snapshot || saving) return;
+    if (!snapshot || saving || !canLeaveEntryDrafts()) return;
     if (selectedRevision() !== null) {
       queryStatus.textContent = "Historical author revisions are read-only.";
       return;
@@ -1371,7 +1383,7 @@ export async function showAuthorWorkspace(
   function bind(form: HTMLFormElement, action: (context: { world_id: string; expected_revision: number }) => Promise<void | string>) {
     form.addEventListener("submit", (event) => {
       event.preventDefault();
-      if (saving) return;
+      if (saving || !canLeaveEntryDrafts()) return;
       void (async () => {
         try {
           if (form !== worldForm) {

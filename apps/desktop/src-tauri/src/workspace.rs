@@ -3531,7 +3531,10 @@ mod tests {
         assert_eq!(after.view_revision, 3);
         assert_eq!(after.people.len(), 2);
         assert_eq!(after.relationships.len(), 1);
-        assert_eq!(workspace.snapshot(&world.id, 9, None)?.relationships.len(), 0);
+        assert_eq!(
+            workspace.snapshot(&world.id, 9, None)?.relationships.len(),
+            0
+        );
         Ok(())
     }
 
