@@ -118,7 +118,10 @@ impl Store {
                 if matches!(subject.record.data, ObjectData::Faction)
                     && matches!(target.record.data, ObjectData::Conflict) =>
             {
-                if !matches!(input.role.as_str(), "supports" | "opposes" | "mediates" | "neutral") {
+                if !matches!(
+                    input.role.as_str(),
+                    "supports" | "opposes" | "mediates" | "neutral"
+                ) {
                     return Err(Error::InvalidInput("conflict stance"));
                 }
             }
@@ -302,7 +305,11 @@ impl Store {
              AND starts_at<=?3 AND (ends_before IS NULL OR ends_before>?3)
              ORDER BY id LIMIT 4001",
         )?;
-        let mut rows = stmt.query(params![view.world.0.as_bytes(), view.revision.0, view.day.0])?;
+        let mut rows = stmt.query(params![
+            view.world.0.as_bytes(),
+            view.revision.0,
+            view.day.0
+        ])?;
         let mut links = Vec::new();
         while let Some(row) = rows.next()? {
             self.check_query_control()?;

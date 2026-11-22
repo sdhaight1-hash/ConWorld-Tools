@@ -2459,7 +2459,10 @@ pub fn workspace_persisted_impact(
     }
     let mut result = Vec::new();
     for object in impact.events {
-        if let Some(version) = store.get_object(object, context).map_err(|e| e.to_string())? {
+        if let Some(version) = store
+            .get_object(object, context)
+            .map_err(|e| e.to_string())?
+        {
             result.push((object, version.record.label));
         }
     }
