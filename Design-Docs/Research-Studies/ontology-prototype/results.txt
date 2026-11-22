@@ -1,0 +1,35 @@
+assertions 126 plus wrong endpoint/world/class and negative value rejection
+{
+  "python": "3.13.5",
+  "sqlite": "3.46.1",
+  "platform": "Linux-6.18.57-x86_64-with-glibc2.41",
+  "results": [
+    {
+      "background": 1000,
+      "match_cap": 100,
+      "partial": true,
+      "median_ms": {
+        "rows": 0.703,
+        "json": 2.038
+      }
+    },
+    {
+      "background": 10000,
+      "match_cap": 100,
+      "partial": true,
+      "median_ms": {
+        "rows": 8.024,
+        "json": 21.485
+      }
+    },
+    {
+      "background": 50000,
+      "match_cap": 100,
+      "partial": true,
+      "median_ms": {
+        "rows": 45.781,
+        "json": 115.771
+      }
+    }
+  ]
+}
