@@ -1,17 +1,20 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import type { ParameterValue, SavedQuery } from "./author-workspace";
+import { publicReader, type ObjectLink, type Backlinks } from "./public-reader";
 
 type Binding = { world: string; query_id: string; definition_revision: number;
   bindings: { name: string; value: ParameterValue }[] };
-type Block = { id: string; audience: string; content: { Text?: string; Stack?: Block[]; SavedQuery?: Binding } };
+type Block = { id: string; audience: string; content: { Text?: string; Stack?: Block[]; SavedQuery?: Binding; ObjectLink?: ObjectLink } };
 type Document = { schema_version: number; entry: { world: string; id: string }; root: Block };
-type Display = { content: { Text?: string; Stack?: Display[];
+type Display = { content: { Text?: string; Stack?: Display[]; ObjectLink?: ObjectLink;
   QueryRows?: { records: [{ world: string; id: string }, string][]; truncated: boolean } } };
 type EntrySearch = { matches: [string, string][]; truncated: boolean };
 
 export async function openEntryEditor(panel: HTMLElement, worldId: string, entryId: string,
-  day: number, revision: number, editable: boolean, afterSave: () => Promise<void>) {
+  day: number, revision: number, editable: boolean, afterSave: () => Promise<void>,
+  people: { id: string; label: string }[] = [],
+  openAuthor?: (id: string) => void) {
   const host = document.createElement("section");
   panel.append(host);
   host.innerHTML = `<h3>Character page</h3><form class="editor-form"><fieldset disabled>
@@ -20,10 +23,15 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
     <label>Private saved query <select name="saved_query"><option value="">No query table</option></select></label>
     <p class="hint">Author only. Pin a definition revision; results follow the selected historical view.</p>
     <div data-binding-parameters></div>
+    <h4>Entry links</h4><div data-entry-links></div>
+    <button type="button" data-add-link>Add entry link</button>
+    <p class="hint">A public link appears only when its target page is released. Private links remain author-only.</p>
     <label><input type="checkbox" name="published"> Publish page text</label>
     <button>Save page</button></fieldset></form>
     <button type="button" data-author-preview-button disabled>Preview author layout</button>
     <div data-author-preview aria-live="polite"></div>
+    <button type="button" data-author-backlinks>Find authored backlinks</button>
+    <div data-author-backlink-results aria-live="polite"></div>
     <button type="button" data-public-preview-button>View current public page</button>
     <form class="editor-form" data-public-search>
       <label>Find in public page <input name="text" required maxlength="256"></label>
@@ -51,6 +59,31 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
   form.addEventListener("input", clearAuthorPreview);
   const args = { worldId, entryId, day };
   let request = 0;
+  const incoming = host.querySelector<HTMLButtonElement>("[data-author-backlinks]")!;
+  const incomingResults = host.querySelector<HTMLElement>("[data-author-backlink-results]")!;
+  incoming.addEventListener("click", async () => {
+    incoming.disabled = true;
+    incomingResults.textContent = "Finding authored references…";
+    try {
+      const found = await invoke<Backlinks>("workspace_author_entry_backlinks",
+        { ...args, revision, requestId: crypto.randomUUID() });
+      if (!host.isConnected) return;
+      const summary = document.createElement("p");
+      summary.textContent = found.truncated ? "First 50 authored references." :
+        found.matches.length + " authored references.";
+      incomingResults.replaceChildren(summary);
+      for (const match of found.matches) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = match.label + " · " + match.source.id;
+        button.disabled = !openAuthor;
+        button.addEventListener("click", () => openAuthor?.(match.source.id));
+        incomingResults.append(button);
+      }
+    } catch (error) {
+      if (host.isConnected) incomingResults.textContent = String(error);
+    } finally { incoming.disabled = false; }
+  });
   const find = host.querySelector<HTMLFormElement>("[data-public-search]")!;
   find.addEventListener("input", () => { request++; result.replaceChildren(); });
   find.addEventListener("submit", async event => {
@@ -77,26 +110,9 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
       if (current === request && host.isConnected) result.textContent = String(error);
     }
   });
-  host.querySelector("[data-public-preview-button]")!.addEventListener("click", async () => {
+  host.querySelector("[data-public-preview-button]")!.addEventListener("click", () => {
     const current = ++request;
-    result.textContent = "Loading current public page…";
-    try {
-      const display = await invoke<Display | null>("workspace_public_entry", args);
-      if (current !== request || !host.isConnected) return;
-      result.replaceChildren();
-      if (!display) result.textContent = "Unpublished at this date.";
-      function render(node: Display) {
-        if (node.content.Text !== undefined) {
-          const p = document.createElement("p");
-          p.textContent = node.content.Text;
-          result.append(p);
-        }
-        node.content.Stack?.forEach(render);
-      }
-      if (display) render(display);
-    } catch (error) {
-      if (current === request && host.isConnected) result.textContent = String(error);
-    }
+    void publicReader(result, worldId, day, () => current === request && host.isConnected, () => {}).open(entryId);
   });
   try {
     const saved = await invoke<[Document, boolean] | null>("workspace_entry_layout", { ...args, revision });
@@ -104,17 +120,65 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
     const layout: Document = saved?.[0] ?? { schema_version: 1, entry: { world: worldId, id: entryId },
       root: { id: crypto.randomUUID(), audience: "Public", content: { Stack: [block("Public"), block("Author")] } } };
     const children = layout.root.content.Stack;
-    if (layout.root.audience !== "Public" || !children || children.length < 2 || children.length > 3 ||
+    const extras = children?.slice(2) ?? [];
+    const savedQueries = extras.filter(block => block.content.SavedQuery !== undefined);
+    if (layout.root.audience !== "Public" || !children || children.length < 2 ||
         children[0].audience !== "Public" || children[1].audience !== "Author" ||
         typeof children[0].content.Text !== "string" || typeof children[1].content.Text !== "string" ||
-        (children.length === 3 && (children[2].audience !== "Author" || !children[2].content.SavedQuery))) {
+        savedQueries.length > 1 || extras.some(block => block.content.SavedQuery
+          ? block.audience !== "Author"
+          : !block.content.ObjectLink || !["Public", "Author"].includes(block.audience))) {
       result.textContent = "This layout uses components outside the character page editor.";
       return;
     }
     body.value = children[0].content.Text;
     notes.value = children[1].content.Text;
     published.checked = saved?.[1] ?? false;
-    const original = children[2]?.content.SavedQuery;
+    const original = savedQueries[0]?.content.SavedQuery;
+    const links = new Map<string, { target: HTMLInputElement; caption: HTMLInputElement; audience: HTMLSelectElement }>();
+    const linkHost = host.querySelector<HTMLElement>("[data-entry-links]")!;
+    const addLink = host.querySelector<HTMLButtonElement>("[data-add-link]")!;
+    const listId = "link-targets-" + crypto.randomUUID();
+    const datalist = document.createElement("datalist");
+    datalist.id = listId;
+    for (const person of people) datalist.append(new Option(person.label, person.id));
+    linkHost.append(datalist);
+    function addLinkRow(block?: Block) {
+      const id = block?.id ?? crypto.randomUUID();
+      const link = block?.content.ObjectLink;
+      const row = document.createElement("fieldset");
+      const target = document.createElement("input");
+      target.setAttribute("list", listId);
+      target.required = true;
+      target.value = link?.target.id ?? "";
+      const caption = document.createElement("input");
+      caption.required = true;
+      caption.maxLength = 800;
+      caption.value = link?.label ?? "";
+      const audience = document.createElement("select");
+      audience.add(new Option("Private", "Author"));
+      audience.add(new Option("Public", "Public"));
+      audience.value = block?.audience ?? "Author";
+      for (const [text, element] of [["Link target identity", target], ["Link caption", caption],
+        ["Link audience", audience]] as const) {
+        const label = document.createElement("label");
+        label.textContent = text;
+        label.append(element);
+        row.append(label);
+      }
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.textContent = "Remove entry link";
+      remove.addEventListener("click", () => {
+        links.delete(id); row.remove(); addLink.disabled = false; clearAuthorPreview();
+      });
+      row.append(remove);
+      links.set(id, { target, caption, audience });
+      linkHost.append(row);
+      addLink.disabled = links.size >= 64;
+    }
+    for (const block of extras.filter(block => block.content.ObjectLink)) addLinkRow(block);
+    addLink.addEventListener("click", () => { if (links.size < 64) { addLinkRow(); clearAuthorPreview(); } });
     const key = (id: string, revision: number) => id + "@" + revision;
     const definitions = await invoke<SavedQuery[]>("workspace_saved_queries", { worldId, revision });
     if (!host.isConnected) return;
@@ -164,7 +228,7 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
     }
     renderParameters(true);
     querySelect.addEventListener("change", () => { clearAuthorPreview(); renderParameters(false); });
-    const queryElementId = children[2]?.id ?? crypto.randomUUID();
+    const queryElementId = savedQueries[0]?.id ?? crypto.randomUUID();
     function draft(): Document {
       const query = choices.get(querySelect.value);
       const blocks: Block[] = [
@@ -183,6 +247,11 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
           world: worldId, query_id: query.id, definition_revision: query.recorded_at, bindings,
         } } });
       }
+      for (const [id, row] of links) blocks.push({ id, audience: row.audience.value,
+        content: { ObjectLink: { target: { world: worldId, id: row.target.value.trim() }, label: row.caption.value } } });
+      // Retain existing component order and identities, append only new blocks.
+      const order = new Map(children!.map((block, i) => [block.id, i]));
+      blocks.sort((a, b) => (order.get(a.id) ?? children!.length) - (order.get(b.id) ?? children!.length));
       return { ...layout, root: { ...layout.root, content: { Stack: blocks } } };
     }
     authorPreview.disabled = false;
@@ -203,6 +272,15 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
             const p = document.createElement("p");
             p.textContent = node.content.Text;
             authorResult.append(p);
+          }
+          if (node.content.ObjectLink) {
+            const link = node.content.ObjectLink;
+            const button = document.createElement("button");
+            button.type = "button";
+            button.textContent = link.label;
+            button.disabled = !openAuthor || link.target.world !== worldId;
+            button.addEventListener("click", () => openAuthor?.(link.target.id));
+            authorResult.append(button);
           }
           if (node.content.QueryRows) {
             const table = document.createElement("table");
@@ -242,6 +320,8 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
       event.preventDefault();
       if (fields.disabled) return;
       const document = draft();
+      ++request;
+      result.replaceChildren();
       clearAuthorPreview();
       fields.disabled = true;
       authorPreview.disabled = true;
