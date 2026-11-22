@@ -2,8 +2,10 @@ import { invoke } from "@tauri-apps/api/core";
 
 export type ObjectRef = { world: string; id: string };
 export type ObjectLink = { target: ObjectRef; label: string };
+export type ProjectedImage = {width:number;height:number;png_base64:string;alt:string;hotspots:{id:string;x:number;y:number;link:ObjectLink}[]};
 export type PublicDisplay = { content: { Text?: string; Stack?: PublicDisplay[]; Panel?: PublicDisplay[];
   Grid?: { columns: number; children: PublicDisplay[] }; ObjectLink?: ObjectLink;
+  Image?: ProjectedImage;
   StatementRows?: { statements: string[]; truncated: boolean }; ReferenceRows?: { links: ObjectLink[]; truncated: boolean } } };
 
 // Both reader and author preview render only the projected children, in layout order.
@@ -13,6 +15,31 @@ export function layoutContainer(parent: HTMLElement, kind: "panel" | "grid", col
   if (kind === "grid") container.style.setProperty("--entry-columns", String(Math.max(1, Math.min(4, columns))));
   parent.append(container);
   return container;
+}
+// Only the Rust projection supplies bytes and hotspot labels.
+export function renderProjectedImage(parent:HTMLElement,image:ProjectedImage,open:(link:ObjectLink)=>void){
+  const figure=document.createElement("figure");
+  figure.className="entry-image";
+  const surface=document.createElement("div");
+  surface.className="entry-image-surface";
+  const img=document.createElement("img");
+  img.src="data:image/png;base64,"+image.png_base64;
+  img.alt=image.alt;img.width=image.width;img.height=image.height;surface.append(img);
+  const links=document.createElement("ol");links.className="image-hotspot-list";
+  for(const [index,hotspot] of image.hotspots.entries()){
+    const marker=document.createElement("button");
+    marker.type="button";marker.textContent=String(index+1);
+    marker.setAttribute("aria-label",hotspot.link.label);
+    marker.className="image-hotspot";
+    marker.style.left=hotspot.x/100+"%";marker.style.top=hotspot.y/100+"%";
+    marker.onclick=()=>open(hotspot.link);surface.append(marker);
+    const row=document.createElement("li"),link=document.createElement("button");link.type="button";
+    link.textContent=hotspot.link.label;link.onclick=()=>open(hotspot.link);row.append(link);links.append(row);
+  }
+  figure.append(surface);
+  const caption=document.createElement("figcaption");caption.textContent=image.alt;figure.append(caption);
+  if(image.hotspots.length)figure.append(links);
+  parent.append(figure);
 }
 export type Backlinks = { matches: { source: ObjectRef; element: string; label: string }[]; truncated: boolean };
 
@@ -58,6 +85,7 @@ export function publicReader(host: HTMLElement, worldId: string, day: number,
           parent.append(p);
         }
         if (node.content.ObjectLink) linkButton(node.content.ObjectLink.label, node.content.ObjectLink.target, parent);
+        if (node.content.Image) renderProjectedImage(parent,node.content.Image,link=>{if(valid()&&link.target.world===worldId)void load(link.target.id);});
         if (node.content.StatementRows) {
           const group = layoutContainer(parent, "panel");
           const title = document.createElement("p");

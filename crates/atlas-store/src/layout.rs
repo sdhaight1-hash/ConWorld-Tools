@@ -58,6 +58,7 @@ pub enum ElementContent {
     PublishedReferences(ObjectRef),
     PublishedStatements(ObjectRef),
     ObjectLink(ObjectLink),
+    Image(ImageBlock),
 }
 
 /// Built-in immutable starting layouts. Instantiation copies presentation only.
@@ -80,6 +81,41 @@ pub enum TemplateKind {
 pub struct ObjectLink {
     pub target: ObjectRef,
     pub label: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImageBlock {
+    pub asset: Uuid,
+    pub alt: String,
+    pub hotspots: Vec<ImageHotspot>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImageHotspot {
+    pub id: ElementId,
+    pub x: u16,
+    pub y: u16,
+    pub audience: ClaimAudience,
+    pub link: ObjectLink,
+}
+
+#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct DisplayImage {
+    pub width: u32,
+    pub height: u32,
+    pub png_base64: String,
+    pub alt: String,
+    pub hotspots: Vec<DisplayHotspot>,
+}
+
+#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct DisplayHotspot {
+    pub id: ElementId,
+    pub x: u16,
+    pub y: u16,
+    pub link: ObjectLink,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -151,6 +187,7 @@ pub enum DisplayContent {
     },
     Text(String),
     ObjectLink(ObjectLink),
+    Image(DisplayImage),
     ReferenceRows {
         links: Vec<ObjectLink>,
         truncated: bool,
@@ -196,7 +233,7 @@ impl LayoutDocument {
         let mut visited = HashSet::new();
         let mut pending = vec![(&self.root, 0)];
         while let Some((element, depth)) = pending.pop() {
-            if depth > MAX_DEPTH || visited.len() == MAX_ELEMENTS {
+            if depth > MAX_DEPTH || visited.len() >= MAX_ELEMENTS {
                 return Err(Error::QueryBudgetExceeded);
             }
             if !visited.insert(element.id) {
@@ -232,6 +269,32 @@ impl LayoutDocument {
                 }
                 ElementContent::Text(text) if text.len() > 16_384 => {
                     return Err(Error::InvalidInput("layout text length"));
+                }
+                ElementContent::Image(image) => {
+                    if image.alt.trim().is_empty()
+                        || image.alt.len() > 800
+                        || image.hotspots.len() > 32
+                    {
+                        return Err(Error::InvalidInput("image text or hotspot count"));
+                    }
+                    for hotspot in &image.hotspots {
+                        if hotspot.x > 10000
+                            || hotspot.y > 10000
+                            || hotspot.link.label.trim().is_empty()
+                            || hotspot.link.label.len() > 800
+                            || !visited.insert(hotspot.id)
+                        {
+                            return Err(Error::InvalidInput("image hotspot"));
+                        }
+                        if hotspot.link.target.world != self.entry.world
+                            || matches!(hotspot.audience, ClaimAudience::Character(reader) if reader.world != self.entry.world)
+                        {
+                            return Err(Error::WrongWorld);
+                        }
+                        if visited.len() > MAX_ELEMENTS {
+                            return Err(Error::QueryBudgetExceeded);
+                        }
+                    }
                 }
                 ElementContent::ObjectLink(link) => {
                     if link.target.world != self.entry.world {
@@ -291,7 +354,8 @@ impl LayoutDocument {
                 ElementContent::Text(_)
                 | ElementContent::ObjectLink(_)
                 | ElementContent::PublishedReferences(_)
-                | ElementContent::PublishedStatements(_) => {}
+                | ElementContent::PublishedStatements(_)
+                | ElementContent::Image(_) => {}
             }
         }
         Ok(())
@@ -321,6 +385,10 @@ impl LayoutDocument {
                     // SQLite tokenization may stop at NUL; normalize it only in
                     // candidates. Queries containing NUL use the exact fallback.
                     text.push_str(&block.to_lowercase().replace('\0', " "));
+                    text.push('\n');
+                }
+                ElementContent::Image(image) => {
+                    text.push_str(&image.alt.to_lowercase().replace('\0', " "));
                     text.push('\n');
                 }
                 // Destination-dependent captions are excluded from static text search.
@@ -353,6 +421,13 @@ impl LayoutDocument {
                 | ElementContent::CustomTemplate { children, .. }
                 | ElementContent::Grid { children, .. } => pending.extend(children.iter().rev()),
                 ElementContent::ObjectLink(link) => links.push((element.id, link)),
+                ElementContent::Image(image) => {
+                    for hotspot in &image.hotspots {
+                        if can_view(scope, hotspot.audience) {
+                            links.push((hotspot.id, &hotspot.link));
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -466,6 +541,7 @@ fn find_container(element: &mut LayoutElement, id: ElementId) -> Option<&mut Vec
 struct ProjectionBudget {
     seen: HashSet<ElementId>,
     queries: usize,
+    media_bytes: usize,
 }
 
 fn project(
@@ -478,7 +554,7 @@ fn project(
     if !can_view(view.scope, element.audience) {
         return Ok(None);
     }
-    if depth > MAX_DEPTH || budget.seen.len() == MAX_ELEMENTS {
+    if depth > MAX_DEPTH || budget.seen.len() >= MAX_ELEMENTS {
         return Err(Error::QueryBudgetExceeded);
     }
     if !budget.seen.insert(element.id) {
@@ -537,6 +613,37 @@ fn project(
                 return Ok(None);
             }
             DisplayContent::ObjectLink(link.clone())
+        }
+        ElementContent::Image(image) => {
+            let (width, height, png_base64, bytes) = store.project_png(view, image.asset)?;
+            budget.media_bytes += bytes;
+            if budget.media_bytes > 6 * 1024 * 1024 {
+                return Err(Error::QueryBudgetExceeded);
+            }
+            let mut hotspots = Vec::new();
+            for hotspot in &image.hotspots {
+                if !can_view(view.scope, hotspot.audience)
+                    || !store.entry_link_target_visible(view, hotspot.link.target)?
+                {
+                    continue;
+                }
+                if budget.seen.len() >= MAX_ELEMENTS || !budget.seen.insert(hotspot.id) {
+                    return Err(Error::QueryBudgetExceeded);
+                }
+                hotspots.push(DisplayHotspot {
+                    id: hotspot.id,
+                    x: hotspot.x,
+                    y: hotspot.y,
+                    link: hotspot.link.clone(),
+                });
+            }
+            DisplayContent::Image(DisplayImage {
+                width,
+                height,
+                png_base64,
+                alt: image.alt.clone(),
+                hotspots,
+            })
         }
         ElementContent::PublishedStatements(target) => {
             if budget.queries == MAX_QUERIES {

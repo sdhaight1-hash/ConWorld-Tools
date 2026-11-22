@@ -317,3 +317,54 @@ impl crate::Store {
         Ok(result)
     }
 }
+
+pub const CHROMOSOME_MODEL_VERSION: u16 = 3;
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct ToyChromosome {
+    pub chromosome: u8,
+    pub homologues: [Vec<FounderSegment>; 2],
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct ChromosomePainter {
+    pub model: u16,
+    pub length: u32,
+    pub chromosomes: Vec<ToyChromosome>,
+}
+
+impl crate::Store {
+    /// A bounded independent toy autosomal chromosome model with reproducible
+    /// chromosome-specific crossover streams. Not actual biological coordinates.
+    pub fn chromosome_painter(
+        &self,
+        view: crate::ViewContext,
+        subject: ObjectRef,
+        seed: u64,
+        count: u8,
+    ) -> Result<ChromosomePainter, Error> {
+        if !(1..=8).contains(&count) {
+            return Err(Error::InvalidInput("toy chromosome count"));
+        }
+        let mut chromosomes = Vec::new();
+        let mut total = 0;
+        for chromosome in 1..=count {
+            let chromosome_seed =
+                mix(seed ^ (u64::from(chromosome) << 32) ^ u64::from(CHROMOSOME_MODEL_VERSION));
+            let genome = self.founder_genome(view, subject, chromosome_seed)?;
+            total += genome.homologues.iter().map(Vec::len).sum::<usize>();
+            if total > 8192 {
+                return Err(Error::QueryBudgetExceeded);
+            }
+            chromosomes.push(ToyChromosome {
+                chromosome,
+                homologues: genome.homologues,
+            });
+        }
+        Ok(ChromosomePainter {
+            model: CHROMOSOME_MODEL_VERSION,
+            length: MODEL_LENGTH,
+            chromosomes,
+        })
+    }
+}

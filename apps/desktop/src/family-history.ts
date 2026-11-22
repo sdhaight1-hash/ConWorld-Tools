@@ -20,7 +20,7 @@ export async function openFamilyHistory(panel: HTMLElement, request: FamilyConte
     <label>Compare with <select name="other" required></select></label>
     <label>Model seed <input type="number" name="seed" min="0" max="4294967295" value="1" required></label>
     <button>Compare segments</button></form><output></output></details>
-    <details class="founder-genome"><summary>Simulated multigenerational ancestry</summary><p>Dimensionless toy founder segments, not real DNA. Unrecorded parents are unresolved founders.</p><button type="button">Compute founder segments</button><button type="button" data-compare-founders>Compare selected relative</button><div data-genome></div></details>`;
+    <details class="founder-genome"><summary>Simulated multigenerational ancestry</summary><p>Dimensionless toy founder segments, not real DNA. Unrecorded parents are unresolved founders.</p><button type="button">Compute founder segments</button><button type="button" data-compare-founders>Compare selected relative</button><button type="button" data-painter>Paint eight toy chromosomes</button><div data-genome></div></details>`;
   panel.append(host);
   const form = host.querySelector("form")!;
   const fields = form.querySelector("fieldset")!;
@@ -81,6 +81,31 @@ export async function openFamilyHistory(panel: HTMLElement, request: FamilyConte
       }
       result.append(matches.length ? list : "No shared founder alleles in this toy model.");
     }catch(error){result.textContent=String(error);}
+  };
+  host.querySelector<HTMLButtonElement>("[data-painter]")!.onclick=async()=>{
+    const out=host.querySelector<HTMLElement>("[data-genome]")!;
+    try{
+      const painter=await invoke<{model:number;length:number;chromosomes:{chromosome:number;homologues:{start:number;end:number;allele:{founder:{id:string};homologue:number}}[][]}[]}>("workspace_chromosome_painter",{request,seed:Number(new FormData(compare).get("seed")),count:8});
+      if(!host.isConnected)return;
+      out.replaceChildren();
+      const heading=document.createElement("h4");heading.textContent="Toy chromosome painter · model "+painter.model;out.append(heading);
+      const legend=new Map<string,string>();
+      for(const chromosome of painter.chromosomes){
+        const label=document.createElement("p");label.textContent="Chromosome "+chromosome.chromosome;out.append(label);
+        for(const [index,segments] of chromosome.homologues.entries()){
+          const row=document.createElement("div");row.className="chromosome-track";row.setAttribute("role","group");row.setAttribute("aria-label","Chromosome "+chromosome.chromosome+", homologue "+(index+1));
+          for(const segment of segments){
+            const key=segment.allele.founder.id+":"+segment.allele.homologue;
+            if(!legend.has(key)){const label=people.find(person=>person.id===segment.allele.founder.id)?.label??segment.allele.founder.id;legend.set(key,label+" · "+segment.allele.homologue);}
+            const hash=Array.from(key).reduce((acc,char)=>((acc*31+char.charCodeAt(0))>>>0),0);
+            const part=document.createElement("span");part.className="chromosome-segment";
+            part.style.flexBasis=(100*(segment.end-segment.start)/painter.length)+"%";part.style.backgroundColor="hsl("+(hash%360)+" 55% 48%)";
+            part.title=legend.get(key)+" ["+segment.start+", "+segment.end+")";part.setAttribute("role","img");part.setAttribute("aria-label",part.title);row.append(part);
+          }out.append(row);
+        }
+      }
+      const key=document.createElement("ul");for(const [id,label] of legend){const item=document.createElement("li");const swatch=document.createElement("span");const hash=Array.from(id).reduce((acc,char)=>((acc*31+char.charCodeAt(0))>>>0),0);swatch.className="chromosome-key";swatch.style.backgroundColor="hsl("+(hash%360)+" 55% 48%)";item.append(swatch,label);key.append(item);}out.append(key);
+    }catch(error){out.textContent=String(error);}
   };
   let busy = false;
   async function save(command: string, payload: Record<string, unknown>) {

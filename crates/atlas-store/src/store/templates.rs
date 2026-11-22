@@ -176,6 +176,11 @@ fn fresh_elements(element: &mut LayoutElement, source: ObjectRef, destination: O
                 fresh_elements(child, source, destination);
             }
         }
+        ElementContent::Image(image) => {
+            for hotspot in &mut image.hotspots {
+                hotspot.id = ElementId(Uuid::new_v4());
+            }
+        }
         ElementContent::FamilyTable(target)
         | ElementContent::NetworkTable(target)
         | ElementContent::ImpactTable(target)

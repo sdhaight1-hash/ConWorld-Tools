@@ -1,0 +1,5 @@
+# Image assets and portable archives
+
+Schema 36 adds immutable world-scoped bounded PNG pixel assets, SHA-256 archive checks, author-only asset import/list, image elements and independently authorized hotspot links with stable IDs. Hotspot targets reuse current release authorization and backlink candidate indexing. No raw asset reader endpoint. Templates regenerate hotspot IDs. The UI and regression suite are separate changes on this branch. Verification pending.
+
+Native import/list and Canvas Image composition now present; reader and author renderer share projected pixels/hotspots plus accessible navigation buttons. Regression tests cover publication, hidden labels, static candidate captions and archive roundtrip. Added independent toy chromosome model 3 with up to eight synthetic chromosome pairs from version-2 recursive founder ancestry; distinct reproducible crossover streams, bounded segments, author-only visual tracks. No actual DNA, genetic drift, migration or population frequency model. Browser mock-native image editing/navigation screenshot configured; full native evidence pending.

@@ -189,6 +189,41 @@ export function editCanvasTree(host: HTMLElement, original: Block, worldId: stri
       text.addEventListener("input", () => { node.content.Text = text.value; recordChange(); });
       field("Component text", text);
     }
+    if(node.content.Image){
+      const image=node.content.Image;
+      const asset=document.createElement("input");asset.required=true;asset.value=image.asset;asset.readOnly=!editable;
+      asset.oninput=()=>{image.asset=asset.value.trim();recordChange();};field("PNG asset identity",asset);
+      if(editable)controls.append(button("Choose imported image",async()=>{
+        const before=last;
+        try{
+          const assets=await invoke<{id:string;name:string;width:number;height:number}[]>("workspace_media_assets",{request:context});
+          if(!host.isConnected||before!==last||selected!==node.id)return;
+          const select=document.createElement("select");
+          select.add(new Option("Choose asset",""));for(const item of assets)select.add(new Option(item.name+" · "+item.width+"×"+item.height,item.id));
+          select.onchange=()=>{if(select.value){image.asset=select.value;commit("Selected immutable image asset.");}};
+          field("Imported PNG",select);
+        }catch(error){message.textContent=String(error);}
+      }));
+      const alt=document.createElement("input");alt.required=true;alt.maxLength=800;alt.value=image.alt;alt.readOnly=!editable;
+      alt.oninput=()=>{image.alt=alt.value;recordChange();};field("Image alternative text",alt);
+      for(const [index,hotspot] of image.hotspots.entries()){
+        const title=document.createElement("h5");title.textContent="Hotspot "+(index+1);controls.append(title);
+        const name=document.createElement("input");name.value=hotspot.link.label;name.required=true;name.maxLength=800;name.readOnly=!editable;
+        name.oninput=()=>{hotspot.link.label=name.value;recordChange();};field("Hotspot label "+(index+1),name);
+        const target=document.createElement("input");target.value=hotspot.link.target.id;target.required=true;target.readOnly=!editable;
+        target.oninput=()=>{hotspot.link.target.id=target.value.trim();recordChange();};field("Hotspot target "+(index+1),target);
+        for(const axis of ["x","y"] as const){
+          const input=document.createElement("input");input.type="number";input.min="0";input.max="100";input.step="0.01";input.required=true;input.value=String(hotspot[axis]/100);input.readOnly=!editable;
+          input.oninput=()=>{if(input.validity.valid){hotspot[axis]=Math.round(Number(input.value)*100);recordChange();}};field("Hotspot "+axis+" percent "+(index+1),input);
+        }
+        const audience=document.createElement("select");
+        for(const choice of ["Author","Public"])audience.add(new Option(choice,choice));
+        audience.value=typeof hotspot.audience==="string"?hotspot.audience:"Author";audience.disabled=!editable;
+        audience.onchange=()=>{hotspot.audience=audience.value;recordChange();};field("Hotspot audience "+(index+1),audience);
+        if(editable)controls.append(button("Remove hotspot "+(index+1),()=>{image.hotspots.splice(index,1);commit("Removed hotspot.");}));
+      }
+      if(editable)controls.append(button("Add private hotspot",()=>{image.hotspots.push({id:crypto.randomUUID(),x:5000,y:5000,audience:"Author",link:{target:{world:worldId,id:""},label:""}});commit("Added private hotspot.");},image.hotspots.length>=32));
+    }
     if (node.content.ObjectLink) {
       const link = node.content.ObjectLink;
       const target = document.createElement("input");
@@ -320,12 +355,13 @@ export function editCanvasTree(host: HTMLElement, original: Block, worldId: stri
     const slot = children(node);
     if (slot) {
       const add = document.createElement("select");
-      for (const label of ["Text", "Stack", "Panel", "Grid", "ObjectLink"]) add.add(new Option(label, label));
+      for (const label of ["Text", "Stack", "Panel", "Grid", "ObjectLink", "Image"]) add.add(new Option(label, label));
       if (definitions.size) add.add(new Option("Saved query table", "SavedQuery"));
       field("New component kind", add);
       controls.append(button("Add child", () => {
         const first = definitions.values().next().value;
         const content: Block["content"] = add.value === "SavedQuery" && first ? { SavedQuery: newBinding(first) } :
+          add.value === "Image" ? {Image:{asset:"",alt:"",hotspots:[]}} :
           add.value === "Text" ? { Text: "" } :
           add.value === "Stack" ? { Stack: [] } : add.value === "Panel" ? { Panel: [] } :
             add.value === "Grid" ? { Grid: { columns: 2, children: [] } } :

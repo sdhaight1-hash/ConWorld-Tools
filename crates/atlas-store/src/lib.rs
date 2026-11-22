@@ -18,7 +18,7 @@ pub use calendar::{
     CalendarCommand, CalendarDate, CalendarDay, CalendarEra, CalendarId, CalendarRules,
     CalendarVersion, LeapCycle,
 };
-pub use store::Store;
+pub use store::{Store, media::MediaSummary};
 use uuid::Uuid;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]

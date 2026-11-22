@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import type { ParameterValue, SavedQuery } from "./author-workspace";
-import { publicReader, layoutContainer, type ObjectLink, type Backlinks } from "./public-reader";
+import { publicReader, layoutContainer, renderProjectedImage, type ProjectedImage, type ObjectLink, type Backlinks } from "./public-reader";
 import { editCanvasTree } from "./canvas-tree";
 
 export type Binding = { world: string; query_id: string; definition_revision: number;
@@ -9,11 +9,13 @@ export type Binding = { world: string; query_id: string; definition_revision: nu
 export type Block = { id: string; audience: string; content: { Text?: string; Stack?: Block[]; Panel?: Block[];
   Grid?: { columns: number; children: Block[] }; Template?: { key: string; version: number; children: Block[] };
   CustomTemplate?: { template_id: string; definition_revision: number; children: Block[] };
+  Image?: {asset:string;alt:string;hotspots:{id:string;x:number;y:number;audience:string;link:ObjectLink}[]};
   SavedQuery?: Binding; ObjectLink?: ObjectLink; Query?: unknown; FamilyTable?: { world: string; id: string }; NetworkTable?: { world: string; id: string };
   PublishedStatements?: { world: string; id: string }; PublishedReferences?: { world: string; id: string }; ImpactTable?: { world: string; id: string } } };
 type Document = { schema_version: number; entry: { world: string; id: string }; root: Block };
 type Display = { content: { Text?: string; Stack?: Display[]; Panel?: Display[];
   Grid?: { columns: number; children: Display[] }; ObjectLink?: ObjectLink;
+  Image?: ProjectedImage;
   StatementRows?: { statements: string[]; truncated: boolean }; ReferenceRows?: { links: ObjectLink[]; truncated: boolean };
   QueryRows?: { records: [{ world: string; id: string }, string][]; truncated: boolean } } };
 type EntrySearch = { matches: [string, string][]; truncated: boolean };
@@ -180,6 +182,7 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
               button.addEventListener("click", () => openAuthor?.(link.target.id));
               parent.append(button);
             }
+            if (node.content.Image) renderProjectedImage(parent,node.content.Image,link=>{if(link.target.world===worldId)openAuthor?.(link.target.id);});
             if (node.content.StatementRows) {
               const group = layoutContainer(parent, "panel");
               const title = document.createElement("p");

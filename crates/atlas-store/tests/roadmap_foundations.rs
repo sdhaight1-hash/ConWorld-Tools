@@ -2693,3 +2693,179 @@ fn designated_succession_and_reversible_identity_redirect_are_explicit() -> Resu
     assert!(store.get_object(duplicate, author)?.is_some());
     Ok(())
 }
+
+#[test]
+fn image_hotspots_authorization_and_asset_archive_roundtrip() -> Result<(), Error> {
+    use atlas_store::{
+        archive::restore_archive,
+        layout::{ImageBlock, ImageHotspot, ObjectLink},
+        query::QueryControl,
+    };
+    use std::time::Duration;
+    let dir = tempfile::tempdir()?;
+    let mut store = Store::open(dir.path().join("source.sqlite"))?;
+    let world = seed(&mut store)?;
+    let mut author = view(&world, 13);
+    let mut data = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut data, 1, 1);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        writer.write_image_data(&[1, 2, 3, 255]).unwrap();
+        writer.finish().unwrap();
+    }
+    assert!(
+        store
+            .import_png(author, "bad", b"<svg/>", Uuid::new_v4())
+            .is_err()
+    );
+    let image = store.import_png(author, "Private filename", &data, Uuid::new_v4())?;
+    author.revision = AuthorRevision(image.revision);
+    let block = |audience, content| LayoutElement {
+        id: ElementId(Uuid::new_v4()),
+        audience,
+        content,
+    };
+    let page = |entry, children| LayoutDocument {
+        schema_version: LAYOUT_SCHEMA_VERSION,
+        entry,
+        root: block(ClaimAudience::Public, ElementContent::Stack(children)),
+    };
+    for target in [id(&world, 2), id(&world, 12)] {
+        let p = page(
+            target,
+            vec![block(
+                ClaimAudience::Public,
+                ElementContent::Text("Released target".into()),
+            )],
+        );
+        author.revision = store.save_entry_layout(author, &p, true, Uuid::new_v4())?;
+    }
+    let hotspot = |target, label: &str, audience| ImageHotspot {
+        id: ElementId(Uuid::new_v4()),
+        x: 5000,
+        y: 5000,
+        audience,
+        link: ObjectLink {
+            target,
+            label: label.into(),
+        },
+    };
+    let document = page(
+        id(&world, 1),
+        vec![block(
+            ClaimAudience::Public,
+            ElementContent::Image(ImageBlock {
+                asset: image.id,
+                alt: "Public painted portrait".into(),
+                hotspots: vec![
+                    hotspot(id(&world, 2), "Released companion", ClaimAudience::Public),
+                    hotspot(id(&world, 12), "Hidden accomplice", ClaimAudience::Author),
+                ],
+            }),
+        )],
+    );
+    author.revision = store.save_entry_layout(author, &document, true, Uuid::new_v4())?;
+    let public = ViewContext {
+        scope: Scope::Public,
+        ..author
+    };
+    let projection = store.display_entry(public, document.entry)?.unwrap();
+    let encoded = serde_json::to_string(&projection).unwrap();
+    assert!(encoded.contains("Released companion"));
+    assert!(!encoded.contains("Hidden accomplice"));
+    assert!(!encoded.contains("Private filename"));
+    assert!(!encoded.contains(&image.id.to_string()));
+    assert!(matches!(
+        store.media_assets(public),
+        Err(Error::CapabilityDenied)
+    ));
+    let control = QueryControl::new(Duration::from_secs(10))?;
+    assert_eq!(
+        store
+            .search_public_pages(public, "Released companion", 10, &control)?
+            .matches
+            .len(),
+        1
+    );
+    let control = QueryControl::new(Duration::from_secs(10))?;
+    assert!(
+        store
+            .search_public_pages(public, "Hidden accomplice", 10, &control)?
+            .matches
+            .is_empty()
+    );
+    let backup = dir.path().join("backup.sqlite");
+    let restored = dir.path().join("restored.sqlite");
+    store.backup_to(&backup, Scope::Author)?;
+    restore_archive(&backup, &restored, Scope::Author)?;
+    let reopened = Store::open(&restored)?;
+    assert_eq!(
+        reopened.display_entry(public, document.entry)?,
+        Some(projection)
+    );
+    assert_eq!(reopened.media_assets(author)?[0], image);
+    Ok(())
+}
+
+#[test]
+fn chromosome_painter_keeps_contiguous_toy_homologues_and_deterministic_seed() -> Result<(), Error>
+{
+    use atlas_store::{
+        genealogy::RecordParentage,
+        inheritance::{CHROMOSOME_MODEL_VERSION, MODEL_LENGTH},
+    };
+    let mut store = Store::open(":memory:")?;
+    let world = seed(&mut store)?;
+    let mut author = view(&world, 13);
+    let person = id(&world, 2);
+    for parent in [1, 12] {
+        store.record_parentage(
+            author,
+            RecordParentage {
+                parent: id(&world, parent),
+                child: person,
+                kind: ParentageKind::Biological,
+                starts_at: WorldDay(0),
+                ends_before: None,
+                command_id: Uuid::new_v4(),
+                rationale: "Accepted biological link",
+            },
+        )?;
+        author.revision = AuthorRevision(author.revision.0 + 1);
+    }
+    let painter = store.chromosome_painter(author, person, 72, 8)?;
+    assert_eq!(painter.model, CHROMOSOME_MODEL_VERSION);
+    assert_eq!(painter.chromosomes.len(), 8);
+    assert_eq!(painter, store.chromosome_painter(author, person, 72, 8)?);
+    assert_ne!(
+        painter.chromosomes[0].homologues,
+        painter.chromosomes[1].homologues
+    );
+    for chromosome in painter.chromosomes {
+        for homologue in chromosome.homologues {
+            assert_eq!(homologue.first().unwrap().start, 0);
+            assert_eq!(homologue.last().unwrap().end, MODEL_LENGTH);
+            assert!(
+                homologue
+                    .windows(2)
+                    .all(|pair| pair[0].end == pair[1].start)
+            );
+        }
+    }
+    assert!(store.chromosome_painter(author, person, 72, 9).is_err());
+    assert!(matches!(
+        store.chromosome_painter(
+            ViewContext {
+                scope: Scope::Public,
+                ..author
+            },
+            person,
+            72,
+            8
+        ),
+        Err(Error::CapabilityDenied)
+    ));
+    Ok(())
+}

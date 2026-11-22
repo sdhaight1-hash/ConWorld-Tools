@@ -2514,6 +2514,30 @@ pub fn workspace_enact_succession(
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
+pub fn workspace_media_assets(
+    workspace: State<'_, AuthorWorkspace>,
+    request: NetworkContext,
+) -> Result<Vec<atlas_store::MediaSummary>, String> {
+    let store = workspace.lock()?;
+    store
+        .media_assets(request.resolve(&store)?)
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+pub fn workspace_import_png(
+    workspace: State<'_, AuthorWorkspace>,
+    request: NetworkContext,
+    name: String,
+    bytes: Vec<u8>,
+) -> Result<(), String> {
+    let mut store = workspace.lock()?;
+    let context = request.resolve(&store)?;
+    store
+        .import_png(context, &name, &bytes, Uuid::new_v4())
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
 pub fn workspace_custom_templates(
     workspace: State<'_, AuthorWorkspace>,
     request: NetworkContext,
@@ -2613,6 +2637,20 @@ pub fn workspace_founder_matches(
             reference(context.world, &other_id)?,
             u64::from(seed),
         )
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn workspace_chromosome_painter(
+    workspace: State<'_, AuthorWorkspace>,
+    request: FamilyRequest,
+    seed: u32,
+    count: u8,
+) -> Result<atlas_store::inheritance::ChromosomePainter, String> {
+    let store = workspace.lock()?;
+    let (context, person) = request.resolve(&store)?;
+    store
+        .chromosome_painter(context, person, u64::from(seed), count)
         .map_err(|e| e.to_string())
 }
 

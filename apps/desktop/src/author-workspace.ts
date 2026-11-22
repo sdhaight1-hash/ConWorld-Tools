@@ -1,5 +1,6 @@
 import { openFamilyHistory } from "./family-history";
 import { openNetworkStudio } from "./network-studio";
+import { openMediaStudio } from "./media-studio";
 import { openEntryEditor } from "./entry-editor";
 import { publicReader, type Backlinks } from "./public-reader";
 import { invoke } from "@tauri-apps/api/core";
@@ -674,6 +675,7 @@ export async function showAuthorWorkspace(
       aliasForm.reset();
       field<HTMLSelectElement>(aliasForm, "alias_id").value = "";
     }
+    openMediaStudio(content,{world_id:next.world.id,revision:next.view_revision,day:next.day},!revisionInput.value.trim(),refresh,()=>snapshot===next);
     openNetworkStudio(content, { world_id: next.world.id, revision: next.view_revision, day: next.day },
       !revisionInput.value.trim(), refresh, () => snapshot === next);
     info.textContent = `Author revision ${next.view_revision} / ${next.world.revision} · historical day ${next.day}` +
