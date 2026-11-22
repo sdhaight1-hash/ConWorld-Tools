@@ -1877,3 +1877,94 @@ test("Canvas arrangement changes preserve content IDs across reopen and public p
   expect(panel.id).toBe(grid.id);
   expect(panel.content.Panel).toEqual(grid.content.Grid?.children);
 });
+
+test("Canvas tree nests and moves stable components without widening inherited audience", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "archive", name: "Archive", revision: 4 };
+    const writes: unknown[] = [];
+    let saved: unknown = [{
+      schema_version: 1, entry: { world: "archive", id: "alice" },
+      root: { id: "root", audience: "Public", content: { Stack: [
+        { id: "private-panel", audience: "Author", content: { Panel: [
+          { id: "secret", audience: "Public", content: { Text: "Secret testimony" } },
+          { id: "binding", audience: "Author", content: { SavedQuery: {
+            world: "archive", query_id: "query", definition_revision: 2, bindings: [],
+          } } },
+        ] } },
+        { id: "public-grid", audience: "Public", content: { Grid: { columns: 2, children: [] } } },
+      ] } },
+    }, false];
+    Object.assign(window, {
+      isTauri: true, __treeWrites: writes,
+      __TAURI_INTERNALS__: {
+        invoke: async (command: string, args: Record<string, unknown>) => {
+          if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+          if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+          if (command === "workspace_worlds") return [{ ...world }];
+          if (command === "workspace_snapshot") return {
+            world: { ...world }, day: args.day, view_revision: args.revision ?? world.revision,
+            people: [{ id: "alice", label: "Alice" }], relationships: [], events: [], definitions: [],
+          };
+          if (command === "workspace_saved_queries") return [];
+          if (command === "workspace_entry_layout") return saved;
+          if (command === "workspace_save_layout") {
+            writes.push(args.document);
+            saved = [args.document, args.published];
+            world.revision++;
+            return null;
+          }
+          if (command === "workspace_preview_author_layout") return { content: { Text: "Compiled preview" } };
+          throw new Error("Unexpected mock command: " + command);
+        },
+      },
+    });
+  });
+  await page.goto("/");
+  const graph = page.getByRole("region", { name: "Saved world graph" });
+  const inspector = graph.getByRole("complementary", { name: "Node inspector" });
+  await graph.locator("#nodes button[data-node=alice]").click();
+  await inspector.getByRole("button", { name: "Open character page" }).click();
+  await expect(inspector.getByRole("heading", { name: "Canvas tree" })).toBeVisible();
+  await inspector.getByRole("button", { name: "Text · Secret testimony" }).click();
+  await inspector.getByLabel("Move into container").selectOption("public-grid");
+  await inspector.getByRole("button", { name: "Move component" }).click();
+  await expect(inspector.getByLabel("Component audience")).toHaveValue("Author");
+  await inspector.getByRole("button", { name: "SavedQuery · binding" }).click();
+  await inspector.getByLabel("Move into container").selectOption("public-grid");
+  await inspector.getByRole("button", { name: "Move component" }).click();
+  await inspector.getByRole("button", { name: "Grid · public-g" }).click();
+  await inspector.getByLabel("New component kind").selectOption("Panel");
+  await inspector.getByRole("button", { name: "Add child" }).click();
+  await inspector.getByLabel("New component kind").selectOption("Text");
+  await inspector.getByRole("button", { name: "Add child" }).click();
+  await inspector.getByLabel("Component text").fill("New nested text");
+  if (process.env.ATLAS_CAPTURE_PHASE3 === "1") {
+    const timestamp = new Date().toISOString().slice(0, 19).replace("T", "_").replaceAll(":", "-") + "Z";
+    await inspector.screenshot({
+      path: "../../Development-Screenshots/" + timestamp + "_phase-04_canvas_mock-native-tree_01.png",
+      animations: "disabled",
+    });
+  }
+  await inspector.getByRole("button", { name: "Save page" }).click();
+  await inspector.getByRole("button", { name: "Open character page" }).click();
+  await expect(inspector.getByRole("button", { name: "Text · New nested text" })).toBeVisible();
+  const writes = await page.evaluate(() => (window as unknown as { __treeWrites: unknown[] }).__treeWrites);
+  expect(writes).toMatchObject([{ root: { content: { Stack: [
+    { id: "private-panel", content: { Panel: [] } },
+    { id: "public-grid", content: { Grid: { columns: 2, children: [
+      { id: "secret", audience: "Author", content: { Text: "Secret testimony" } },
+      { id: "binding", audience: "Author", content: { SavedQuery: {
+        query_id: "query", definition_revision: 2, bindings: [],
+      } } },
+      { audience: "Author", content: { Panel: [
+        { audience: "Author", content: { Text: "New nested text" } },
+      ] } },
+    ] } } },
+  ] } } }]);
+  const revision = page.locator("#author-revision");
+  await revision.fill("4");
+  await revision.blur();
+  await graph.locator("#nodes button[data-node=alice]").click();
+  await inspector.getByRole("button", { name: "Open character page" }).click();
+  await expect(inspector.getByRole("button", { name: "Save page" })).toBeDisabled();
+});

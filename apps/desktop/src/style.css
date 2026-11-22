@@ -147,3 +147,9 @@ button:disabled { opacity: 0.55; cursor: default; }
 }
 .entry-grid > * { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
 @media (max-width: 760px) { .entry-grid { grid-template-columns: minmax(0, 1fr); } }
+
+.canvas-tree, .canvas-tree-controls { display: grid; gap: 0.4rem; }
+.canvas-tree { max-height: 18rem; overflow: auto; }
+.canvas-tree button { text-align: left; width: auto; overflow-wrap: anywhere; }
+.canvas-tree [aria-pressed="true"] { border-color: var(--gold); color: var(--gold); }
+.canvas-tree-controls { border-top: 1px solid var(--border); padding-top: 0.6rem; }
