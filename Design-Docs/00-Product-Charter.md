@@ -13,14 +13,14 @@ A world author should be able to enter a single person, an incomplete event or a
 1. **Historical relationships:** people, households, organizations, families, places, assets, beliefs, events, actions and conflicts are all referenceable objects. Any significant relationship or affiliation can be tagged, dated, sourced, revised and investigated.
 2. **Genealogical depth:** legal, social and biological kinship, dynasties, household history, inheritance and synthetic DNA-style ancestry are distinguished rather than collapsed into family-tree edges.
 3. **Causality and agency:** actors perform actions within events, groups have event-specific affiliations, conflicts have dynamic positions, and explicit effects explain relationship and institutional change.
-4. **Three faces of one entry:** Node Studio exposes semantic connections; Canvas Studio composes responsive pages from layout primitives and data-bound components; Display Studio presents a scoped, read-only publication.
+4. **World Bible-first:** a central searchable directory and entry experience exposes semantic properties and typed connections, responsive Canvas composition and authorized read-only Display. The three representations remain separate architectural concerns. Graph, genealogy, map, chronology and evidence tools are contextual, not compulsory construction stages.
 5. **Universal discovery and queries:** search and typed graph/temporal queries work in every studio; backlinks, aliases, text mentions and image hotspots support progressive worldbuilding without automatically treating every mention as a fact.
 6. **Perspective and privacy:** canon, source testimony, rumor, uncertainty and character knowledge are different. Hidden author knowledge must not leak through queries, public backlinks or published components.
 7. **Local ownership:** offline desktop authoring, portable project data, deterministic generated histories, no required AI or cloud service.
 
 ## Primary users and workflows
 
-**Worldbuilder:** starts with named nodes, authors family/organization/event facts, follows suggestions, builds interconnected chronologies and historical explanations.
+**Worldbuilder:** creates or finds an entry in the World Bible, optionally starts without a page, adds typed family/organization/event facts in context, follows reviewed suggestions, composes an article and explores interconnected histories.
 
 **Writer/researcher:** compares conflicting records, reads an event biography, discovers cross-generational causes, queries the world as a particular character or at a particular date.
 

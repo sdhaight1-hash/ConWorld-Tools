@@ -44,7 +44,7 @@
 | CON-01 | Conflicts with issue-specific multipolar positions, factions, negotiations, phases and events | Side-switch and neutrality time-query correctly |
 | CON-02 | Conflict evolution, maps and biographies, direct versus indirect impact | Query shows supported causal chain and uncertainty |
 | EVD-01 | Canon, claims, testimonies, public narratives, personal knowledge, conflicting evidence | Character perspective never reveals unknown secret |
-| ENT-01 | Every world entry has Node, Canvas and Display representations | Changing one fact updates bound views, without copying fields |
+| ENT-01 | Each eligible world identity supports semantic, optional Canvas and authorized Display representations within the World Bible | Changing one fact updates bound views, without copying fields; identity-only records remain discoverable to permitted authors |
 | CAN-01 | Responsive layout primitives containing components with typed query bindings | Move component between Stack/Grid without changing binding |
 | CAN-02 | Templates, slots, breakpoint variants, hide/omit rules and versioned layouts | Public compile strips hidden children and references |
 | LNK-01 | Stable hyperlink targets in prose/images, hotspots, aliases and automatic backlinks | Rename preserves links; hidden backlinks don't leak |
@@ -62,10 +62,13 @@
 
 ## C. User-facing interaction requirements
 
-- **Node Studio:** create incomplete nodes, connect typed relations, traverse/filter by time or path, select graph layouts, inspect proposals and backlinks, search nodes and edges independently.
-- **Canvas Studio:** template/element palette, responsive Grid/Stack/Flex/Panel/SplitPane/Overlay, bound data components, content picker, in-page find, query editor, image hotspots and visibility previews.
-- **Display Studio:** read-only public/character/author previews, contextual navigation, permitted search, historic snapshot selector, source detail when authorized, accessible non-GPU equivalent.
-- **All studios:** keyboard navigation, undo/redo, stable deep links, clear unknown/uncertain flags, errors rather than fabricated results, and shared ViewContext.
+- **World Bible and contextual connections:** create incomplete semantic records without requiring a page; open stable identities from the directory; connect typed relations using compatible target/predicate controls, traverse/filter by time or path, select graph layouts, inspect proposals and backlinks, search nodes and edges independently.
+- **Entry editor / Canvas:** template/element palette, responsive Grid/Stack/Flex/Panel/SplitPane/Overlay, bound data components, content picker, in-page find, query editor, image hotspots and visibility previews.
+- **Authorized World Bible reader:** read-only public/character/author previews, contextual navigation, permitted search, historic snapshot selector, source detail when authorized, accessible non-GPU equivalent.
+- **All contextual tools:** keyboard navigation, undo/redo, stable deep links, clear unknown/uncertain flags, errors rather than fabricated results, and shared ViewContext.
+
+- Entry editing distinguishes semantic commands from presentation-only changes: template/type presets suggest compatible controls, layout or theme changes cannot mutate canon, and removing a bound component cannot delete its underlying fact. When a context or operation is unsupported, fail closed and explain; no silent main/author substitution.
+- Hierarchy navigation uses existing typed domain-specific predicates and stable references, supports overlapping lenses, and does not infer ancestry, membership, authority or physical containment from layout/collection grouping. New semantic predicates require reviewed domain contracts.
 
 ## D. Prioritization
 

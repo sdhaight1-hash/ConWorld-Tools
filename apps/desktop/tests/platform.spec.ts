@@ -1513,7 +1513,7 @@ test("world public search opens only the current reader projection", async ({ pa
             ] : [], truncated: false,
           };
           if (command === "workspace_public_entry" && payload.entryId === "alice") return {
-            content: { Stack: [{ content: { Text: "Gazette biography" } }, { content: { Text: "Released context" } }] },
+            content: { Stack: [{ id:"one", content: { Text: "Gazette biography" } }, { id:"two", content: { Text: "Released context" } }] },
           };
           if (command === "workspace_cancel_query") return null;
           throw new Error("Unexpected mock command: " + command);
@@ -1525,9 +1525,10 @@ test("world public search opens only the current reader projection", async ({ pa
   const search = page.getByRole("region", { name: "Published page search" });
   await search.getByLabel("Text in public pages").fill("gazette");
   await search.getByRole("button", { name: "Search published pages" }).click();
-  await expect(search.getByText("1 matching public blocks.")).toBeVisible();
+  await expect(search.getByText("1 matching published articles.")).toBeVisible();
   await search.getByRole("button", { name: "Read published page" }).click();
   await expect(search.getByText("Released context")).toBeVisible();
+  await expect(search.locator("#public-page-preview").getByText("Gazette biography", {exact:true})).toBeFocused();
   if (process.env.ATLAS_CAPTURE_PHASE3 === "1") {
     const timestamp = new Date().toISOString().slice(0, 19).replace("T", "_").replaceAll(":", "-") + "Z";
     await search.screenshot({
@@ -1537,7 +1538,7 @@ test("world public search opens only the current reader projection", async ({ pa
   }
   await search.getByLabel("Text in public pages").fill("private");
   await search.getByRole("button", { name: "Search published pages" }).click();
-  await expect(search.getByText("0 matching public blocks.")).toBeVisible();
+  await expect(search.getByText("0 matching published articles.")).toBeVisible();
   await expect(search.getByText("Released context")).toHaveCount(0);
 });
 
@@ -2107,6 +2108,29 @@ test("institution studio records a sourced fact and reviews a separate draft", a
     {command: "workspace_record_network_fact", args: {request: {revision: 5}, input: {kind: "membership", source: {id: "folio"}}}},
     {command: "workspace_review_ghost", args: {request: {revision: 6}, proposalId: "proposal", promote: true}},
   ]);
+  await studio.locator("summary").click();
+  await studio.getByLabel("Identity type").selectOption("place");
+  await studio.getByLabel("Identity label").fill("Northbridge Manor");
+  await studio.getByRole("button", { name: "Create identity" }).click();
+  await expect(page.locator("#author-world-info")).toContainText("Author revision 8 / 8");
+  await studio.locator("summary").click();
+  await studio.getByLabel("Subject identity").fill("manor");
+  await studio.getByLabel("Target identity").fill("town");
+  await studio.getByLabel("Evidence source identity").fill("folio");
+  await studio.getByLabel("Fact type").selectOption("proper_part_within");
+  await studio.getByLabel("Role or causal rationale").fill("physical");
+  await expect(studio.getByLabel("Fact type")).toHaveValue("proper_part_within");
+  if (process.env.ATLAS_CAPTURE_PHASE3 === "1") {
+    const timestamp = new Date().toISOString().slice(0, 19).replace("T", "_").replaceAll(":", "-") + "Z";
+    await studio.locator("[data-fact]").screenshot({ path: "../../Development-Screenshots/" + timestamp + "_phase-03_spatial_mock-native-containment-form_01.png", animations: "disabled" });
+  }
+  await studio.getByRole("button", { name: "Record network fact" }).click();
+  await expect(page.locator("#author-world-info")).toContainText("Author revision 9 / 9");
+  const spatialWrites = await page.evaluate(() => (window as unknown as { __networkWrites: unknown[] }).__networkWrites.slice(3));
+  expect(spatialWrites).toMatchObject([
+    {command: "workspace_create_identity", args: {request: {revision: 7}, kind: "place", label: "Northbridge Manor"}},
+    {command: "workspace_record_network_fact", args: {request: {revision: 8}, input: {kind: "proper_part_within", role: "physical", subject: {id: "manor"}, target: {id: "town"}}}}
+  ]);
 });
 
 test("custom template insertion uses exact pin and Canvas drag and undo preserve privacy", async ({ page }) => {
@@ -2257,4 +2281,506 @@ test("imported PNG and scoped hotspots edit in Canvas and public projection navi
   }
   await inspector.locator(".image-hotspot").click();
   await expect(inspector.getByText("Released companion page")).toBeVisible();
+});
+
+test("classification authoring and evidence backlinks use historical author commands", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "archive", name: "Archive", revision: 4 };
+    const writes: unknown[] = [];
+    const fact = {
+      reference: { world: "archive", family: "classification", id: "classification" },
+      subject: { world: "archive", id: "language" }, target: null,
+      source: { world: "archive", id: "folio" }, descriptor: { world: "archive", id: "tag" },
+      description: "Language classification", rationale: "Record concept classification",
+      recorded_at: 5, source_branch: "main", descriptor_revision: 3,
+      descriptor_state_revision: 2, descriptor_branch: "main", corrects: null,
+    };
+    Object.assign(window, {
+      isTauri: true, __classificationWrites: writes,
+      __TAURI_INTERNALS__: {
+        invoke: async (command: string, args: Record<string, unknown>) => {
+          if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+          if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+          if (command === "workspace_worlds") return [{ ...world }];
+          if (command === "workspace_snapshot") return {
+            world: { ...world }, day: args.day, view_revision: args.revision ?? world.revision,
+            people: [], relationships: [], events: [], definitions: [],
+          };
+          if (command === "workspace_saved_queries") return [];
+          if (["workspace_record_classification", "workspace_withdraw_classification", "workspace_annotate_semantic_fact", "workspace_retire_semantic_descriptor"].includes(command)) {
+            writes.push({ command, args }); world.revision++; return null;
+          }
+          if (command === "workspace_classifications") return [{
+            id: "classification", profile: "language", descriptor_id: "tag", descriptor_revision: 3,
+            source_id: "folio", starts_at: 0, ends_before: null, recorded_at: 5,
+          }];
+          if (command === "workspace_semantic_fact_backlinks") return [fact];
+          if (command === "workspace_semantic_fact") {
+            if ((args.reference as { family: string }).family === "site_area") {
+              return { ...fact, reference: { world: "archive", family: "site_area", id: "area" },
+                subject: { world: "archive", id: "workshop" }, description: "Site area: 12 ha", corrects: "prior-area" };
+            }
+            return fact;
+          }
+          if (command === "workspace_semantic_fact_annotations") return [{
+            id: "note", claim: { world: "archive", id: "claim" }, recorded_at: 6,
+          }];
+          throw new Error("Unexpected mock command: " + command);
+        },
+      },
+    });
+  });
+  await page.goto("/");
+  const studio = page.locator("[data-network-studio]");
+  await studio.locator("summary").click();
+  const form = studio.locator("[data-classification]");
+  await form.getByLabel("Concept identity").fill("language");
+  await form.getByLabel("Semantic profile").selectOption("language");
+  await form.getByLabel("Tag definition identity").fill("tag");
+  await form.getByLabel("Classification evidence source").fill("folio");
+  await form.getByRole("button", { name: "Record classification" }).click();
+  await expect(page.locator("#author-world-info")).toContainText("Author revision 5 / 5");
+  await studio.locator("summary").click();
+  await studio.getByLabel("Classification focus concept").fill("language");
+  await studio.getByRole("button", { name: "Inspect classifications" }).click();
+  await expect(studio.locator("[data-classifications]")).toContainText("revision 3");
+  await studio.getByLabel("Evidence or identity backlinks").fill("folio");
+  await studio.getByRole("button", { name: "Inspect semantic backlinks" }).click();
+  await expect(studio.locator("[data-semantic-links]")).toContainText("Language classification");
+  await studio.getByRole("button", { name: "Resolve classification fact" }).click();
+  await expect(studio.locator("[data-semantic-detail]")).toContainText("evidence folio");
+  await expect(studio.locator("[data-semantic-detail]")).toContainText("descriptor tag @ revision 3 (state 2, branch main)");
+  await expect(studio.locator("[data-semantic-detail]")).toContainText("recorded on branch main");
+  await expect(studio.locator("[data-semantic-detail]")).not.toContainText("corrects fact");
+  await studio.locator("[data-semantic-fact]").getByRole("combobox").selectOption("site_area");
+  await studio.getByLabel("Stable fact identity").fill("area");
+  await studio.getByRole("button", { name: "Resolve fact", exact: true }).click();
+  await expect(studio.locator("[data-semantic-detail]")).toContainText("corrects fact prior-area");
+  if (process.env.ATLAS_CAPTURE_PHASE3 === "1") {
+    const timestamp = new Date().toISOString().slice(0, 19).replace("T", "_").replaceAll(":", "-") + "Z";
+    await studio.locator("[data-semantic-detail]").screenshot({
+      path: "../../Development-Screenshots/" + timestamp + "_phase-03_semantic_mock-native-annotation-provenance_01.png",
+      animations: "disabled",
+    });
+  }
+  await studio.getByRole("button", { name: "Select fact for annotation" }).click();
+  await expect(studio.getByLabel("Annotation fact UUID")).toHaveValue("classification");
+  await studio.getByLabel("Sourced claim UUID").fill("claim");
+  await studio.getByRole("button", { name: "Link sourced annotation" }).click();
+  await expect(page.locator("#author-world-info")).toContainText("Author revision 6 / 6");
+  await studio.locator("summary").click();
+  await studio.getByLabel("Annotation fact family").selectOption("classification");
+  await studio.getByLabel("Annotation fact UUID").fill("classification");
+  await studio.getByRole("button", { name: "Inspect annotations" }).click();
+  await expect(studio.locator("[data-annotations]")).toContainText("Claim claim");
+  if (process.env.ATLAS_CAPTURE_PHASE3 === "1") {
+    const timestamp = new Date().toISOString().slice(0, 19).replace("T", "_").replaceAll(":", "-") + "Z";
+    await studio.locator("[data-fact-annotation]").screenshot({
+      path: "../../Development-Screenshots/" + timestamp + "_phase-03_semantic_mock-native-annotation-form_01.png",
+      animations: "disabled",
+    });
+    await studio.locator("[data-annotations]").screenshot({
+      path: "../../Development-Screenshots/" + timestamp + "_phase-03_semantic_mock-native-annotation-list_02.png",
+      animations: "disabled",
+    });
+  }
+  await studio.getByLabel("Retire Tag definition UUID").fill("tag");
+  await studio.getByLabel("Confirm retirement").check();
+  await studio.getByRole("button", { name: "Retire descriptor", exact: true }).click();
+  await expect(page.locator("#author-world-info")).toContainText("Author revision 7 / 7");
+  await studio.locator("summary").click();
+  await studio.getByLabel("Classification focus concept").fill("language");
+  await studio.getByRole("button", { name: "Inspect classifications" }).click();
+  await studio.getByRole("button", { name: "Withdraw classification" }).click();
+  await expect(page.locator("#author-world-info")).toContainText("Author revision 8 / 8");
+  const writes = await page.evaluate(() => (window as unknown as { __classificationWrites: unknown[] }).__classificationWrites);
+  expect(writes).toMatchObject([
+    { command: "workspace_record_classification", args: { request: { revision: 4 },
+      input: { subject_id: "language", descriptor_id: "tag", source_id: "folio", profile: "language" } } },
+    { command: "workspace_annotate_semantic_fact", args: { request: { revision: 5 },
+      fact: { world: "archive", family: "classification", id: "classification" }, claimId: "claim" } },
+    { command: "workspace_retire_semantic_descriptor", args: { request: { revision: 6 }, descriptorId: "tag" } },
+    { command: "workspace_withdraw_classification", args: { request: { revision: 7 }, factId: "classification" } },
+  ]);
+});
+
+test("semantic inspection invalidates pending replies and stale actions when focus changes", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "archive", name: "Archive", revision: 4 };
+    let release: (() => void) | undefined;
+    Object.assign(window, {
+      isTauri: true, __releaseSemantic: () => release?.(), __semanticPending: false,
+      __selectionRequests: [] as Record<string, unknown>[],
+      __TAURI_INTERNALS__: {
+        invoke: async (command: string, args: Record<string, unknown>) => {
+          switch (command) {
+            case "platform_scene": return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+            case "northbridge_history": return { day: 0, relationships: [], cause: null };
+            case "workspace_worlds": return [world];
+            case "workspace_snapshot": return { world, day: args.day, view_revision: 4,
+              people: [], relationships: [], events: [], definitions: [] };
+            case "workspace_saved_queries": return [];
+            case "workspace_semantic_candidates": {
+              (window as unknown as { __selectionRequests: Record<string, unknown>[] }).__selectionRequests.push(args);
+              if (args.kind === "culture") return { rows: [{id:"culture",label:"Estuary Culture"}], truncated:false };
+              return { rows: [{id:"new",label:"Estuary Speech"}], truncated:false };
+            }
+            case "workspace_classifications": {
+              if (args.subjectId === "old") {
+                await new Promise<void>(resolve => {
+                  release = resolve;
+                  Object.assign(window, { __semanticPending: true });
+                });
+              }
+              if (args.subjectId === "old") Object.assign(window, { __semanticReleased: true });
+              return [{ id: String(args.subjectId), profile: String(args.subjectId), descriptor_id: "tag",
+                descriptor_revision: 3, source_id: "folio", starts_at: 0, ends_before: null, recorded_at: 4 }];
+            }
+            default: throw new Error("Unexpected mock command: " + command);
+          }
+        },
+      },
+    });
+  });
+  await page.goto("/");
+  const studio=page.locator("[data-network-studio]");
+  await studio.locator("summary").click();
+  const focus=studio.getByLabel("Classification focus concept");
+  const inspect=studio.getByRole("button", { name: "Inspect classifications" });
+  const results=studio.locator("[data-classifications]");
+  await focus.fill("old");
+  await inspect.click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __semanticPending: boolean }).__semanticPending)).toBe(true);
+  await studio.getByLabel("Selection destination").selectOption({label:"Classification inspector"});
+  await studio.getByLabel("Identity name or phrase").fill("Estuary");
+  await studio.getByRole("button", {name:"Find compatible identities",exact:true}).click();
+  await studio.getByRole("button", {name:"Estuary Speech · new",exact:true}).click();
+  await expect(focus).toHaveValue("new");
+  await inspect.click();
+  await expect(results).toContainText("new");
+  await page.evaluate(() => (window as unknown as { __releaseSemantic: () => void }).__releaseSemantic());
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __semanticReleased?: boolean }).__semanticReleased)).toBe(true);
+  await expect(results).toContainText("new");
+  await expect(results).not.toContainText("old");
+  await focus.fill("different");
+  await expect(results).toBeEmpty();
+  await expect(results.getByRole("button", { name: "Withdraw classification" })).toHaveCount(0);
+
+  const fact = studio.locator("[data-fact]");
+  await fact.getByLabel("Fact type").selectOption("culture_language");
+  await fact.getByLabel("Starts at day").fill("7");
+  await studio.getByLabel("Selection destination").selectOption({label:"Semantic network target"});
+  await studio.getByLabel("Identity name or phrase").fill("Estuary");
+  await studio.getByRole("button", {name:"Find compatible identities",exact:true}).click();
+  const language = studio.getByRole("button", {name:"Estuary Speech · new",exact:true});
+  await expect(language).toBeVisible();
+  const requests = await page.evaluate(() =>
+    (window as unknown as { __selectionRequests: Record<string, unknown>[] }).__selectionRequests);
+  expect(requests.at(-1)).toMatchObject({kind:"language", phrase:"Estuary", request:{world_id:"archive",revision:4,day:7}});
+  if (process.env.ATLAS_CAPTURE_PHASE3 === "1") {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-").replace(/-\d{3}Z$/, "Z").replace("T", "_");
+    await studio.locator("[data-semantic-picker]").screenshot({
+      path: "../../Development-Screenshots/" + timestamp + "_phase-03_semantic_mock-native-profile-picker_01.png",
+      animations: "disabled",
+    });
+  }
+  // Changing the effective day makes the old result unusable.
+  await fact.getByLabel("Starts at day").fill("8");
+  await expect(language).toHaveCount(0);
+  await studio.getByRole("button", {name:"Find compatible identities",exact:true}).click();
+  await language.click();
+  await expect(fact.getByLabel("Target identity")).toHaveValue("new");
+
+  await studio.getByLabel("Selection destination").selectOption({label:"Semantic network subject"});
+  await studio.getByRole("button", {name:"Find compatible identities",exact:true}).click();
+  await studio.getByRole("button", {name:"Estuary Culture · culture",exact:true}).click();
+  await expect(fact.getByLabel("Subject identity")).toHaveValue("culture");
+  await fact.getByLabel("Fact type").selectOption("membership");
+  await studio.getByRole("button", {name:"Find compatible identities",exact:true}).click();
+  await expect(studio.locator("[data-status]")).toContainText("Select Culture documented language");
+  await expect(studio.locator("[data-picker-results]")).toBeEmpty();
+});
+
+
+test("creation commands use the loaded author revision and reject a changed day before refresh", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "guard-world", name: "Revision guard", revision: 7 };
+    const people = [{ id: "alice", label: "Alice" }, { id: "beatrice", label: "Beatrice" }];
+    const writes: { command: string; args: unknown }[] = [];
+    Object.assign(window, { isTauri: true, __creationWrites: writes, __TAURI_INTERNALS__: {
+      invoke: async (command: string, args: Record<string, unknown>) => {
+        if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+        if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+        if (command === "workspace_worlds") return [world];
+        if (command === "workspace_saved_queries") return [];
+        if (command === "workspace_snapshot") return { world, day: args.day, view_revision: world.revision, people, relationships: [], events: [] };
+        if (command === "workspace_create_person" || command === "workspace_create_relationship") {
+          writes.push({ command, args });
+          world.revision++;
+          return null;
+        }
+        throw new Error("Unexpected mock command: " + command);
+      },
+    } });
+  });
+  await page.goto("/");
+  await expect(page.locator("#author-status")).toContainText("World loaded");
+  const person = page.locator("#author-create-person");
+  await person.locator('[name="name"]').fill("Cora");
+  await page.evaluate(() => {
+    document.querySelector<HTMLInputElement>("#author-day")!.value = "10";
+    document.querySelector<HTMLFormElement>("#author-create-person")!.requestSubmit();
+  });
+  await expect(page.locator("#author-status")).toContainText("Refresh the selected historical view");
+  const writes = () => page.evaluate(() => (window as unknown as { __creationWrites: { command: string; args: unknown }[] }).__creationWrites);
+  expect(await writes()).toEqual([]);
+  await page.locator("#author-refresh-view").click();
+  await expect(page.locator("#author-world-info")).toContainText("historical day 10");
+  await person.getByRole("button", { name: "Add person" }).click();
+  await expect(page.locator("#author-status")).toContainText("Saved to local world history");
+  expect((await writes())[0]).toEqual({ command: "workspace_create_person", args: { worldId: "guard-world", expectedRevision: 7, name: "Cora" } });
+  await page.locator("#author-create-relationship button[type=submit]").click();
+  await expect(page.locator("#author-status")).toContainText("Saved to local world history");
+  expect((await writes())[1]).toMatchObject({ command: "workspace_create_relationship", args: { request: { world_id: "guard-world", expected_revision: 8, day: 10 } } });
+  const kinds = await page.locator('#author-composite-form select[name="kind"] option').evaluateAll(options => options.map(option => (option as HTMLOptionElement).value));
+  expect(kinds).toEqual(["","person","concept","place","organization","household","family_house","faction","conflict","office","title","asset","population","conflict_issue","conflict_phase","succession_rule","definition","relationship","event_involvement","actor_action","historical_event","source","claim"]);
+});
+
+
+test("entry draft blocks view changes, retains a failed save and can be explicitly discarded", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "draft-world", name: "Draft safety", revision: 4 };
+    const people = [{ id: "alice", label: "Alice" }, { id: "beatrice", label: "Beatrice" }];
+    let saves = 0;
+    let release: (() => void) | undefined;
+    let saved: unknown = null;
+    Object.assign(window, { isTauri: true, __resolveDraftSave: () => release?.(), __TAURI_INTERNALS__: {
+      invoke: async (command: string, args: { day?: number; revision?: number; document?: unknown; published?: boolean }) => {
+        if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+        if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+        if (command === "workspace_worlds") return [world];
+        if (command === "workspace_saved_queries") return [];
+        if (command === "workspace_snapshot") return { world, day: args.day ?? 0, view_revision: args.revision ?? world.revision, people, relationships: [], events: [] };
+        if (command === "workspace_entry_layout") return saved;
+        if (command === "workspace_save_layout") {
+          saves++;
+          if (saves === 1) throw new Error("Simulated stale revision");
+          await new Promise<void>(resolve => { release = resolve; });
+          saved = [args.document, args.published]; world.revision++;
+          return null;
+        }
+        throw new Error("Unexpected mock command: " + command);
+      },
+    } });
+  });
+  await page.goto("/");
+  await expect(page.locator("#author-status")).toContainText("World loaded");
+  const graph = page.getByRole("region", { name: "Saved world graph" });
+  const inspector = graph.getByRole("complementary", { name: "Node inspector" });
+  await graph.locator("#nodes button[data-node=alice]").click();
+  await inspector.getByRole("button", { name: "Open character page" }).click();
+  const text = inspector.getByRole("textbox", { name: "Page text", exact: true });
+  await text.fill("Retain this draft");
+  await graph.locator("#nodes button[data-node=beatrice]").click();
+  await expect(text).toHaveValue("Retain this draft");
+  await expect(inspector.locator("[data-draft-status]")).toContainText("Save or discard");
+  const day = page.locator("#author-day");
+  await day.fill("42");
+  await day.blur();
+  await expect(day).toHaveValue("0");
+  await expect(text).toHaveValue("Retain this draft");
+  await inspector.getByRole("button", { name: "Save page" }).click();
+  await expect(inspector.locator("[data-draft-status]")).toContainText("Save failed");
+  await expect(text).toHaveValue("Retain this draft");
+  if (process.env.ATLAS_CAPTURE_PHASE3 === "1") {
+    const timestamp = new Date().toISOString().slice(0, 19).replace("T", "_").replaceAll(":", "-") + "Z";
+    await inspector.screenshot({ path: "../../Development-Screenshots/" + timestamp + "_phase-04_canvas_mock-native-draft-guard_01.png", animations: "disabled" });
+  }
+  await inspector.getByRole("button", { name: "Discard unsaved page changes" }).click();
+  await expect(text).toHaveValue("");
+  await text.fill("Save this instead");
+  await inspector.getByRole("button", { name: "Save page" }).click();
+  await expect(inspector.locator("[data-draft-status]")).toHaveText("Saving page…");
+  await graph.locator("#nodes button[data-node=beatrice]").click();
+  await expect(inspector.locator("[data-draft-status]")).toContainText("Wait for the result");
+  await page.evaluate(() => (window as unknown as { __resolveDraftSave: () => void }).__resolveDraftSave());
+  await expect(page.locator("#author-world-info")).toContainText("Author revision 5 / 5");
+  await inspector.getByRole("button", { name: "Open character page" }).click();
+  await expect(text).toHaveValue("Save this instead");
+  await graph.locator("#nodes button[data-node=beatrice]").click();
+  await expect(inspector.getByRole("button", { name: "Open character page" })).toBeVisible();
+});
+
+
+test("Canvas reference picker uses the pinned ontology search, preserves captions and ignores late results", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "reference-world", name: "Reference selection", revision: 4 };
+    const people = [{ id: "alice", label: "Alice" }];
+    const calls: { command: string; args: unknown }[] = [];
+    let finishOld: (() => void) | undefined;
+    Object.assign(window, { isTauri: true, __referenceCalls: calls, __finishOldReference: () => finishOld?.(), __TAURI_INTERNALS__: {
+      invoke: async (command: string, args: { day?: number; phrase?: string }) => {
+        if (command === "platform_scene") return { target: "test-native", smoke: false, scene: { nodes: [], edges: [] } };
+        if (command === "northbridge_history") return { day: 0, relationships: [], cause: null };
+        if (command === "workspace_worlds") return [world];
+        if (command === "workspace_saved_queries") return [];
+        if (command === "workspace_snapshot") return { world, day: args.day ?? 0, view_revision: world.revision, people, relationships: [], events: [] };
+        if (command === "workspace_entry_layout") return null;
+        if (command === "workspace_cancel_query") { calls.push({ command, args }); return null; }
+        if (command === "workspace_semantic_candidates") {
+          calls.push({ command, args });
+          if (args.phrase === "Old") {
+            await new Promise<void>(resolve => { finishOld = resolve; });
+            return { rows: [{ id: "old", label: "Obsolete", kind: "concept" }], truncated: false };
+          }
+          return { rows: [{ id: "concept-one", label: "Amber", kind: "concept" },
+            { id: "place-two", label: "Amber", kind: "place" }], truncated: false };
+        }
+        if (command === "workspace_save_layout") {
+          calls.push({ command, args }); world.revision++; return null;
+        }
+        throw new Error("Unexpected mock command: " + command);
+      },
+    } });
+  });
+  await page.goto("/");
+  const graph = page.getByRole("region", { name: "Saved world graph" });
+  const inspector = graph.getByRole("complementary", { name: "Node inspector" });
+  await inspector.getByRole("button", { name: "Open character page" }).click();
+  await inspector.getByRole("textbox", { name: "Page text", exact: true }).fill("Amber research");
+  await inspector.getByRole("button", { name: "Add entry link" }).click();
+  await inspector.getByLabel("Link caption").fill("A carefully authored caption");
+  await inspector.getByText("Find link target", { exact: true }).click();
+  const picker = inspector.locator("[data-reference-picker]");
+  await picker.getByRole("searchbox", { name: "Search link target" }).fill("Old");
+  await picker.getByRole("button", { name: "Search references" }).click();
+  await expect(picker.getByText("Searching the selected author view…")).toBeVisible();
+  await picker.getByRole("searchbox", { name: "Search link target" }).fill("Amber");
+  await picker.getByRole("button", { name: "Search references" }).click();
+  await expect(picker.getByRole("button", { name: "Amber · concept · concept-one" })).toBeVisible();
+  await page.evaluate(() => (window as unknown as { __finishOldReference: () => void }).__finishOldReference());
+  await expect(picker.getByRole("button", { name: "Amber · place · place-two" })).toBeVisible();
+  await expect(picker.getByText("Obsolete", { exact: false })).toHaveCount(0);
+  if (process.env.ATLAS_CAPTURE_PHASE3 === "1") {
+    const timestamp = new Date().toISOString().slice(0, 19).replace("T", "_").replaceAll(":", "-") + "Z";
+    await inspector.screenshot({ path: "../../Development-Screenshots/" + timestamp + "_phase-04_canvas_mock-native-reference-picker_01.png", animations: "disabled" });
+  }
+  await picker.getByRole("button", { name: "Amber · concept · concept-one" }).click();
+  await expect(inspector.getByLabel("Link target identity")).toHaveValue("concept-one");
+  await expect(inspector.getByLabel("Link caption")).toHaveValue("A carefully authored caption");
+  await expect(inspector.getByLabel("Link target identity")).toBeFocused();
+  const calls = () => page.evaluate(() => (window as unknown as { __referenceCalls: { command: string; args: unknown }[] }).__referenceCalls);
+  const before = await calls();
+  expect(before.filter(call => call.command === "workspace_save_layout")).toHaveLength(0);
+  expect(before.filter(call => call.command === "workspace_semantic_candidates")).toMatchObject([
+    { args: { request: { world_id: "reference-world", day: 0, revision: 4 }, kind: "entry", phrase: "Old" } },
+    { args: { request: { world_id: "reference-world", day: 0, revision: 4 }, kind: "entry", phrase: "Amber" } },
+  ]);
+  expect(before.filter(call => call.command === "workspace_cancel_query")).toHaveLength(1);
+  await inspector.getByRole("button", { name: "Save page" }).click();
+  await expect(page.locator("#author-world-info")).toContainText("Author revision 5 / 5");
+  expect((await calls()).filter(call => call.command === "workspace_save_layout")).toMatchObject([
+    { args: { document: { root: { content: { Stack: [
+      expect.anything(), expect.anything(), { content: { ObjectLink: { target: { world: "reference-world", id: "concept-one" }, label: "A carefully authored caption" } } },
+    ] } } } } },
+  ]);
+});
+
+
+test("World Bible opens and creates typed entries independently of the scene and protects drafts", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "bible-world", name: "Alder Basin", revision: 4 };
+    const entries = [{id:"guild",label:"Vale",kind:"organization"}, {id:"estate",label:"Vale",kind:"place"}, {id:"register",label:"Register",kind:"source"}, {id:"child",label:"Alder child",kind:"person"}, {id:"parent",label:"Alder parent",kind:"person"}];
+    const calls: {command: string; args: Record<string, unknown>}[] = [];
+    const layouts = new Map<string, unknown>();
+    let finishCreate: (() => void) | undefined;
+    Object.assign(window, {isTauri: true, __bibleCalls: calls, __finishBibleCreate: () => finishCreate?.(), __TAURI_INTERNALS__: {
+      invoke: async (command: string, args: Record<string, unknown>) => {
+        if (command === "platform_scene") return {target:"test-native",smoke:false,scene:{nodes:[],edges:[]}};
+        if (command === "northbridge_history") return {day:0,relationships:[],cause:null};
+        if (command === "workspace_worlds") return [{...world}];
+        if (command === "workspace_snapshot") return {world:{...world},day:args.day,view_revision:args.revision??world.revision,people:[],relationships:[],events:[],definitions:[],scene_limited:true};
+        if (command === "workspace_saved_queries") return [];
+        calls.push({command,args});
+        if (command === "workspace_semantic_candidates") return {rows:entries.filter(e=>e.label.includes(String(args.phrase))),truncated:false};
+        if (command === "workspace_entry_layout") return layouts.get(String(args.entryId))??null;
+        if (command === "workspace_family_links") return [];
+        if (command === "workspace_record_parentage") { world.revision++; return "parentage"; }
+        if (command === "workspace_record_network_fact") { world.revision++; return "new-fact"; }
+        if (command === "workspace_network_facts") return [{id:"fact-1",subject_label:"Vale",target_label:"Vale",input:{subject:{world:world.id,id:"guild"},target:{world:world.id,id:"estate"},source:{world:world.id,id:"register"},kind:"located_at",role:"headquarters",starts_at:0,ends_before:null}}];
+        if (command === "workspace_create_identity") {
+          await new Promise<void>(resolve => { finishCreate = resolve; });
+          entries.push({id:"new-title",label:String(args.label),kind:String(args.kind)}); world.revision++;
+          return {world:world.id,id:"new-title"};
+        }
+        if (command === "workspace_save_layout") {
+          const doc = args.document as {entry:{id:string}};
+          layouts.set(doc.entry.id,[doc,args.published]); world.revision++; return null;
+        }
+        throw new Error("Unexpected mock command: "+command);
+      }
+    }});
+  });
+  await page.goto("/");
+  await expect(page.locator("#author-status")).toContainText("Search-only mode");
+  const bible = page.locator("#world-bible"), entry = bible.getByRole("region", {name:"World Bible entry"});
+  await bible.getByLabel("Find an entry").fill("Alder child");
+  await bible.getByRole("button",{name:"Find entry",exact:true}).click();
+  await bible.getByRole("button",{name:"Alder child · person · child"}).click();
+  await entry.getByRole("button",{name:"Family history",exact:true}).click();
+  await entry.getByText("Record a parent",{exact:true}).click();
+  await entry.getByText("Find parent identity",{exact:true}).click();
+  await entry.getByLabel("Search parent identity").fill("Alder parent");
+  await entry.getByRole("button",{name:"Search references",exact:true}).click();
+  await entry.getByRole("button",{name:"Alder parent · person · parent"}).click();
+  await expect(entry.getByLabel("Parent",{exact:true})).toHaveValue("parent");
+  await entry.getByLabel("Basis for the record").fill("Family register");
+  await entry.getByRole("button",{name:"Record parent",exact:true}).click();
+  await expect(page.locator("#author-world-info")).toContainText("Author revision 5 / 5");
+  await expect(entry.getByRole("heading",{name:"Family history",exact:true})).toBeVisible();
+  await bible.getByLabel("Find an entry").fill("Vale");
+  await bible.getByRole("button",{name:"Find entry",exact:true}).click();
+  await bible.getByRole("button",{name:"Vale · organization · guild"}).click();
+  await expect(entry.locator("[data-entry-identity]")).toContainText("Identity only");
+  await entry.getByRole("button",{name:"Connections",exact:true}).click();
+  await expect(entry.getByText(/headquarters.*fact-1/)).toBeVisible();
+  const connection = entry.locator("[data-connection-editor]");
+  await connection.getByText("Find connection target",{exact:true}).click();
+  await connection.getByLabel("Search connection target").fill("Vale");
+  await connection.getByRole("button",{name:"Search references"}).click();
+  await connection.getByRole("button",{name:"Vale · place · estate"}).click();
+  await expect(connection.getByLabel("Connection type")).toHaveValue("located_at");
+  await expect(connection.getByLabel("Location role or conflict stance")).toHaveValue("headquarters");
+  await connection.getByLabel("Connection evidence source",{exact:true}).fill("register");
+  await connection.getByRole("button",{name:"Record connection",exact:true}).click();
+  await expect(page.locator("#author-world-info")).toContainText("Author revision 6 / 6");
+  await entry.getByRole("button",{name:"Open Vale",exact:true}).click();
+  await expect(entry.locator("[data-entry-identity]")).toContainText("estate");
+  const narrative = entry.getByRole("textbox",{name:"Page text",exact:true});
+  await narrative.fill("The estate.");
+  await entry.getByRole("button",{name:"Back to directory"}).click();
+  await expect(narrative).toHaveValue("The estate.");
+  await expect(entry.locator("[data-draft-status]")).toContainText("Save or discard");
+  await entry.getByRole("button",{name:"Save page",exact:true}).click();
+  await expect(entry.locator("[data-entry-identity]")).toContainText("Saved unreleased page");
+  await expect(narrative).toHaveValue("The estate.");
+  await bible.getByLabel("Entry type").selectOption("title");
+  await bible.getByLabel("Entry name").fill("Basin Warden");
+  await bible.getByRole("button",{name:"Create identity only"}).click();
+  await expect(bible.locator("[data-bible-create-status]")).toHaveText("Creating identity…");
+  await entry.getByRole("button",{name:"Back to directory"}).click();
+  await expect(bible.locator("[data-bible-create-status]")).toContainText("Wait for the result");
+  await expect(entry.locator("[data-entry-identity]")).toContainText("estate");
+  await page.evaluate(() => (window as unknown as {__finishBibleCreate:()=>void}).__finishBibleCreate());
+  await expect(entry.getByRole("heading",{name:"Basin Warden",exact:true})).toBeVisible();
+  await expect(entry.locator("[data-entry-identity]")).toContainText("Identity only");
+  const calls = await page.evaluate(() => (window as unknown as {__bibleCalls:{command:string;args:Record<string,unknown>}[]}).__bibleCalls);
+  expect(calls.find(c=>c.command==="workspace_create_identity")?.args).toMatchObject({request:{world_id:"bible-world",day:0,revision:7},kind:"title",label:"Basin Warden"});
+  expect(calls.filter(c=>c.command==="workspace_save_layout")).toHaveLength(1);
+  expect(calls.find(c=>c.command==="workspace_record_parentage")?.args).toMatchObject({request:{world_id:"bible-world",person_id:"child",day:0,revision:4},input:{parent_id:"parent",kind:"biological",starts_at:0,ends_before:null,rationale:"Family register"}});
+  expect(calls.find(c=>c.command==="workspace_record_network_fact")?.args).toMatchObject({request:{world_id:"bible-world",day:0,revision:5},input:{subject:{world:"bible-world",id:"guild"},target:{world:"bible-world",id:"estate"},source:{world:"bible-world",id:"register"},kind:"located_at",role:"headquarters",starts_at:0,ends_before:null}});
+  if (process.env.ATLAS_CAPTURE_PHASE3 === "1") {
+    const stamp = new Date().toISOString().slice(0,19).replace("T","_").replaceAll(":","-")+"Z";
+    await bible.screenshot({path:"../../Development-Screenshots/"+stamp+"_phase-04_canvas_mock-native-world-bible_01.png",animations:"disabled"});
+  }
 });

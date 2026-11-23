@@ -554,6 +554,9 @@ fn project(
     if !can_view(view.scope, element.audience) {
         return Ok(None);
     }
+    // Controlled previews and public searches share the deadline even for
+    // components that only perform in-memory projection work.
+    store.check_query_control()?;
     if depth > MAX_DEPTH || budget.seen.len() >= MAX_ELEMENTS {
         return Err(Error::QueryBudgetExceeded);
     }

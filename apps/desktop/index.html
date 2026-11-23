@@ -64,7 +64,7 @@
       <section id="author-workspace" class="history author-workspace" aria-label="Persistent author workspace" hidden>
         <div class="toolbar">
           <div>
-            <h2>Author workspace</h2>
+            <h2>World authoring</h2>
             <p class="hint">Saved locally in app data. Day numbers are normalized fictional days until the calendar editor is available.</p>
           </div>
           <label for="author-world">World <select id="author-world"></select></label>
@@ -80,6 +80,7 @@
         </form>
         <div id="author-world-content" hidden>
           <p id="author-world-info" class="hint"></p>
+          <section id="world-bible" aria-label="World Bible author directory" class="query-panel"></section>
           <section id="public-page-search" aria-label="Published page search" class="query-panel">
             <h3>Search published pages</h3>
             <p class="hint">Current publication, selected historical day. Private author notes and unlisted pages are excluded.</p>
@@ -149,16 +150,13 @@
                 <label>Object kind
                   <select name="kind">
                     <option value="">Any kind</option>
-                    <option value="person">Person</option>
-                    <option value="definition">Definition</option>
-                    <option value="relationship">Relationship</option>
-                    <option value="event_involvement">Event involvement</option>
-                    <option value="actor_action">Actor action</option>
-                    <option value="historical_event">Historical event</option>
-                    <option value="source">Source</option>
-                    <option value="claim">Claim</option>
                   </select>
                 </label>
+      <label>Concept profile <select name="profile"><option value="">Any profile</option><option value="culture">Culture</option><option value="language">Language</option><option value="material">Material</option><option value="technology">Technology</option></select></label>
+                <label>Site area filter <select name="area_test"><option value="">Any area</option><option value="unknown">Explicitly unknown</option><option value="at_least">At least (same unit)</option></select></label>
+                <label>Minimum area <input name="area_amount" type="number" min="0" step="1" /></label>
+                <label>Area unit <select name="area_unit"><option value="hectare">Hectare</option><option value="square_metre">Square metre</option></select></label>
+                <label>Classification descriptor ID <input name="descriptor" placeholder="Optional Tag definition UUID" /></label>
                 <label>Has cited source ID <input name="source" placeholder="Optional source UUID" /></label>
                 <label>Combine selected filters
                   <select name="combine"><option value="and">All (AND)</option><option value="or">Any (OR)</option></select>
@@ -184,6 +182,7 @@
           <div class="editor-forms">
             <form id="author-create-person" class="editor-form">
               <h3>Create person</h3>
+              <p class="hint">Creates an undated identity, not a birth or an event at the selected day.</p>
               <label>Name <input name="name" maxlength="200" required /></label>
               <button type="submit">Add person</button>
             </form>

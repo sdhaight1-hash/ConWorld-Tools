@@ -10,6 +10,7 @@ pub mod inheritance;
 pub mod layout;
 pub mod network;
 pub mod query;
+pub mod semantic;
 mod store;
 
 use std::path::PathBuf;
@@ -30,7 +31,9 @@ pub struct BranchId(pub Uuid);
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ObjectId(pub Uuid);
 
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(
+    Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize,
+)]
 pub struct AuthorRevision(pub i64);
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -164,6 +167,8 @@ pub struct EvidenceStatement {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ObjectData {
     Person,
+    Concept,
+    Place,
     Organization,
     Household,
     FamilyHouse,

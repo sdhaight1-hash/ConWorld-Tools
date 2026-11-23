@@ -2,15 +2,17 @@
 
 **Status:** Normative shared query-service contract; search is a foundation, not a late polish phase.
 
-## 1. One engine, three search experiences
+## 1. One engine, contextual search experiences
 
 **Global search:** names, IDs, aliases, tags, text, sources, media descriptions, organizations, actor roles, conflicts, page content and saved queries; ranking/filters, disambiguation, result provenance and jump-to. Keep current world, branch, date, author revision and perspective.
 
-**Node Studio:** filter objects, edge types, directionality, path/depth and neighbor count; ancestry/common ancestor, event impact, faction intersections and "how are A and B connected?". Discovered names may expand authorized graph neighbors or create *proposals*, never indiscriminately add canon.
+**Entry directory and contextual graph:** filter objects, edge types, directionality, path/depth and neighbor count; ancestry/common ancestor, event impact, faction intersections and "how are A and B connected?". Discovered names may expand authorized graph neighbors or create *proposals*, never indiscriminately add canon.
 
-**Canvas Studio:** search component/primitive palette; picker for objects and media; find within page; query builder with preview/binding; dependency inspector for components, templates and inline references.
+**Entry editor / Canvas:** search component/primitive palette; picker for objects and media; find within page; query builder with preview/binding; dependency inspector for components, templates and inline references.
 
-**Display Studio:** search the **published authorized projection**, including permitted content and linked component data. Query, snippet, facet, result counts, link previews, backtracking paths, HTML exports and image annotations must all obey identical policies.
+**Authorized World Bible reader:** search the **published authorized projection**, including permitted content and linked component data. Query, snippet, facet, result counts, link previews, backtracking paths, HTML exports and image annotations must all obey identical policies.
+
+Distinguish go-to identity (with stable kind-labelled matches and ambiguity), find-in-world (typed queries, facts, sources and proposals), and find-in-article (authorized text and exact stable element anchors). Reuse the same query services and bounded request/cancel controls; a reader's corpus, title, snippet, ranking, backlink and count cannot be derived from hidden author data on the client. Preserve the selection and draft across navigation; use contextual graph exploration and saved queries before #70 recipes and #78 dashboards.
 
 ## 2. Versioned typed query AST
 
@@ -133,3 +135,7 @@ Subsequent explicit owner approval: [#70](https://github.com/sdhaight1-hash/ConW
 [Accepted Architectural Evolution #72](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/72) ([design](Architectural-Evolutions/universal-worldbuilding-ontology-and-governed-semantic-extensibility.md), [ADR-007](ADRs/adr-007-governed-semantic-extensibility.md), [approval](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/72#issuecomment-7074159822)). AE-01–09 production gates remain unpassed; original phase/feature gates unchanged.
 
 Use existing QuerySpec/QueryControl for verified compatible descriptor/field predicates and pinned saved definitions. Scope before traversal/facets/counts/labels, review proposals explicitly, cancel and invalidate stale results. No independent engine or automatic Transform eligibility.
+
+## Research #76 — approved editorial and workspace direction (2026-11-22)
+
+[Owner approval](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/76#issuecomment-7079741458) accepts [Architectural Evolution #77](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/77) ([specification](Architectural-Evolutions/independent-editorial-draft-and-publication-lifecycle.md), [ADR-014](ADRs/adr-014-independent-editorial-release.md)) and [New Feature #78](https://github.com/sdhaight1-hash/ConWorld-Tools/issues/78) ([specification](Features/configurable-world-management-workspaces-and-dashboards.md)). The future release-selection refinement separates saved author draft from current explicitly released layout version; current runtime remains combined until A1, reviewed contract/migration and implementation. Publication indices and reader access follow the current authorized release, not newest draft, after implementation. Restore never reinstates revoked publication or grants. No changes to stable identity, existing time/branch/authority restrictions, required projection or acceptance exits. The author-only configurable dashboard is a bounded configuration over existing queries and entry views, not another semantic entry layer or query engine; readiness B1 required. Existing contextual UI, rich text, templates, safe search/links and views remain under original owners. See [research disposition](Research-Studies/comparative-research-ticket-disposition-2026-11-22.md). No production readiness or verification implied.

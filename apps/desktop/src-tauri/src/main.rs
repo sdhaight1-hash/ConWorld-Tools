@@ -32,6 +32,7 @@ struct Edge {
 enum PlatformSmoke {
     None,
     Scene,
+    Ontology,
     Renderer { require_gpu: bool },
 }
 
@@ -40,6 +41,7 @@ struct PlatformScene {
     target: &'static str,
     smoke: bool,
     renderer_smoke: bool,
+    ontology_smoke: bool,
     scene: Scene,
 }
 
@@ -50,6 +52,44 @@ struct SmokeObservation {
     history_verified: bool,
     webgpu: WebGpuStatus,
     benchmark: Option<BenchmarkObservation>,
+    ontology_verified: Option<bool>,
+    ontology: Option<OntologyObservation>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct OntologyObservation {
+    passed: bool,
+    tasks: Vec<OntologyTaskObservation>,
+    error: Option<String>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct OntologyTaskObservation {
+    name: String,
+    elapsed_ms: f64,
+    submissions: usize,
+}
+
+impl OntologyObservation {
+    fn verified(&self) -> bool {
+        self.passed
+            && self.error.is_none()
+            && self.tasks.len() == 3
+            && self
+                .tasks
+                .iter()
+                .zip([
+                    ("culture_language", 4),
+                    ("novel_category_shared_material", 4),
+                    ("site_area_history_and_evidence", 3),
+                ])
+                .all(|(task, (name, submissions))| {
+                    task.name == name
+                        && task.submissions == submissions
+                        && task.elapsed_ms.is_finite()
+                        && task.elapsed_ms >= 0.0
+                })
+    }
 }
 
 #[derive(Deserialize, Serialize)]
@@ -109,6 +149,7 @@ fn load_scene(mode: PlatformSmoke) -> Result<PlatformScene, &'static str> {
         target: std::env::consts::OS,
         smoke: !matches!(mode, PlatformSmoke::None),
         renderer_smoke: matches!(mode, PlatformSmoke::Renderer { .. }),
+        ontology_smoke: matches!(mode, PlatformSmoke::Ontology),
         scene,
     })
 }
@@ -131,6 +172,13 @@ fn complete_platform_smoke(
                 && observation.canvas2d_verified
                 && observation.history_verified
         }
+        PlatformSmoke::Ontology => {
+            observation.ontology_verified == Some(true)
+                && observation
+                    .ontology
+                    .as_ref()
+                    .is_some_and(OntologyObservation::verified)
+        }
         PlatformSmoke::Renderer { require_gpu } => observation
             .benchmark
             .as_ref()
@@ -144,7 +192,33 @@ fn complete_platform_smoke(
         "observation": observation,
     });
     println!("ATLAS_PLATFORM_SMOKE {report}");
-    app.exit(i32::from(!passed));
+    if passed
+        && matches!(*smoke, PlatformSmoke::Ontology)
+        && let Some(directory) = std::env::var_os("ATLAS_ONTOLOGY_CAPTURE_HANDSHAKE")
+    {
+        let directory = std::path::PathBuf::from(directory);
+        // Keep the verified window alive only for the explicitly requested capture.
+        // The launcher owns the temporary directory and acknowledges after saving.
+        std::thread::spawn(move || {
+            let ready = directory.join("ready");
+            let captured = directory.join("captured");
+            if std::fs::write(ready, b"verified").is_err() {
+                app.exit(1);
+                return;
+            }
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+            while std::time::Instant::now() < deadline {
+                if captured.is_file() {
+                    app.exit(0);
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            app.exit(1);
+        });
+    } else {
+        app.exit(i32::from(!passed));
+    }
     Ok(())
 }
 
@@ -174,7 +248,9 @@ fn main() {
         return;
     }
     let has_flag = |name| std::env::args_os().any(|arg| arg == name);
-    let smoke = if has_flag("--renderer-smoke") {
+    let smoke = if has_flag("--ontology-smoke") {
+        PlatformSmoke::Ontology
+    } else if has_flag("--renderer-smoke") {
         PlatformSmoke::Renderer {
             require_gpu: has_flag("--require-gpu"),
         }
@@ -188,7 +264,11 @@ fn main() {
     tauri::Builder::default()
         .manage(smoke)
         .manage(history)
-        .setup(|app| {
+        .setup(move |app| {
+            if matches!(smoke, PlatformSmoke::Ontology) {
+                app.manage(workspace::AuthorWorkspace::ontology_smoke_fixture()?);
+                return Ok(());
+            }
             let directory = app.path().app_data_dir()?;
             std::fs::create_dir_all(&directory)?;
             app.manage(workspace::AuthorWorkspace::open(
@@ -244,6 +324,17 @@ fn main() {
             workspace::workspace_import_png,
             workspace::workspace_create_identity,
             workspace::workspace_network_facts,
+            workspace::workspace_record_classification,
+            workspace::workspace_classifications,
+            workspace::workspace_withdraw_classification,
+            workspace::workspace_semantic_fact_backlinks,
+            workspace::workspace_semantic_fact,
+            workspace::workspace_semantic_candidates,
+            workspace::workspace_annotate_semantic_fact,
+            workspace::workspace_semantic_fact_annotations,
+            workspace::workspace_retire_semantic_descriptor,
+            workspace::workspace_record_site_area,
+            workspace::workspace_site_area,
             workspace::workspace_persisted_impact,
             workspace::workspace_record_network_fact,
             workspace::workspace_withdraw_network_fact,

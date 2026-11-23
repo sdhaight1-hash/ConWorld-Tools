@@ -7,8 +7,9 @@
 ~~~text
 Tauri 2 desktop shell
   HTML/CSS/TypeScript UI (React is a view-layer choice)
-    Node Studio | Canvas Studio | Display Studio
-    World | Relationship | Genealogy | Organization | Event | Conflict
+    World Bible directory / entry shell / authorized reader
+    Semantic controls + Canvas composition | contextual connections/graph
+    Hierarchy | Genealogy | Organization | Event | Conflict | Map | Evidence
        |
        | typed IPC commands and read-only queries; no direct SQL
        v
@@ -29,6 +30,8 @@ Native app --> scoped immutable Scene DTO --> wgpu-WASM WebGPU canvas
 ~~~
 
 **Source of truth:** native Rust and SQLite. Frontend caches are temporary. wgpu view is a renderer and interaction hit-testing aid, never a historical logic engine.
+
+The entry shell coordinates existing commands and scoped queries under one supported selection/context. Semantic controls explicitly mutate canonical facts via Rust; layout elements bind those facts without owning them. Graph coordinates and hierarchy presentation remain view metadata. Article-only editing must not depend on loading the whole graph. This is a UI reconciliation, not an additional storage representation or native service.
 
 ## 2. Rust workspace organization
 

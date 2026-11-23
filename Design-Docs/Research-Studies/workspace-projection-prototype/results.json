@@ -1,0 +1,68 @@
+{
+  "passed": 25,
+  "checks": [
+    "public projection contains no private ids, captions or query",
+    "hidden subtree never evaluates query",
+    "witness only sees own permitted section",
+    "other character only sees own section",
+    "author sees all headings",
+    "reparent preserves inherited restriction",
+    "conflicting character scopes become author-only",
+    "revoked target and caption disappear on recompile",
+    "hidden insertion leaves public DTO unchanged",
+    "1000: list/cards expose identical page ids",
+    "1000: groups sum only authorized rows",
+    "1000: first-page group counts are not total",
+    "1000: hidden addition leaves selection and grouping identical",
+    "1000: end-exclusive dates respected",
+    "10000: list/cards expose identical page ids",
+    "10000: groups sum only authorized rows",
+    "10000: first-page group counts are not total",
+    "10000: hidden addition leaves selection and grouping identical",
+    "10000: end-exclusive dates respected",
+    "50000: list/cards expose identical page ids",
+    "50000: groups sum only authorized rows",
+    "50000: first-page group counts are not total",
+    "50000: hidden addition leaves selection and grouping identical",
+    "50000: end-exclusive dates respected",
+    "structured link survives Unicode prefix insertion without byte-offset retargeting"
+  ],
+  "metrics": [
+    {
+      "n": 1000,
+      "visible": 686,
+      "full": {
+        "House A": 229,
+        "House B": 457
+      },
+      "first": {
+        "House A": 17,
+        "House B": 33
+      }
+    },
+    {
+      "n": 10000,
+      "visible": 6857,
+      "full": {
+        "House A": 2286,
+        "House B": 4571
+      },
+      "first": {
+        "House A": 17,
+        "House B": 33
+      }
+    },
+    {
+      "n": 50000,
+      "visible": 34286,
+      "full": {
+        "House A": 11429,
+        "House B": 22857
+      },
+      "first": {
+        "House A": 17,
+        "House B": 33
+      }
+    }
+  ]
+}

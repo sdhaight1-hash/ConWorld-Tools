@@ -41,6 +41,7 @@ pub fn inspect_archive(path: impl AsRef<Path>, scope: Scope) -> Result<ArchiveMa
     if schema > SCHEMA_VERSION {
         return Err(Error::SchemaTooNew(schema));
     }
+    crate::store::verify_semantic_schema_lineage(&tx, schema)?;
     let integrity: String = tx.pragma_query_value(None, "quick_check", |row| row.get(0))?;
     if integrity != "ok" {
         return Err(Error::Integrity(integrity));
@@ -48,6 +49,15 @@ pub fn inspect_archive(path: impl AsRef<Path>, scope: Scope) -> Result<ArchiveMa
     verify_foreign_keys(&tx)?;
     if schema >= 36 {
         crate::store::media::verify_media_hashes(&tx)?;
+    }
+    if schema >= 38 {
+        crate::store::classification::verify_classification_integrity(&tx)?;
+    }
+    if schema >= 42 {
+        crate::store::site_area::verify_site_area_integrity(&tx)?;
+    }
+    if schema >= 43 {
+        crate::store::annotation::verify_annotation_integrity(&tx)?;
     }
     let mut statement = tx.prepare(
         "SELECT w.id, w.name, COALESCE(MAX(r.revision), 0)
@@ -68,6 +78,56 @@ pub fn inspect_archive(path: impl AsRef<Path>, scope: Scope) -> Result<ArchiveMa
         schema,
         worlds,
     })
+}
+
+/// Preserve the committed old schema while the caller holds the migration
+/// write reservation. A failed copy or verification prevents any migration.
+pub(crate) fn preserve_before_migration(path: &Path, schema: i64) -> Result<(), Error> {
+    let path = std::path::absolute(path)?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| Error::InvalidBackupPath(path.clone()))?;
+    let mut name = path
+        .file_name()
+        .ok_or_else(|| Error::InvalidBackupPath(path.clone()))?
+        .to_os_string();
+    name.push(format!(".pre-schema-{schema}-{}.sqlite", Uuid::new_v4()));
+    let destination = parent.join(name);
+    let temp = tempfile::NamedTempFile::new_in(parent)?.into_temp_path();
+    let filename = temp
+        .to_str()
+        .ok_or_else(|| Error::InvalidBackupPath(temp.to_path_buf()))?;
+    let source = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    source.execute("VACUUM INTO ?1", [filename])?;
+    drop(source);
+
+    if schema >= 3 {
+        let manifest = inspect_archive(&temp, Scope::Author)?;
+        if manifest.schema != schema {
+            return Err(Error::Integrity("migration backup schema mismatch".into()));
+        }
+    } else {
+        // Versions 1 and 2 predate the standalone archive contract. Preserve
+        // their raw database snapshot without upgrading it or inventing history.
+        let copy = Connection::open_with_flags(&temp, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let app_id: i64 = copy.pragma_query_value(None, "application_id", |row| row.get(0))?;
+        let version: i64 = copy.pragma_query_value(None, "user_version", |row| row.get(0))?;
+        if app_id != APPLICATION_ID || version != schema {
+            return Err(Error::WrongDatabase);
+        }
+        let integrity: String = copy.pragma_query_value(None, "quick_check", |row| row.get(0))?;
+        if integrity != "ok" {
+            return Err(Error::Integrity(integrity));
+        }
+        verify_foreign_keys(&copy)?;
+    }
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&temp)?
+        .sync_all()?;
+    temp.persist_noclobber(&destination)
+        .map_err(|error| error.error)?;
+    Ok(())
 }
 
 /// Restore to a new database beside the caller's chosen destination. Existing

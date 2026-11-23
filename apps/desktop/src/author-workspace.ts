@@ -1,7 +1,10 @@
+import { appendReferencePicker } from "./reference-picker";
+import { canLeaveEntryDrafts } from "./entry-drafts";
+import { objectKinds } from "./object-kinds";
 import { openFamilyHistory } from "./family-history";
 import { openNetworkStudio } from "./network-studio";
 import { openMediaStudio } from "./media-studio";
-import { openEntryEditor } from "./entry-editor";
+import { entryNavigator, mountWorldBible, type EntryTarget, type EntryTab } from "./world-bible";
 import { publicReader, type Backlinks } from "./public-reader";
 import { invoke } from "@tauri-apps/api/core";
 import type { Scene } from "./main";
@@ -33,11 +36,15 @@ type SearchResult = { revision: number; truncated: boolean; next_cursor?: string
 }[] };
 type Predicate = { op: "contains" | "exact" | "exact_alias" | "full_text" | "claim_full_text"; text: string } |
   { op: "object_kind"; kind: string } |
+  { op: "classified_as"; profile: string } |
+  { op: "classified_by"; descriptor_id: string } |
+  { op: "site_area"; test: { test: "unknown" } | { test: "at_least"; amount: number; unit: "hectare" | "square_metre" } } |
   { op: "has_source"; source_id: string } |
   { op: "and" | "or"; filters: Predicate[] } |
   { op: "not"; filter: Predicate };
-export type ParameterValue = { type: "text" | "object_kind"; value: string } |
-  { type: "source"; world_id: string; source_id: string };
+export type ParameterValue = { type: "text" | "object_kind" | "concept_profile"; value: string } |
+  { type: "source"; world_id: string; source_id: string } |
+  { type: "descriptor"; world_id: string; descriptor_id: string };
 type QueryParameter = { name: string; default: ParameterValue };
 export type SavedQuery = { id: string; name: string; mode: "contains" | "exact" | "alias" | "fulltext" | "claimtext" | "composite";
   term: string; predicate?: Predicate | null; limit: number; recorded_at: number; parameters?: QueryParameter[] };
@@ -136,6 +143,8 @@ export async function showAuthorWorkspace(
   const revisionInput = document.querySelector<HTMLInputElement>("#author-revision")!;
   const content = document.querySelector<HTMLElement>("#author-world-content")!;
   const info = document.querySelector<HTMLElement>("#author-world-info")!;
+  const bibleHost = document.querySelector<HTMLElement>("#world-bible")!;
+  let bible: ReturnType<typeof mountWorldBible> | undefined;
   const refreshView = document.querySelector<HTMLButtonElement>("#author-refresh-view")!;
   const editorForms = document.querySelector<HTMLElement>(".editor-forms")!;
   const discoveryPanel = document.querySelector<HTMLElement>("#author-mention-discovery")!;
@@ -156,6 +165,9 @@ export async function showAuthorWorkspace(
   const pathForm = document.querySelector<HTMLFormElement>("#author-path-form")!;
   const participantEventsForm = document.querySelector<HTMLFormElement>("#author-participant-events-form")!;
   const compositeForm = document.querySelector<HTMLFormElement>("#author-composite-form")!;
+  const kindFilter = compositeForm.elements.namedItem("kind") as HTMLSelectElement;
+  kindFilter.replaceChildren(new Option("Any kind", ""), ...objectKinds.map(kind =>
+    new Option(kind.charAt(0).toUpperCase() + kind.slice(1).replaceAll("_", " "), kind)));
   const queryResults = document.querySelector<HTMLUListElement>("#author-query-results")!;
   const nextSearchPage = document.querySelector<HTMLButtonElement>("#author-next-search-page")!;
   const cancelSearch = document.querySelector<HTMLButtonElement>("#author-cancel-query")!;
@@ -201,6 +213,7 @@ export async function showAuthorWorkspace(
   const value = (form: HTMLFormElement, name: string) => field(form, name).value;
   const score = (form: HTMLFormElement) => value(form, "trust") === "" ? null : Number(value(form, "trust"));
   let snapshot: Snapshot | undefined;
+  let loadedControls: { world: string; day: string; revision: string } | undefined;
   let requestSequence = 0;
   let querySequence = 0;
   let publicSequence = 0;
@@ -450,6 +463,29 @@ export async function showAuthorWorkspace(
     return targets;
   }
 
+  function authorContext(view: Snapshot) {
+    return { world_id: view.world.id, day: view.day, revision: view.view_revision };
+  }
+
+  function validView(view: Snapshot) {
+    try {
+      return snapshot === view && worldSelect.value === view.world.id &&
+        currentDay() === view.day && selectedRevision() === (loadedControls?.revision ? Number(loadedControls.revision) : null);
+    } catch { return false; }
+  }
+
+  function installBible(view: Snapshot, initial?: EntryTarget, tab: EntryTab = "edit") {
+    const reopen = (target: EntryTarget, nextTab: EntryTab = "edit") => {
+      const next = snapshot;
+      if (!next || next.world.id !== view.world.id || next.day !== view.day ||
+          next.view_revision <= view.view_revision || revisionInput.value.trim() || !validView(next) || !canLeaveEntryDrafts()) return;
+      bible?.clear();
+      installBible(next, target, nextTab);
+    };
+    bible = mountWorldBible(bibleHost, authorContext(view),
+      !revisionInput.value.trim(), () => validView(view) && !saving, refresh, reopen, initial, tab);
+  }
+
   function inspector(id: string, panel: HTMLElement) {
     const bond = snapshot?.relationships.find((record) => record.id === id);
     const event = snapshot?.events.find((record) => record.id === id);
@@ -463,6 +499,7 @@ export async function showAuthorWorkspace(
     const current = snapshot;
     if (current && people.some(person => person.id === id)) {
       button("Family history", () => {
+        if (!canLeaveEntryDrafts()) return;
         panel.replaceChildren();
         void openFamilyHistory(panel, { world_id: current.world.id, person_id: id, day: current.day, revision: current.view_revision },
           people, !revisionInput.value.trim(), async () => { await refresh(); selectNode(id); });
@@ -472,18 +509,14 @@ export async function showAuthorWorkspace(
       const label = event ? "Open event page" : bond ? "Open relationship page" : "Open character page";
       button(label, () => {
         const targets = entryTargets(current);
-        const open = (target: string) => {
-          if (snapshot !== current) return;
-          panel.replaceChildren();
-          void openEntryEditor(panel, current.world.id, target, current.day, current.view_revision,
-            !revisionInput.value.trim(), async () => {
-              await refresh();
-              const next = snapshot as Snapshot | undefined;
-              if (next?.world.id !== current.world.id || next.day !== current.day || next.scene_limited) return;
-              const onGraph = [...next.people, ...next.events, ...next.relationships].some(node => node.id === target);
-              selectNode(onGraph ? target : id);
-            }, targets, open);
-        };
+        const open = entryNavigator(panel, authorContext(current), !revisionInput.value.trim(),
+          () => validView(current), targets, async target => {
+            await refresh();
+            const next = snapshot as Snapshot | undefined;
+            if (next?.world.id !== current.world.id || next.day !== current.day || next.scene_limited) return;
+            const onGraph = [...next.people, ...next.events, ...next.relationships].some(node => node.id === target);
+            selectNode(onGraph ? target : id);
+          });
         open(id);
       });
     }
@@ -584,8 +617,8 @@ export async function showAuthorWorkspace(
       const found = await invoke<{ matches: Hit[]; truncated: boolean }>(
         "workspace_search_public_pages", { worldId, day, text, requestId });
       if (sequence !== publicSequence) return;
-      publicStatus.textContent = found.truncated ? "Showing first 50 matching blocks." :
-        found.matches.length + " matching public blocks.";
+      publicStatus.textContent = found.truncated ? "Showing first 50 matching published articles. Refine your search." :
+        found.matches.length + " matching published articles.";
       for (const hit of found.matches) {
         const item = document.createElement("li");
         const passage = document.createElement("p");
@@ -597,7 +630,7 @@ export async function showAuthorWorkspace(
           const preview = ++publicPreviewSequence;
           void publicReader(publicPreview, worldId, day,
             () => sequence === publicSequence && preview === publicPreviewSequence,
-            () => { clearPublicSearch(); publicStatus.textContent = "Publication changed. Search again."; }).open(hit.entry.id);
+            () => { clearPublicSearch(); publicStatus.textContent = "Publication changed. Search again."; }).open(hit.entry.id, hit.element);
         });
         item.append(passage, open);
         publicResults.append(item);
@@ -613,6 +646,16 @@ export async function showAuthorWorkspace(
   });
 
   async function refresh() {
+    if (!canLeaveEntryDrafts()) {
+      if (loadedControls) {
+        worldSelect.value = loadedControls.world;
+        dayInput.value = loadedControls.day;
+        revisionInput.value = loadedControls.revision;
+      }
+      return;
+    }
+    bible?.clear();
+    bible = undefined;
     clearPublicSearch();
     const sequence = ++requestSequence;
     ++querySequence;
@@ -657,6 +700,7 @@ export async function showAuthorWorkspace(
     }
     if (sequence !== requestSequence) return;
     snapshot = next;
+    loadedControls = { world: worldId, day: String(day), revision: revision === null ? "" : String(revision) };
     savedQueries = saved;
     options(savedSelect, [{ id: "", label: "New saved search" },
       ...savedQueries.map((query) => ({ id: query.id, label: query.name + " · " + query.id.slice(0, 8) }))],
@@ -678,7 +722,7 @@ export async function showAuthorWorkspace(
     openMediaStudio(content,{world_id:next.world.id,revision:next.view_revision,day:next.day},!revisionInput.value.trim(),refresh,()=>snapshot===next);
     openNetworkStudio(content, { world_id: next.world.id, revision: next.view_revision, day: next.day },
       !revisionInput.value.trim(), refresh, () => snapshot === next);
-    info.textContent = `Author revision ${next.view_revision} / ${next.world.revision} · historical day ${next.day}` +
+    info.textContent = `Author revision ${next.view_revision} / ${next.world.revision} · historical day ${next.day} · Main history (author graph, queries and Canvas)` +
       (next.scene_limited ? " · Search-only mode: the complete scene exceeds its budget. Indexed search remains available." : "");
     const subject = field<HTMLSelectElement>(relationshipForm, "subject");
     const target = field<HTMLSelectElement>(relationshipForm, "target");
@@ -743,12 +787,14 @@ export async function showAuthorWorkspace(
     addParticipant.disabled = !people.length || selectedEvent?.day === null;
     syncEffect();
     syncButtons();
-    if (info.nextElementSibling !== graph) info.after(graph);
+    content.prepend(info, bibleHost);
+    bibleHost.after(graph);
+    installBible(next);
     graph.hidden = Boolean(next.scene_limited);
     heading.textContent = next.world.name;
     intro.textContent = next.scene_limited
       ? "Search the selected historical world without loading a complete graph."
-      : "Explore saved people, relationships, and events.";
+      : "Build your World Bible and explore its historical connections.";
     graph.setAttribute("aria-label", "Saved world graph");
     history.hidden = true;
     authorLink.hidden = true;
@@ -761,7 +807,7 @@ export async function showAuthorWorkspace(
   }
 
   function runQuery(message: string, execute: (requestId: string) => Promise<SearchResult>, page = 1) {
-    if (!snapshot || saving) return;
+    if (!snapshot || saving || !canLeaveEntryDrafts()) return;
     const sequence = ++querySequence;
     cancelActiveQuery();
     const requestId = crypto.randomUUID();
@@ -819,12 +865,8 @@ export async function showAuthorWorkspace(
             const current = snapshot;
             if (!current || sequence !== querySequence) return;
             const targets = entryTargets(current, { id: row.id, label: row.label });
-            const open = (target: string) => {
-              if (sequence !== querySequence || snapshot !== current || !item.isConnected) return;
-              item.replaceChildren();
-              void openEntryEditor(item, current.world.id, target, current.day, current.view_revision,
-                !revisionInput.value.trim(), refresh, targets, open);
-            };
+            const open = entryNavigator(item, authorContext(current), !revisionInput.value.trim(),
+              () => sequence === querySequence && validView(current), targets, refresh);
             open(row.id);
           });
           item.append(pageButton);
@@ -855,12 +897,9 @@ export async function showAuthorWorkspace(
                 open.type = "button";
                 open.textContent = match.label + " · " + match.source.id;
                 open.addEventListener("click", () => {
-                  const navigate = (target: string) => {
-                    if (sequence !== querySequence || snapshot !== current) return;
-                    item.replaceChildren();
-                    void openEntryEditor(item, current.world.id, target, current.day,
-                      current.view_revision, !revisionInput.value.trim(), refresh, entryTargets(current, { id: row.id, label: row.label }), navigate);
-                  };
+                  const navigate = entryNavigator(item, authorContext(current), !revisionInput.value.trim(),
+                    () => sequence === querySequence && validView(current),
+                    entryTargets(current, { id: row.id, label: row.label }), refresh);
                   navigate(match.source.id);
                 });
                 li.append(open);
@@ -921,7 +960,7 @@ export async function showAuthorWorkspace(
   }
 
   function reviewCandidate(candidate: MentionDiscovery["rows"][number], decision: "approved" | "dismissed") {
-    if (!snapshot || saving || selectedRevision() !== null) return;
+    if (!snapshot || saving || selectedRevision() !== null || !canLeaveEntryDrafts()) return;
     const focus = discoveryFocus;
     const request = {
       world_id: snapshot.world.id,
@@ -1055,7 +1094,7 @@ export async function showAuthorWorkspace(
   }
 
   cancelSearch.addEventListener("click", () => {
-    if (!activeQuery) return;
+    if (!activeQuery || !canLeaveEntryDrafts()) return;
     ++querySequence;
     cancelActiveQuery();
     pageCursor = undefined;
@@ -1107,17 +1146,28 @@ export async function showAuthorWorkspace(
       let control: HTMLInputElement | HTMLSelectElement;
       if (parameter.default.type === "object_kind") {
         control = document.createElement("select");
-        for (const kind of ["person", "organization", "household", "family_house", "faction", "conflict", "office", "title", "asset", "population", "conflict_issue", "conflict_phase", "succession_rule", "definition", "relationship", "event_involvement", "actor_action", "historical_event", "source", "claim"]) {
+        for (const kind of objectKinds) {
           control.add(new Option(kind.replaceAll("_", " "), kind));
+        }
+      } else if (parameter.default.type === "concept_profile") {
+        control = document.createElement("select");
+        for (const profile of ["culture", "language", "material", "technology"]) {
+          control.add(new Option(profile, profile));
         }
       } else {
         control = document.createElement("input");
-        control.maxLength = parameter.default.type === "source" ? 36 : 800;
+        control.maxLength = parameter.default.type === "source" || parameter.default.type === "descriptor" ? 36 : 800;
       }
-      control.value = parameter.default.type === "source" ? parameter.default.source_id : parameter.default.value;
+      control.value = parameter.default.type === "source" ? parameter.default.source_id : parameter.default.type === "descriptor" ? parameter.default.descriptor_id : parameter.default.value;
       parameterInputs.set(parameter.name, control);
       label.append(control);
       parameterFields.append(label);
+      if (snapshot && control instanceof HTMLInputElement &&
+          (parameter.default.type === "source" || parameter.default.type === "descriptor")) {
+        appendReferencePicker(parameterFields, control, {
+          world_id: snapshot.world.id, day: snapshot.day, revision: snapshot.view_revision,
+        }, parameter.default.type === "source" ? "source" : "tag", parameter.name.replaceAll("_", " "));
+      }
     }
   }
 
@@ -1142,6 +1192,7 @@ export async function showAuthorWorkspace(
         const value = parameterInputs.get(parameter.name)?.value ?? "";
         return { name: parameter.name, value: parameter.default.type === "source"
           ? { type: "source", world_id: snapshot!.world.id, source_id: value }
+          : parameter.default.type === "descriptor" ? { type: "descriptor", world_id: snapshot!.world.id, descriptor_id: value }
           : { type: parameter.default.type, value } };
       });
       const request = {
@@ -1178,7 +1229,7 @@ export async function showAuthorWorkspace(
 
   saveQueryForm.addEventListener("submit", (event) => {
     event.preventDefault();
-    if (!snapshot || saving) return;
+    if (!snapshot || saving || !canLeaveEntryDrafts()) return;
     if (selectedRevision() !== null) {
       queryStatus.textContent = "Historical author revisions are read-only.";
       return;
@@ -1223,12 +1274,24 @@ export async function showAuthorWorkspace(
     const labelPhrase = value(compositeForm, "label_phrase").trim();
     const claimPhrase = value(compositeForm, "claim_phrase").trim();
     const kind = value(compositeForm, "kind");
+    const profile = value(compositeForm, "profile");
+    const descriptor = value(compositeForm, "descriptor").trim();
+    const areaTest = value(compositeForm, "area_test");
+    if (areaTest === "unknown") filters.push({ op: "site_area", test: { test: "unknown" } });
+    if (areaTest === "at_least") {
+      const raw = value(compositeForm, "area_amount");
+      const amount = raw ? Number(raw) : -1;
+      filters.push({ op: "site_area", test: { test: "at_least", amount: Number.isSafeInteger(amount) ? amount : -1,
+        unit: value(compositeForm, "area_unit") as "hectare" | "square_metre" } });
+    }
     const source = value(compositeForm, "source").trim();
     if (text) filters.push({ op: "contains", text });
     if (alias) filters.push({ op: "exact_alias", text: alias });
     if (labelPhrase) filters.push({ op: "full_text", text: labelPhrase });
     if (claimPhrase) filters.push({ op: "claim_full_text", text: claimPhrase });
     if (kind) filters.push({ op: "object_kind", kind });
+    if (profile) filters.push({ op: "classified_as", profile });
+    if (descriptor) filters.push({ op: "classified_by", descriptor_id: descriptor });
     if (source) filters.push({ op: "has_source", source_id: source });
     if (!filters.length) return null;
     let predicate: Predicate = filters.length === 1 ? filters[0] : {
@@ -1260,7 +1323,7 @@ export async function showAuthorWorkspace(
   });
 
   saveComposite.addEventListener("click", () => {
-    if (!snapshot || saving) return;
+    if (!snapshot || saving || !canLeaveEntryDrafts()) return;
     if (selectedRevision() !== null) {
       queryStatus.textContent = "Historical author revisions are read-only.";
       return;
@@ -1345,18 +1408,19 @@ export async function showAuthorWorkspace(
   function bind(form: HTMLFormElement, action: (context: { world_id: string; expected_revision: number }) => Promise<void | string>) {
     form.addEventListener("submit", (event) => {
       event.preventDefault();
-      if (saving) return;
+      if (saving || !canLeaveEntryDrafts()) return;
       void (async () => {
         try {
           if (form !== worldForm) {
-            currentDay();
+            const day = currentDay();
             if (selectedRevision() !== null) throw new Error("Archived author revisions are read-only.");
-            if (!snapshot || snapshot.world.id !== worldSelect.value) throw new Error("Wait for the world to load.");
+            if (!snapshot || snapshot.world.id !== worldSelect.value || snapshot.day !== day ||
+                snapshot.view_revision !== snapshot.world.revision) throw new Error("Refresh the selected historical view before saving.");
             if (snapshot.scene_limited) throw new Error("Graph editing requires a complete scene.");
           }
           saving = true;
           syncButtons();
-          const savedNode = await action({ world_id: worldSelect.value, expected_revision: snapshot?.world.revision ?? 0 });
+          const savedNode = await action({ world_id: snapshot?.world.id ?? worldSelect.value, expected_revision: snapshot?.view_revision ?? 0 });
           if (form !== worldForm) await refresh();
           if (form === worldForm || form === personForm) field(form, "name").value = "";
           if (form === evidenceForm) {
@@ -1384,8 +1448,8 @@ export async function showAuthorWorkspace(
     revisionInput.value = "";
     await refreshWorlds(world.id);
   });
-  bind(personForm, async ({ world_id }) => {
-    await invoke("workspace_create_person", { worldId: world_id, name: value(personForm, "name") });
+  bind(personForm, async ({ world_id, expected_revision }) => {
+    await invoke("workspace_create_person", { worldId: world_id, expectedRevision: expected_revision, name: value(personForm, "name") });
   });
   field<HTMLSelectElement>(aliasForm, "alias_id").addEventListener("change", () => {
     const alias = snapshot?.aliases?.find((entry) => entry.id === value(aliasForm, "alias_id"));

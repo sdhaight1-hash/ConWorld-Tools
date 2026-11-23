@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::fs::{self, OpenOptions};
+use std::fs::OpenOptions;
 use std::path::Path;
 use std::time::Duration;
 
@@ -18,14 +18,18 @@ use crate::query::{
 use crate::*;
 
 pub(crate) const APPLICATION_ID: i64 = 0x4357_4c44; // CWLD
+pub(crate) mod annotation;
+pub(crate) mod classification;
 mod entries;
 mod family;
 pub(crate) mod media;
 mod network;
+mod semantic;
+pub(crate) mod site_area;
 mod templates;
 
 // Version 29 adds version-pinned template layout variants without changing tables.
-pub(crate) const SCHEMA_VERSION: i64 = 36;
+pub(crate) const SCHEMA_VERSION: i64 = 44;
 
 // Candidate queries bind world (?1), focus/phrase (?2), author revision (?3),
 // limit (?4) and branch (?5). Follow only immutable inherited revisions.
@@ -88,6 +92,16 @@ impl Store {
     }
 
     pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
+        Self::open_internal(path.as_ref(), false)
+    }
+
+    /// Open the live author database, preserving a verified pre-migration copy.
+    /// Archive restoration and explicit lower-level fixture opens remain separate.
+    pub fn open_with_migration_backup(path: impl AsRef<Path>) -> Result<Self, Error> {
+        Self::open_internal(path.as_ref(), true)
+    }
+
+    fn open_internal(path: &Path, preserve: bool) -> Result<Self, Error> {
         let mut conn = Connection::open(path)?;
         conn.busy_timeout(Duration::from_secs(5))?;
         // SQLite requires an unchecked connection during the registry rebuild.
@@ -113,6 +127,13 @@ impl Store {
             }
             1..=SCHEMA_VERSION if application_id == APPLICATION_ID => {}
             _ => return Err(Error::WrongDatabase),
+        }
+        verify_semantic_schema_lineage(&tx, version)?;
+        if preserve && (1..SCHEMA_VERSION).contains(&version) && path != Path::new(":memory:") {
+            // The immediate transaction already excludes competing writers.
+            // No migration DDL has run on an existing database at this point.
+            // A separate read-only connection can take the committed snapshot.
+            crate::archive::preserve_before_migration(path, version)?;
         }
         if version < 2 {
             tx.execute_batch(include_str!("../migrations/0002.sql"))?;
@@ -218,8 +239,36 @@ impl Store {
         if version < 36 {
             tx.execute_batch(include_str!("../migrations/0036.sql"))?;
         }
+        if version < 37 {
+            tx.execute_batch(include_str!("../migrations/0037.sql"))?;
+        }
+        if version < 38 {
+            tx.execute_batch(include_str!("../migrations/0038.sql"))?;
+        }
+        if version < 39 {
+            tx.execute_batch(include_str!("../migrations/0039.sql"))?;
+        }
+        if version < 40 {
+            tx.execute_batch(include_str!("../migrations/0040.sql"))?;
+        }
+        if version < 41 {
+            tx.execute_batch(include_str!("../migrations/0041.sql"))?;
+        }
+        if version < 42 {
+            tx.execute_batch(include_str!("../migrations/0042.sql"))?;
+        }
+        if version < 43 {
+            tx.execute_batch(include_str!("../migrations/0043.sql"))?;
+        }
+        if version < 44 {
+            tx.execute_batch(include_str!("../migrations/0044.sql"))?;
+        }
         if version < SCHEMA_VERSION {
+            verify_semantic_schema_lineage(&tx, SCHEMA_VERSION)?;
             verify_foreign_keys(&tx)?;
+            annotation::verify_annotation_integrity(&tx)?;
+            site_area::verify_site_area_integrity(&tx)?;
+            classification::verify_classification_integrity(&tx)?;
             tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
         tx.commit()?;
@@ -1122,6 +1171,9 @@ impl Store {
             QueryFilter::ClaimFullTextPhrase(text) => ("claimtext", text.trim().to_string()),
             QueryFilter::ExactAlias(_)
             | QueryFilter::Kind(_)
+            | QueryFilter::ClassifiedAs(_)
+            | QueryFilter::ClassifiedBy(_)
+            | QueryFilter::SiteArea(_)
             | QueryFilter::HasSource(_)
             | QueryFilter::And(_)
             | QueryFilter::Or(_)
@@ -2490,18 +2542,21 @@ impl Store {
     pub fn backup_to(&self, path: impl AsRef<Path>, scope: Scope) -> Result<(), Error> {
         require_author(scope)?;
         let path = std::path::absolute(path)?;
-        let filename = path
+        path.to_str()
+            .ok_or_else(|| Error::InvalidBackupPath(path.clone()))?;
+        let parent = path
+            .parent()
+            .ok_or_else(|| Error::InvalidBackupPath(path.clone()))?;
+        // Match archive restore: publish only a verified sibling copy.
+        // An interrupted VACUUM must never reserve the final pathname.
+        let temp = tempfile::NamedTempFile::new_in(parent)?.into_temp_path();
+        let filename = temp
             .to_str()
-            .ok_or_else(|| Error::InvalidBackupPath(path.to_path_buf()))?;
-        // Claim the destination without overwriting a prior backup.
-        OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)?;
-        if let Err(error) = self.conn.execute("VACUUM INTO ?1", [filename]) {
-            fs::remove_file(&path)?;
-            return Err(error.into());
-        }
+            .ok_or_else(|| Error::InvalidBackupPath(temp.to_path_buf()))?;
+        self.conn.execute("VACUUM INTO ?1", [filename])?;
+        crate::archive::inspect_archive(&temp, scope)?;
+        OpenOptions::new().write(true).open(&temp)?.sync_all()?;
+        temp.persist_noclobber(&path).map_err(|error| error.error)?;
         Ok(())
     }
 }
@@ -2977,6 +3032,80 @@ fn apply_change(
     Ok(())
 }
 
+/// Reject incompatible unreleased schema lineage and missing required seek
+/// indexes before admitting a database to the corresponding query planner.
+pub(crate) fn verify_semantic_schema_lineage(conn: &Connection, version: i64) -> Result<(), Error> {
+    if version >= 44 {
+        for (name, table, columns) in [
+            (
+                "semantic_label_seek",
+                "object_versions",
+                &["world_id", "label", "object_id"][..],
+            ),
+            (
+                "classification_subject_profile",
+                "concept_classifications",
+                &[
+                    "world_id",
+                    "subject_id",
+                    "profile",
+                    "starts_at",
+                    "recorded_revision",
+                ][..],
+            ),
+        ] {
+            let exists: bool = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM pragma_index_list(?1)
+                 WHERE name=?2 AND origin='c' AND partial=0 AND [unique]=0)",
+                params![table, name],
+                |row| row.get(0),
+            )?;
+            let mut statement = conn.prepare(
+                "SELECT name,coll,[desc] FROM pragma_index_xinfo(?1)
+                 WHERE [key]=1 ORDER BY seqno",
+            )?;
+            let actual = statement
+                .query_map([name], |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, bool>(2)?,
+                    ))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            if !exists
+                || actual.len() != columns.len()
+                || !actual
+                    .iter()
+                    .zip(columns)
+                    .all(|((column, collation, descending), expected)| {
+                        column.as_deref() == Some(*expected)
+                            && collation.as_deref() == Some("BINARY")
+                            && !descending
+                    })
+            {
+                return Err(Error::Integrity(format!(
+                    "missing or incompatible semantic index: {name}"
+                )));
+            }
+        }
+    }
+    if !(37..=40).contains(&version) {
+        return Ok(());
+    }
+    let registry: String = conn.query_row(
+        "SELECT sql FROM sqlite_schema WHERE type='table' AND name='objects'",
+        [],
+        |row| row.get(0),
+    )?;
+    if !registry.contains("'concept'") || registry.contains("'place'") {
+        return Err(Error::Integrity(
+            "incompatible unreleased schema lineage; restore a schema-36 backup".into(),
+        ));
+    }
+    Ok(())
+}
+
 pub(crate) fn verify_foreign_keys(conn: &Connection) -> Result<(), Error> {
     let violation = conn
         .query_row("PRAGMA foreign_key_check", [], |row| row.get(0))
@@ -3243,6 +3372,8 @@ fn write_version(
     }
     let (kind, occurrence, citation) = match &record.data {
         ObjectData::Person => ("person", &EventDate::Unknown, None),
+        ObjectData::Concept => ("concept", &EventDate::Unknown, None),
+        ObjectData::Place => ("place", &EventDate::Unknown, None),
         ObjectData::Organization => ("organization", &EventDate::Unknown, None),
         ObjectData::Household => ("household", &EventDate::Unknown, None),
         ObjectData::FamilyHouse => ("family_house", &EventDate::Unknown, None),
@@ -3624,6 +3755,8 @@ fn read_version(
 ) -> rusqlite::Result<Version> {
     let data = match row.get::<_, String>(1)?.as_str() {
         "person" => ObjectData::Person,
+        "concept" => ObjectData::Concept,
+        "place" => ObjectData::Place,
         "organization" => ObjectData::Organization,
         "household" => ObjectData::Household,
         "family_house" => ObjectData::FamilyHouse,
@@ -3790,6 +3923,25 @@ fn read_version(
 #[cfg(test)]
 mod query_control_tests {
     use super::*;
+
+    #[test]
+    fn failed_backup_does_not_publish_or_leave_staging_file() -> Result<(), Error> {
+        let store = Store::open(":memory:")?;
+        let directory = tempfile::tempdir()?;
+        let destination = directory.path().join("backup.sqlite");
+        // SQLite refuses VACUUM inside an active transaction.
+        let transaction = store.conn.unchecked_transaction()?;
+        assert!(store.backup_to(&destination, Scope::Author).is_err());
+        assert!(!destination.exists());
+        assert_eq!(std::fs::read_dir(directory.path())?.count(), 0);
+        drop(transaction);
+        store.backup_to(&destination, Scope::Author)?;
+        let original = std::fs::read(&destination)?;
+        assert!(store.backup_to(&destination, Scope::Author).is_err());
+        assert_eq!(std::fs::read(&destination)?, original);
+        assert_eq!(std::fs::read_dir(directory.path())?.count(), 1);
+        Ok(())
+    }
 
     #[test]
     fn sqlite_progress_handler_interrupts_and_is_removed() -> Result<(), Error> {
