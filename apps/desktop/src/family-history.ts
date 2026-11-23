@@ -1,4 +1,5 @@
 import { canLeaveEntryDrafts } from "./entry-drafts";
+import { appendReferencePicker } from "./reference-picker";
 import { invoke } from "@tauri-apps/api/core";
 
 type FamilyContext = { world_id: string; person_id: string; day: number; revision: number };
@@ -10,15 +11,15 @@ export async function openFamilyHistory(panel: HTMLElement, request: FamilyConte
   editable: boolean, refresh: () => Promise<void>) {
   const host = document.createElement("section");
   host.innerHTML = `<h3>Family history</h3><ul></ul><details class="add-parent"><summary>Record a parent</summary><form class="editor-form"><fieldset disabled>
-    <label>Parent <select name="parent" required></select></label>
+    <label>Parent <select name="parent" required></select></label><div data-parent-picker></div>
     <label>Parentage <select name="kind"><option value="biological">Biological</option>
       <option value="adoptive">Adoptive</option><option value="legal">Legal</option></select></label>
     <label>From day <input type="number" name="start" required></label>
     <label>Before day <input type="number" name="end"></label>
     <label>Basis for the record <input name="rationale" required maxlength="200"></label>
-    <button>Record parent</button></fieldset></form></details><p role="status"></p>
+    <button>Record parent</button></fieldset></form></details><p role="status" data-draft-status tabindex="-1"></p>
     <details class="family-match"><summary>Compare fictional inheritance</summary><form class="editor-form">
-    <label>Compare with <select name="other" required></select></label>
+    <label>Compare with <select name="other" required></select></label><div data-relative-picker></div>
     <label>Model seed <input type="number" name="seed" min="0" max="4294967295" value="1" required></label>
     <button>Compare segments</button></form><output></output></details>
     <details class="founder-genome"><summary>Simulated multigenerational ancestry</summary><p>Dimensionless toy founder segments, not real DNA. Unrecorded parents are unresolved founders.</p><button type="button">Compute founder segments</button><button type="button" data-compare-founders>Compare selected relative</button><button type="button" data-painter>Paint eight toy chromosomes</button><div data-genome></div></details>`;
@@ -34,6 +35,27 @@ export async function openFamilyHistory(panel: HTMLElement, request: FamilyConte
   const compare = host.querySelector<HTMLFormElement>(".family-match form")!;
   const other = compare.elements.namedItem("other") as HTMLSelectElement;
   for (const option of Array.from(parent.options)) other.add(new Option(option.text, option.value));
+  const compatible = (candidate: { id: string; kind?: string }) =>
+    candidate.kind === "person" && candidate.id !== request.person_id;
+  const lookup = (selector: string, select: HTMLSelectElement, label: string) => {
+    const container = host.querySelector<HTMLElement>(selector)!;
+    const identity = document.createElement("input");
+    identity.type = "hidden";
+    container.append(identity);
+    appendReferencePicker(container, identity,
+      { world_id: request.world_id, day: request.day, revision: request.revision },
+      "entry", label, candidate => {
+        if (!Array.from(select.options).some(option => option.value === candidate.id)) {
+          select.add(new Option(candidate.label + " · " + candidate.id, candidate.id));
+        }
+        select.value = candidate.id;
+        select.focus();
+      }, compatible);
+  };
+  // Keep the existing nearby options, but no longer require a complete graph
+  // or put every person in a select before a family record can be authored.
+  lookup("[data-parent-picker]", parent, "parent identity");
+  lookup("[data-relative-picker]", other, "relative identity");
   const output = host.querySelector("output")!;
   compare.onsubmit = async event => {
     event.preventDefault();
@@ -112,17 +134,30 @@ export async function openFamilyHistory(panel: HTMLElement, request: FamilyConte
   async function save(command: string, payload: Record<string, unknown>) {
     if (busy || !editable || !host.isConnected || !canLeaveEntryDrafts()) return;
     busy = true;
-    host.querySelectorAll<HTMLButtonElement>("button").forEach(b => b.disabled = true);
+    const controls = [...host.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>("input,select,button")];
+    const states = controls.map(control => control.disabled);
+    controls.forEach(control => control.disabled = true);
+    host.dataset.entryDraftState = "saving";
+    status.textContent = "Saving family record…";
     try {
       await invoke(command, { request, ...payload });
-      if (host.isConnected) await refresh();
     } catch (error) {
+      delete host.dataset.entryDraftState;
       status.textContent = String(error);
-      host.querySelectorAll<HTMLButtonElement>("button").forEach(b => b.disabled = false);
-    } finally { busy = false; }
+      controls.forEach((control, index) => control.disabled = states[index]);
+      busy = false;
+      return;
+    }
+    delete host.dataset.entryDraftState;
+    status.textContent = "Family record saved.";
+    if (host.isConnected) {
+      try { await refresh(); }
+      catch (error) { status.textContent = "Family record saved, but refresh failed: " + String(error); }
+    }
   }
   try {
     const links = await invoke<FamilyLink[]>("workspace_family_links", { request });
+    if (!host.isConnected) return;
     for (const link of links) {
       const row = document.createElement("li");
       const role = link.parent.id === request.person_id ? "child" : "parent";
@@ -151,12 +186,12 @@ export async function openFamilyHistory(panel: HTMLElement, request: FamilyConte
       host.querySelector("ul")!.append(row);
     }
     if (!links.length) status.textContent = "No accepted family links at this date.";
-    fields.disabled = !editable || !parent.length;
+    fields.disabled = !editable;
     host.querySelector<HTMLElement>(".add-parent")!.hidden = !editable;
   } catch (error) { status.textContent = String(error); }
   form.onsubmit = event => {
     event.preventDefault();
-    if (fields.disabled) return;
+    if (fields.disabled || !parent.value) return;
     const data = new FormData(form);
     void save("workspace_record_parentage", {input: {parent_id: parent.value, kind: data.get("kind"),
       starts_at:Number(data.get("start")), ends_before:data.get("end") ? Number(data.get("end")) : null,

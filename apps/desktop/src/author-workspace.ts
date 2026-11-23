@@ -4,7 +4,7 @@ import { objectKinds } from "./object-kinds";
 import { openFamilyHistory } from "./family-history";
 import { openNetworkStudio } from "./network-studio";
 import { openMediaStudio } from "./media-studio";
-import { entryNavigator, mountWorldBible, type EntryTarget } from "./world-bible";
+import { entryNavigator, mountWorldBible, type EntryTarget, type EntryTab } from "./world-bible";
 import { publicReader, type Backlinks } from "./public-reader";
 import { invoke } from "@tauri-apps/api/core";
 import type { Scene } from "./main";
@@ -474,16 +474,16 @@ export async function showAuthorWorkspace(
     } catch { return false; }
   }
 
-  function installBible(view: Snapshot, initial?: EntryTarget, connections = false) {
-    const reopen = (target: EntryTarget, showConnections = false) => {
+  function installBible(view: Snapshot, initial?: EntryTarget, tab: EntryTab = "edit") {
+    const reopen = (target: EntryTarget, nextTab: EntryTab = "edit") => {
       const next = snapshot;
       if (!next || next.world.id !== view.world.id || next.day !== view.day ||
           next.view_revision <= view.view_revision || revisionInput.value.trim() || !validView(next) || !canLeaveEntryDrafts()) return;
       bible?.clear();
-      installBible(next, target, showConnections);
+      installBible(next, target, nextTab);
     };
     bible = mountWorldBible(bibleHost, authorContext(view),
-      !revisionInput.value.trim(), () => validView(view) && !saving, refresh, reopen, initial, connections);
+      !revisionInput.value.trim(), () => validView(view) && !saving, refresh, reopen, initial, tab);
   }
 
   function inspector(id: string, panel: HTMLElement) {

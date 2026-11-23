@@ -2690,7 +2690,7 @@ test("Canvas reference picker uses the pinned ontology search, preserves caption
 test("World Bible opens and creates typed entries independently of the scene and protects drafts", async ({ page }) => {
   await page.addInitScript(() => {
     const world = { id: "bible-world", name: "Alder Basin", revision: 4 };
-    const entries = [{id:"guild",label:"Vale",kind:"organization"}, {id:"estate",label:"Vale",kind:"place"}, {id:"register",label:"Register",kind:"source"}];
+    const entries = [{id:"guild",label:"Vale",kind:"organization"}, {id:"estate",label:"Vale",kind:"place"}, {id:"register",label:"Register",kind:"source"}, {id:"child",label:"Alder child",kind:"person"}, {id:"parent",label:"Alder parent",kind:"person"}];
     const calls: {command: string; args: Record<string, unknown>}[] = [];
     const layouts = new Map<string, unknown>();
     let finishCreate: (() => void) | undefined;
@@ -2704,6 +2704,8 @@ test("World Bible opens and creates typed entries independently of the scene and
         calls.push({command,args});
         if (command === "workspace_semantic_candidates") return {rows:entries.filter(e=>e.label.includes(String(args.phrase))),truncated:false};
         if (command === "workspace_entry_layout") return layouts.get(String(args.entryId))??null;
+        if (command === "workspace_family_links") return [];
+        if (command === "workspace_record_parentage") { world.revision++; return "parentage"; }
         if (command === "workspace_record_network_fact") { world.revision++; return "new-fact"; }
         if (command === "workspace_network_facts") return [{id:"fact-1",subject_label:"Vale",target_label:"Vale",input:{subject:{world:world.id,id:"guild"},target:{world:world.id,id:"estate"},source:{world:world.id,id:"register"},kind:"located_at",role:"headquarters",starts_at:0,ends_before:null}}];
         if (command === "workspace_create_identity") {
@@ -2722,6 +2724,20 @@ test("World Bible opens and creates typed entries independently of the scene and
   await page.goto("/");
   await expect(page.locator("#author-status")).toContainText("Search-only mode");
   const bible = page.locator("#world-bible"), entry = bible.getByRole("region", {name:"World Bible entry"});
+  await bible.getByLabel("Find an entry").fill("Alder child");
+  await bible.getByRole("button",{name:"Find entry",exact:true}).click();
+  await bible.getByRole("button",{name:"Alder child · person · child"}).click();
+  await entry.getByRole("button",{name:"Family history",exact:true}).click();
+  await entry.getByText("Record a parent",{exact:true}).click();
+  await entry.getByText("Find parent identity",{exact:true}).click();
+  await entry.getByLabel("Search parent identity").fill("Alder parent");
+  await entry.getByRole("button",{name:"Search references",exact:true}).click();
+  await entry.getByRole("button",{name:"Alder parent · person · parent"}).click();
+  await expect(entry.getByLabel("Parent",{exact:true})).toHaveValue("parent");
+  await entry.getByLabel("Basis for the record").fill("Family register");
+  await entry.getByRole("button",{name:"Record parent",exact:true}).click();
+  await expect(page.locator("#author-world-info")).toContainText("Author revision 5 / 5");
+  await expect(entry.getByRole("heading",{name:"Family history",exact:true})).toBeVisible();
   await bible.getByLabel("Find an entry").fill("Vale");
   await bible.getByRole("button",{name:"Find entry",exact:true}).click();
   await bible.getByRole("button",{name:"Vale · organization · guild"}).click();
@@ -2737,7 +2753,7 @@ test("World Bible opens and creates typed entries independently of the scene and
   await expect(connection.getByLabel("Location role or conflict stance")).toHaveValue("headquarters");
   await connection.getByLabel("Connection evidence source",{exact:true}).fill("register");
   await connection.getByRole("button",{name:"Record connection",exact:true}).click();
-  await expect(page.locator("#author-world-info")).toContainText("Author revision 5 / 5");
+  await expect(page.locator("#author-world-info")).toContainText("Author revision 6 / 6");
   await entry.getByRole("button",{name:"Open Vale",exact:true}).click();
   await expect(entry.locator("[data-entry-identity]")).toContainText("estate");
   const narrative = entry.getByRole("textbox",{name:"Page text",exact:true});
@@ -2759,9 +2775,10 @@ test("World Bible opens and creates typed entries independently of the scene and
   await expect(entry.getByRole("heading",{name:"Basin Warden",exact:true})).toBeVisible();
   await expect(entry.locator("[data-entry-identity]")).toContainText("Identity only");
   const calls = await page.evaluate(() => (window as unknown as {__bibleCalls:{command:string;args:Record<string,unknown>}[]}).__bibleCalls);
-  expect(calls.find(c=>c.command==="workspace_create_identity")?.args).toMatchObject({request:{world_id:"bible-world",day:0,revision:6},kind:"title",label:"Basin Warden"});
+  expect(calls.find(c=>c.command==="workspace_create_identity")?.args).toMatchObject({request:{world_id:"bible-world",day:0,revision:7},kind:"title",label:"Basin Warden"});
   expect(calls.filter(c=>c.command==="workspace_save_layout")).toHaveLength(1);
-  expect(calls.find(c=>c.command==="workspace_record_network_fact")?.args).toMatchObject({request:{world_id:"bible-world",day:0,revision:4},input:{subject:{world:"bible-world",id:"guild"},target:{world:"bible-world",id:"estate"},source:{world:"bible-world",id:"register"},kind:"located_at",role:"headquarters",starts_at:0,ends_before:null}});
+  expect(calls.find(c=>c.command==="workspace_record_parentage")?.args).toMatchObject({request:{world_id:"bible-world",person_id:"child",day:0,revision:4},input:{parent_id:"parent",kind:"biological",starts_at:0,ends_before:null,rationale:"Family register"}});
+  expect(calls.find(c=>c.command==="workspace_record_network_fact")?.args).toMatchObject({request:{world_id:"bible-world",day:0,revision:5},input:{subject:{world:"bible-world",id:"guild"},target:{world:"bible-world",id:"estate"},source:{world:"bible-world",id:"register"},kind:"located_at",role:"headquarters",starts_at:0,ends_before:null}});
   if (process.env.ATLAS_CAPTURE_PHASE3 === "1") {
     const stamp = new Date().toISOString().slice(0,19).replace("T","_").replaceAll(":","-")+"Z";
     await bible.screenshot({path:"../../Development-Screenshots/"+stamp+"_phase-04_canvas_mock-native-world-bible_01.png",animations:"disabled"});

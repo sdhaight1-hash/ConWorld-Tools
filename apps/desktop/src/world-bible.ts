@@ -2,8 +2,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { canLeaveEntryDrafts } from "./entry-drafts";
 import { openEntryEditor } from "./entry-editor";
 import { appendConnectionEditor } from "./connection-editor";
+import { openFamilyHistory } from "./family-history";
 
 export type EntryTarget = { id: string; label: string; kind?: string };
+export type EntryTab = "edit" | "connections" | "family";
 type Context = { world_id: string; day: number; revision: number };
 type Ref = { world: string; id: string };
 type NetworkFact = { id: string; subject_label: string; target_label: string;
@@ -35,7 +37,7 @@ function button(label: string, action: () => void) {
 // Author-only directory. No complete scene or client-side public filtering.
 export function mountWorldBible(host: HTMLElement, context: Context, editable: boolean,
   valid: () => boolean, refresh: () => Promise<void>,
-  reopen: (target: EntryTarget, connections?: boolean) => void, initial?: EntryTarget, initialConnections = false) {
+  reopen: (target: EntryTarget, tab?: EntryTab) => void, initial?: EntryTarget, initialTab: EntryTab = "edit") {
   host.innerHTML = `<div class="world-bible-header"><h2>World Bible</h2>
     <p class="hint">Author directory · Main history · Find identities, including those without an article.</p></div>
     <div class="world-bible-columns"><div class="world-bible-directory">
@@ -76,7 +78,7 @@ export function mountWorldBible(host: HTMLElement, context: Context, editable: b
   }
   phrase.addEventListener("input", () => { invalidate(); status.textContent = "Search the selected historical view."; });
   cancel.addEventListener("click", () => { invalidate(); status.textContent = "Directory search cancelled."; });
-  function open(target: EntryTarget, connections = false) {
+  function open(target: EntryTarget, tab: EntryTab = "edit") {
     if (!current() || !canLeaveEntryDrafts()) return;
     ++inspected;
     entry.replaceChildren();
@@ -121,19 +123,30 @@ export function mountWorldBible(host: HTMLElement, context: Context, editable: b
         body.append(list);
         if (editable && target.kind) {
           appendConnectionEditor(body, target, context, () => current() && body.isConnected && token === inspected,
-            async () => { await refresh(); reopen(target, true); });
+            async () => { await refresh(); reopen(target, "connections"); });
         }
       } catch (error) {
         if (current() && body.isConnected && token === inspected) body.textContent = String(error);
       }
     };
-    nav.append(button("Edit article", showEditor), button("Connections", () => void showConnections()),
-      button("Back to directory", () => {
+    const showFamily = () => {
+      if (!current() || !body.isConnected || !canLeaveEntryDrafts() || target.kind !== "person") return;
+      ++inspected;
+      body.replaceChildren();
+      void openFamilyHistory(body, { ...context, person_id: target.id },
+        rows.filter(row => row.kind === "person"), editable,
+        async () => { await refresh(); reopen(target, "family"); });
+    };
+    nav.append(button("Edit article", showEditor), button("Connections", () => void showConnections()));
+    if (target.kind === "person") nav.append(button("Family history", showFamily));
+    nav.append(button("Back to directory", () => {
         if (!current() || !canLeaveEntryDrafts()) return;
         ++inspected; entry.textContent = "Choose an identity from the directory."; phrase.focus();
       }));
     entry.append(title, meta, nav, body);
-    if (connections) void showConnections(); else showEditor();
+    if (tab === "connections") void showConnections();
+    else if (tab === "family") showFamily();
+    else showEditor();
     title.focus();
   }
   search.addEventListener("submit", async event => {
@@ -189,6 +202,6 @@ export function mountWorldBible(host: HTMLElement, context: Context, editable: b
       catch (error) { createStatus.textContent = "Identity created, but refresh failed: " + String(error); }
     }
   });
-  if (initial) open(initial, initialConnections);
+  if (initial) open(initial, initialTab);
   return { clear: () => { invalidate(); ++inspected; host.replaceChildren(); } };
 }
