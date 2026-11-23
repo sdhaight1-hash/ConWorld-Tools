@@ -2689,7 +2689,7 @@ test("Canvas reference picker uses the pinned ontology search, preserves caption
 test("World Bible opens and creates typed entries independently of the scene and protects drafts", async ({ page }) => {
   await page.addInitScript(() => {
     const world = { id: "bible-world", name: "Alder Basin", revision: 4 };
-    const entries = [{id:"guild",label:"Vale",kind:"organization"}, {id:"estate",label:"Vale",kind:"place"}];
+    const entries = [{id:"guild",label:"Vale",kind:"organization"}, {id:"estate",label:"Vale",kind:"place"}, {id:"register",label:"Register",kind:"source"}];
     const calls: {command: string; args: Record<string, unknown>}[] = [];
     const layouts = new Map<string, unknown>();
     Object.assign(window, {isTauri: true, __bibleCalls: calls, __TAURI_INTERNALS__: {
@@ -2702,6 +2702,7 @@ test("World Bible opens and creates typed entries independently of the scene and
         calls.push({command,args});
         if (command === "workspace_semantic_candidates") return {rows:entries.filter(e=>e.label.includes(String(args.phrase))),truncated:false};
         if (command === "workspace_entry_layout") return layouts.get(String(args.entryId))??null;
+        if (command === "workspace_record_network_fact") { world.revision++; return "new-fact"; }
         if (command === "workspace_network_facts") return [{id:"fact-1",subject_label:"Vale",target_label:"Vale",input:{subject:{world:world.id,id:"guild"},target:{world:world.id,id:"estate"},source:{world:world.id,id:"register"},kind:"located_at",role:"headquarters",starts_at:0,ends_before:null}}];
         if (command === "workspace_create_identity") {
           entries.push({id:"new-title",label:String(args.label),kind:String(args.kind)}); world.revision++;
@@ -2724,6 +2725,16 @@ test("World Bible opens and creates typed entries independently of the scene and
   await expect(entry.locator("[data-entry-identity]")).toContainText("Identity only");
   await entry.getByRole("button",{name:"Connections",exact:true}).click();
   await expect(entry.getByText(/headquarters.*fact-1/)).toBeVisible();
+  const connection = entry.locator("[data-connection-editor]");
+  await connection.getByText("Find connection target",{exact:true}).click();
+  await connection.getByLabel("Search connection target").fill("Vale");
+  await connection.getByRole("button",{name:"Search references"}).click();
+  await connection.getByRole("button",{name:"Vale · place · estate"}).click();
+  await expect(connection.getByLabel("Connection type")).toHaveValue("located_at");
+  await expect(connection.getByLabel("Location role or conflict stance")).toHaveValue("headquarters");
+  await connection.getByLabel("Connection evidence source",{exact:true}).fill("register");
+  await connection.getByRole("button",{name:"Record connection",exact:true}).click();
+  await expect(page.locator("#author-world-info")).toContainText("Author revision 5 / 5");
   await entry.getByRole("button",{name:"Open Vale",exact:true}).click();
   await expect(entry.locator("[data-entry-identity]")).toContainText("estate");
   const narrative = entry.getByRole("textbox",{name:"Page text",exact:true});
@@ -2740,8 +2751,9 @@ test("World Bible opens and creates typed entries independently of the scene and
   await expect(entry.getByRole("heading",{name:"Basin Warden",exact:true})).toBeVisible();
   await expect(entry.locator("[data-entry-identity]")).toContainText("Identity only");
   const calls = await page.evaluate(() => (window as unknown as {__bibleCalls:{command:string;args:Record<string,unknown>}[]}).__bibleCalls);
-  expect(calls.find(c=>c.command==="workspace_create_identity")?.args).toMatchObject({request:{world_id:"bible-world",day:0,revision:5},kind:"title",label:"Basin Warden"});
+  expect(calls.find(c=>c.command==="workspace_create_identity")?.args).toMatchObject({request:{world_id:"bible-world",day:0,revision:6},kind:"title",label:"Basin Warden"});
   expect(calls.filter(c=>c.command==="workspace_save_layout")).toHaveLength(1);
+  expect(calls.find(c=>c.command==="workspace_record_network_fact")?.args).toMatchObject({request:{world_id:"bible-world",day:0,revision:4},input:{subject:{world:"bible-world",id:"guild"},target:{world:"bible-world",id:"estate"},source:{world:"bible-world",id:"register"},kind:"located_at",role:"headquarters",starts_at:0,ends_before:null}});
   if (process.env.ATLAS_CAPTURE_PHASE3 === "1") {
     const stamp = new Date().toISOString().slice(0,19).replace("T","_").replaceAll(":","-")+"Z";
     await bible.screenshot({path:"../../Development-Screenshots/"+stamp+"_phase-04_canvas_mock-native-world-bible_01.png",animations:"disabled"});

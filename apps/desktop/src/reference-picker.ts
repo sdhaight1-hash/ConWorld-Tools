@@ -1,12 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 
 type Context = { world_id: string; day: number; revision: number };
-type Candidate = { id: string; label: string; kind?: string };
+export type Candidate = { id: string; label: string; kind?: string };
 
 // Reuse the bounded, author-only semantic candidate service. This picker
 // only edits the existing reference field; Rust still validates every write.
 export function appendReferencePicker(parent: HTMLElement, target: HTMLInputElement,
-  context: Context, kind: "entry" | "source" | "tag", label: string) {
+  context: Context, kind: "entry" | "source" | "tag", label: string,
+  choose?: (candidate: Candidate) => void, compatible?: (candidate: Candidate) => boolean) {
   const host = document.createElement("details");
   host.dataset.referencePicker = "";
   const summary = document.createElement("summary");
@@ -59,7 +60,8 @@ export function appendReferencePicker(parent: HTMLElement, target: HTMLInputElem
       const found = await invoke<{ rows: Candidate[]; truncated: boolean }>(
         "workspace_semantic_candidates", { request: context, requestId, kind, phrase: term });
       if (!current()) return;
-      for (const row of found.rows) {
+      const visible = compatible ? found.rows.filter(compatible) : found.rows;
+      for (const row of visible) {
         const item = document.createElement("li");
         const button = document.createElement("button");
         button.type = "button";
@@ -68,13 +70,14 @@ export function appendReferencePicker(parent: HTMLElement, target: HTMLInputElem
           if (!current()) return;
           target.value = row.id;
           target.dispatchEvent(new Event("input", { bubbles: true }));
+          choose?.(row);
           host.open = false;
           target.focus();
         });
         item.append(button);
         results.append(item);
       }
-      status.textContent = found.rows.length + " compatible references." +
+      status.textContent = visible.length + " compatible references." +
         (found.truncated ? " Refine the phrase to see further matches." : "");
     } catch (error) {
       if (current()) status.textContent = String(error);

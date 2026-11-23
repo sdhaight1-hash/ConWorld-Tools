@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { canLeaveEntryDrafts } from "./entry-drafts";
 import { openEntryEditor } from "./entry-editor";
+import { appendConnectionEditor } from "./connection-editor";
 
 export type EntryTarget = { id: string; label: string; kind?: string };
 type Context = { world_id: string; day: number; revision: number };
@@ -34,7 +35,7 @@ function button(label: string, action: () => void) {
 // Author-only directory. No complete scene or client-side public filtering.
 export function mountWorldBible(host: HTMLElement, context: Context, editable: boolean,
   valid: () => boolean, refresh: () => Promise<void>,
-  reopen: (target: EntryTarget) => void, initial?: EntryTarget) {
+  reopen: (target: EntryTarget, connections?: boolean) => void, initial?: EntryTarget, initialConnections = false) {
   host.innerHTML = `<div class="world-bible-header"><h2>World Bible</h2>
     <p class="hint">Author directory · Main history · Find identities, including those without an article.</p></div>
     <div class="world-bible-columns"><div class="world-bible-directory">
@@ -44,7 +45,7 @@ export function mountWorldBible(host: HTMLElement, context: Context, editable: b
     <ul data-bible-results aria-label="World Bible directory"></ul>
     <form class="editor-form" data-bible-create><h3>Create identity</h3><label>Entry type<select name="kind"></select></label>
     <label>Entry name<input name="name" required maxlength="200"></label><button>Create identity only</button>
-    <p class="hint">Creates a canonical identity, not a page or inferred relationship.</p></form>
+    <p class="hint">Creates a canonical identity effective from the selected world day, not a page or inferred relationship.</p></form>
     <p role="status" data-bible-create-status></p></div>
     <section class="world-bible-entry" aria-label="World Bible entry"><p>Choose an identity to edit its article or inspect typed connections.</p></section></div>`;
   const search = host.querySelector<HTMLFormElement>("[data-bible-search]")!;
@@ -75,7 +76,7 @@ export function mountWorldBible(host: HTMLElement, context: Context, editable: b
   }
   phrase.addEventListener("input", () => { invalidate(); status.textContent = "Search the selected historical view."; });
   cancel.addEventListener("click", () => { invalidate(); status.textContent = "Directory search cancelled."; });
-  function open(target: EntryTarget) {
+  function open(target: EntryTarget, connections = false) {
     if (!current() || !canLeaveEntryDrafts()) return;
     ++inspected;
     entry.replaceChildren();
@@ -113,11 +114,15 @@ export function mountWorldBible(host: HTMLElement, context: Context, editable: b
           const item = document.createElement("li");
           item.textContent = fact.subject_label + " → " + fact.target_label + " · " + humanize(f.kind) + " · " +
             f.role + " · day " + f.starts_at + "–" + (f.ends_before ?? "open") + " · source " + f.source.id + " · fact " + fact.id + " ";
-          if (other.world === context.world_id) item.append(button("Open " + label, () => open({ id: other.id, label })));
+          if (other.world === context.world_id) item.append(button("Open " + label, () => open(rows.find(row => row.id === other.id) ?? { id: other.id, label })));
           list.append(item);
         }
         if (!facts.length) body.append("No recorded network facts at this view.");
         body.append(list);
+        if (editable && target.kind) {
+          appendConnectionEditor(body, target, context, () => current() && body.isConnected && token === inspected,
+            async () => { await refresh(); reopen(target, true); });
+        }
       } catch (error) {
         if (current() && body.isConnected && token === inspected) body.textContent = String(error);
       }
@@ -128,7 +133,8 @@ export function mountWorldBible(host: HTMLElement, context: Context, editable: b
         ++inspected; entry.textContent = "Choose an identity from the directory."; phrase.focus();
       }));
     entry.append(title, meta, nav, body);
-    showEditor(); title.focus();
+    if (connections) void showConnections(); else showEditor();
+    title.focus();
   }
   search.addEventListener("submit", async event => {
     event.preventDefault();
@@ -170,6 +176,6 @@ export function mountWorldBible(host: HTMLElement, context: Context, editable: b
     } catch (error) { if (current()) createStatus.textContent = String(error); }
     finally { creating = false; if (current()) save.disabled = !editable; }
   });
-  if (initial) open(initial);
+  if (initial) open(initial, initialConnections);
   return { clear: () => { invalidate(); ++inspected; host.replaceChildren(); } };
 }

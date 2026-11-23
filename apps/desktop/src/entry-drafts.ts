@@ -5,7 +5,7 @@ export function canLeaveEntryDrafts(): boolean {
   if (!draft) return true;
   const notice = draft.querySelector<HTMLElement>("[data-draft-status]")!;
   notice.textContent = draft.dataset.entryDraftState === "saving"
-    ? "Saving page. Wait for the result before changing views."
+    ? "Saving entry changes. Wait for the result before changing views."
     : "Unsaved page changes. Save or discard this draft before changing views.";
   notice.focus();
   return false;

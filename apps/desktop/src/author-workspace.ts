@@ -468,19 +468,22 @@ export async function showAuthorWorkspace(
   }
 
   function validView(view: Snapshot) {
-    return snapshot === view && worldSelect.value === view.world.id &&
-      dayInput.value.trim() === String(view.day) && revisionInput.value.trim() === loadedControls?.revision;
+    try {
+      return snapshot === view && worldSelect.value === view.world.id &&
+        currentDay() === view.day && selectedRevision() === (loadedControls?.revision ? Number(loadedControls.revision) : null);
+    } catch { return false; }
   }
 
-  function installBible(view: Snapshot, initial?: EntryTarget) {
-    const reopen = (target: EntryTarget) => {
+  function installBible(view: Snapshot, initial?: EntryTarget, connections = false) {
+    const reopen = (target: EntryTarget, showConnections = false) => {
       const next = snapshot;
-      if (!next || next.world.id !== view.world.id || next.day !== view.day || !validView(next)) return;
+      if (!next || next.world.id !== view.world.id || next.day !== view.day ||
+          next.view_revision < view.view_revision || revisionInput.value.trim() || !validView(next)) return;
       bible?.clear();
-      installBible(next, target);
+      installBible(next, target, showConnections);
     };
     bible = mountWorldBible(bibleHost, authorContext(view),
-      !revisionInput.value.trim(), () => validView(view) && !saving, refresh, reopen, initial);
+      !revisionInput.value.trim(), () => validView(view) && !saving, refresh, reopen, initial, connections);
   }
 
   function inspector(id: string, panel: HTMLElement) {
