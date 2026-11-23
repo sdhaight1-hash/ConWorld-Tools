@@ -2684,3 +2684,66 @@ test("Canvas reference picker uses the pinned ontology search, preserves caption
     ] } } } } },
   ]);
 });
+
+
+test("World Bible opens and creates typed entries independently of the scene and protects drafts", async ({ page }) => {
+  await page.addInitScript(() => {
+    const world = { id: "bible-world", name: "Alder Basin", revision: 4 };
+    const entries = [{id:"guild",label:"Vale",kind:"organization"}, {id:"estate",label:"Vale",kind:"place"}];
+    const calls: {command: string; args: Record<string, unknown>}[] = [];
+    const layouts = new Map<string, unknown>();
+    Object.assign(window, {isTauri: true, __bibleCalls: calls, __TAURI_INTERNALS__: {
+      invoke: async (command: string, args: Record<string, unknown>) => {
+        if (command === "platform_scene") return {target:"test-native",smoke:false,scene:{nodes:[],edges:[]}};
+        if (command === "northbridge_history") return {day:0,relationships:[],cause:null};
+        if (command === "workspace_worlds") return [{...world}];
+        if (command === "workspace_snapshot") return {world:{...world},day:args.day,view_revision:args.revision??world.revision,people:[],relationships:[],events:[],definitions:[],scene_limited:true};
+        if (command === "workspace_saved_queries") return [];
+        calls.push({command,args});
+        if (command === "workspace_semantic_candidates") return {rows:entries.filter(e=>e.label.includes(String(args.phrase))),truncated:false};
+        if (command === "workspace_entry_layout") return layouts.get(String(args.entryId))??null;
+        if (command === "workspace_network_facts") return [{id:"fact-1",subject_label:"Vale",target_label:"Vale",input:{subject:{world:world.id,id:"guild"},target:{world:world.id,id:"estate"},source:{world:world.id,id:"register"},kind:"located_at",role:"headquarters",starts_at:0,ends_before:null}}];
+        if (command === "workspace_create_identity") {
+          entries.push({id:"new-title",label:String(args.label),kind:String(args.kind)}); world.revision++;
+          return {world:world.id,id:"new-title"};
+        }
+        if (command === "workspace_save_layout") {
+          const doc = args.document as {entry:{id:string}};
+          layouts.set(doc.entry.id,[doc,args.published]); world.revision++; return null;
+        }
+        throw new Error("Unexpected mock command: "+command);
+      }
+    }});
+  });
+  await page.goto("/");
+  await expect(page.locator("#author-status")).toContainText("Search-only mode");
+  const bible = page.locator("#world-bible"), entry = bible.getByRole("region", {name:"World Bible entry"});
+  await bible.getByLabel("Find an entry").fill("Vale");
+  await bible.getByRole("button",{name:"Find entry",exact:true}).click();
+  await bible.getByRole("button",{name:"Vale · organization · guild"}).click();
+  await expect(entry.locator("[data-entry-identity]")).toContainText("Identity only");
+  await entry.getByRole("button",{name:"Connections",exact:true}).click();
+  await expect(entry.getByText(/headquarters.*fact-1/)).toBeVisible();
+  await entry.getByRole("button",{name:"Open Vale",exact:true}).click();
+  await expect(entry.locator("[data-entry-identity]")).toContainText("estate");
+  const narrative = entry.getByRole("textbox",{name:"Page text",exact:true});
+  await narrative.fill("The estate.");
+  await entry.getByRole("button",{name:"Back to directory"}).click();
+  await expect(narrative).toHaveValue("The estate.");
+  await expect(entry.locator("[data-draft-status]")).toContainText("Save or discard");
+  await entry.getByRole("button",{name:"Save page",exact:true}).click();
+  await expect(entry.locator("[data-entry-identity]")).toContainText("Saved unreleased page");
+  await expect(narrative).toHaveValue("The estate.");
+  await bible.getByLabel("Entry type").selectOption("title");
+  await bible.getByLabel("Entry name").fill("Basin Warden");
+  await bible.getByRole("button",{name:"Create identity only"}).click();
+  await expect(entry.getByRole("heading",{name:"Basin Warden",exact:true})).toBeVisible();
+  await expect(entry.locator("[data-entry-identity]")).toContainText("Identity only");
+  const calls = await page.evaluate(() => (window as unknown as {__bibleCalls:{command:string;args:Record<string,unknown>}[]}).__bibleCalls);
+  expect(calls.find(c=>c.command==="workspace_create_identity")?.args).toMatchObject({request:{world_id:"bible-world",day:0,revision:5},kind:"title",label:"Basin Warden"});
+  expect(calls.filter(c=>c.command==="workspace_save_layout")).toHaveLength(1);
+  if (process.env.ATLAS_CAPTURE_PHASE3 === "1") {
+    const stamp = new Date().toISOString().slice(0,19).replace("T","_").replaceAll(":","-")+"Z";
+    await bible.screenshot({path:"../../Development-Screenshots/"+stamp+"_phase-04_canvas_mock-native-world-bible_01.png",animations:"disabled"});
+  }
+});

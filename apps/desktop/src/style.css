@@ -163,3 +163,21 @@ button:disabled { opacity: 0.55; cursor: default; }
 .chromosome-track {display:flex; height:14px; overflow:hidden; margin:3px 0; border:1px solid #69828c; border-radius:4px;}
 .chromosome-segment {display:block; flex-shrink:0;}
 .chromosome-key {display:inline-block;width:12px;height:12px;margin-right:6px;border-radius:2px;}
+
+/* Entry-first author surface; the existing specialist tools remain available. */
+.world-bible-header { margin-bottom: 1rem; }
+.world-bible-header h2 { font: 600 1.65rem Georgia, serif; color: var(--gold); }
+.world-bible-columns { display: grid; grid-template-columns: minmax(13rem, 17rem) minmax(0, 1fr); gap: 1rem; }
+.world-bible-directory { min-width: 0; border-right: 1px solid var(--border); padding-right: 1rem; }
+.world-bible-directory ul { list-style: none; padding: 0; display: grid; gap: .4rem; }
+.world-bible-directory li button { width: 100%; text-align: left; overflow-wrap: anywhere; }
+.world-bible-directory form { margin-bottom: .6rem; }
+.world-bible-entry { min-width: 0; overflow-wrap: anywhere; padding: .4rem .6rem; }
+.world-bible-entry > h2 { font: 600 1.65rem Georgia, serif; }
+.world-bible-entry nav { display: flex; flex-wrap: wrap; gap: .5rem; margin: .8rem 0; }
+.world-bible-entry textarea { width: 100%; min-height: 6rem; resize: vertical; }
+.world-bible-entry li { margin-bottom: .55rem; }
+@media (max-width: 760px) {
+  .world-bible-columns { grid-template-columns: minmax(0, 1fr); }
+  .world-bible-directory { padding-right: 0; border: 0; border-bottom: 1px solid var(--border); padding-bottom: .75rem; }
+}

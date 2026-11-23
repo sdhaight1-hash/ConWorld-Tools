@@ -4,7 +4,7 @@ import { objectKinds } from "./object-kinds";
 import { openFamilyHistory } from "./family-history";
 import { openNetworkStudio } from "./network-studio";
 import { openMediaStudio } from "./media-studio";
-import { openEntryEditor } from "./entry-editor";
+import { entryNavigator, mountWorldBible, type EntryTarget } from "./world-bible";
 import { publicReader, type Backlinks } from "./public-reader";
 import { invoke } from "@tauri-apps/api/core";
 import type { Scene } from "./main";
@@ -143,6 +143,8 @@ export async function showAuthorWorkspace(
   const revisionInput = document.querySelector<HTMLInputElement>("#author-revision")!;
   const content = document.querySelector<HTMLElement>("#author-world-content")!;
   const info = document.querySelector<HTMLElement>("#author-world-info")!;
+  const bibleHost = document.querySelector<HTMLElement>("#world-bible")!;
+  let bible: ReturnType<typeof mountWorldBible> | undefined;
   const refreshView = document.querySelector<HTMLButtonElement>("#author-refresh-view")!;
   const editorForms = document.querySelector<HTMLElement>(".editor-forms")!;
   const discoveryPanel = document.querySelector<HTMLElement>("#author-mention-discovery")!;
@@ -461,6 +463,26 @@ export async function showAuthorWorkspace(
     return targets;
   }
 
+  function authorContext(view: Snapshot) {
+    return { world_id: view.world.id, day: view.day, revision: view.view_revision };
+  }
+
+  function validView(view: Snapshot) {
+    return snapshot === view && worldSelect.value === view.world.id &&
+      dayInput.value.trim() === String(view.day) && revisionInput.value.trim() === loadedControls?.revision;
+  }
+
+  function installBible(view: Snapshot, initial?: EntryTarget) {
+    const reopen = (target: EntryTarget) => {
+      const next = snapshot;
+      if (!next || next.world.id !== view.world.id || next.day !== view.day || !validView(next)) return;
+      bible?.clear();
+      installBible(next, target);
+    };
+    bible = mountWorldBible(bibleHost, authorContext(view),
+      !revisionInput.value.trim(), () => validView(view) && !saving, refresh, reopen, initial);
+  }
+
   function inspector(id: string, panel: HTMLElement) {
     const bond = snapshot?.relationships.find((record) => record.id === id);
     const event = snapshot?.events.find((record) => record.id === id);
@@ -484,18 +506,14 @@ export async function showAuthorWorkspace(
       const label = event ? "Open event page" : bond ? "Open relationship page" : "Open character page";
       button(label, () => {
         const targets = entryTargets(current);
-        const open = (target: string) => {
-          if (snapshot !== current || !canLeaveEntryDrafts()) return;
-          panel.replaceChildren();
-          void openEntryEditor(panel, current.world.id, target, current.day, current.view_revision,
-            !revisionInput.value.trim(), async () => {
-              await refresh();
-              const next = snapshot as Snapshot | undefined;
-              if (next?.world.id !== current.world.id || next.day !== current.day || next.scene_limited) return;
-              const onGraph = [...next.people, ...next.events, ...next.relationships].some(node => node.id === target);
-              selectNode(onGraph ? target : id);
-            }, targets, open);
-        };
+        const open = entryNavigator(panel, authorContext(current), !revisionInput.value.trim(),
+          () => validView(current), targets, async target => {
+            await refresh();
+            const next = snapshot as Snapshot | undefined;
+            if (next?.world.id !== current.world.id || next.day !== current.day || next.scene_limited) return;
+            const onGraph = [...next.people, ...next.events, ...next.relationships].some(node => node.id === target);
+            selectNode(onGraph ? target : id);
+          });
         open(id);
       });
     }
@@ -633,6 +651,8 @@ export async function showAuthorWorkspace(
       }
       return;
     }
+    bible?.clear();
+    bible = undefined;
     clearPublicSearch();
     const sequence = ++requestSequence;
     ++querySequence;
@@ -764,12 +784,14 @@ export async function showAuthorWorkspace(
     addParticipant.disabled = !people.length || selectedEvent?.day === null;
     syncEffect();
     syncButtons();
-    if (info.nextElementSibling !== graph) info.after(graph);
+    content.prepend(info, bibleHost);
+    bibleHost.after(graph);
+    installBible(next);
     graph.hidden = Boolean(next.scene_limited);
     heading.textContent = next.world.name;
     intro.textContent = next.scene_limited
       ? "Search the selected historical world without loading a complete graph."
-      : "Explore saved people, relationships, and events.";
+      : "Build your World Bible and explore its historical connections.";
     graph.setAttribute("aria-label", "Saved world graph");
     history.hidden = true;
     authorLink.hidden = true;
@@ -840,12 +862,8 @@ export async function showAuthorWorkspace(
             const current = snapshot;
             if (!current || sequence !== querySequence) return;
             const targets = entryTargets(current, { id: row.id, label: row.label });
-            const open = (target: string) => {
-              if (sequence !== querySequence || snapshot !== current || !item.isConnected || !canLeaveEntryDrafts()) return;
-              item.replaceChildren();
-              void openEntryEditor(item, current.world.id, target, current.day, current.view_revision,
-                !revisionInput.value.trim(), refresh, targets, open);
-            };
+            const open = entryNavigator(item, authorContext(current), !revisionInput.value.trim(),
+              () => sequence === querySequence && validView(current), targets, refresh);
             open(row.id);
           });
           item.append(pageButton);
@@ -876,12 +894,9 @@ export async function showAuthorWorkspace(
                 open.type = "button";
                 open.textContent = match.label + " · " + match.source.id;
                 open.addEventListener("click", () => {
-                  const navigate = (target: string) => {
-                    if (sequence !== querySequence || snapshot !== current || !canLeaveEntryDrafts()) return;
-                    item.replaceChildren();
-                    void openEntryEditor(item, current.world.id, target, current.day,
-                      current.view_revision, !revisionInput.value.trim(), refresh, entryTargets(current, { id: row.id, label: row.label }), navigate);
-                  };
+                  const navigate = entryNavigator(item, authorContext(current), !revisionInput.value.trim(),
+                    () => sequence === querySequence && validView(current),
+                    entryTargets(current, { id: row.id, label: row.label }), refresh);
                   navigate(match.source.id);
                 });
                 li.append(open);

@@ -1,0 +1,10 @@
+# World Bible production refactor — first slice
+
+Baseline 70106dc: exact combined PR #81 desktop and persistence workflows 45075618814 and 45075618828 succeeded. Existing canonical storage and scope gates unchanged. Scope #4/#5/#8. This is production frontend refactoring using existing native services, not the independent HTML mockup.
+
+- World Bible directory at the top of an open world, searchable via author-only bounded semantic candidate service; kind and stable ID disambiguation, request cancellation and generation guards. Works when scene exceeds its budget.
+- Typed identity creation reuses native IdentityKind and expected revision; no article or inferred fact created. Article composition uses original versioned layout and existing public preview, including honest current save/release coupling.
+- One shared entry navigator for graph, search, backlinks and World Bible editor; old inspector mounts retained until parity migration. Primary directory uses a full-width contextual editor, identity/page state and author-only network facts with source, role, interval and stable refs. No new canonical data or fake generic hierarchy.
+- Existing graph, template, family, media, network and query tools remain in place. Branch-specific network tool remains explicitly scoped separately; directory/Canvas main-only. No client-side author-to-public projection.
+- Mock-native browser regression exercises graph-limited directory, duplicate labels, connections, draft guard, save/reopen and identity-only creation. CI screenshot capture configured; not yet run on this commit. Native tests and full matrix pending.
+- Remaining: authorized reader directory/envelope and anchors; first real semantic relationship edit component (not just read); template presets, structured writing and scoped bindings; move specialist tools into entry context with parity; hierarchy traversal, lifecycle A1, full native comparative testing. This slice is not completion of every refactor or phase. Keep migrations/authorization/domain contracts; inspect every module against this direction before changing its semantics.

@@ -166,6 +166,7 @@ export async function openEntryEditor(panel: HTMLElement, worldId: string, entry
       root: { id: crypto.randomUUID(), audience: "Public", content: { Stack: [block("Public"), block("Author")] } } };
     if (!host.isConnected) return;
     published.checked = saved?.[1] ?? false;
+    host.querySelector<HTMLElement>("[data-entry-identity]")!.textContent += saved ? (saved[1] ? " · Released page" : " · Saved unreleased page") : " · Identity only; no saved article";
     const treeButton = host.querySelector<HTMLButtonElement>("[data-open-tree]")!;
     const simpleFields = host.querySelector<HTMLFieldSetElement>("[data-simple-fields]")!;
     const treeHost = host.querySelector<HTMLElement>("[data-tree-host]")!;
