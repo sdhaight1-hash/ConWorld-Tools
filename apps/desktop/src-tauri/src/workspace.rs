@@ -2454,7 +2454,7 @@ pub async fn workspace_search_public_pages(
             .world(WorldId(id(&world_id)?), Scope::Author)
             .map_err(|e| e.to_string())?;
         store
-            .search_public_pages(
+            .search_public_articles(
                 ViewContext {
                     scope: Scope::Public,
                     ..view(&world, day)

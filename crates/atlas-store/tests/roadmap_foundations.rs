@@ -5365,3 +5365,76 @@ fn focused_network_reads_preserve_dates_sources_and_branch_withdrawals() -> Resu
     assert!(store.network_facts(child, redirect)?.is_empty());
     Ok(())
 }
+
+#[test]
+fn world_bible_article_search_limits_distinct_authorized_entries() -> Result<(), Error> {
+    use atlas_store::query::QueryControl;
+    use std::time::Duration;
+
+    let mut store = Store::open(":memory:")?;
+    let world = seed(&mut store)?;
+    let mut author = view(&world, 13);
+    let page = |entry, repeated: usize, text: &str| LayoutDocument {
+        entry,
+        schema_version: LAYOUT_SCHEMA_VERSION,
+        root: LayoutElement {
+            id: ElementId(Uuid::new_v4()),
+            audience: ClaimAudience::Public,
+            content: ElementContent::Stack(
+                (0..repeated)
+                    .map(|_| LayoutElement {
+                        id: ElementId(Uuid::new_v4()),
+                        audience: ClaimAudience::Public,
+                        content: ElementContent::Text(text.into()),
+                    })
+                    .chain(std::iter::once(LayoutElement {
+                        id: ElementId(Uuid::new_v4()),
+                        audience: ClaimAudience::Author,
+                        content: ElementContent::Text("Private catalogue".into()),
+                    }))
+                    .collect(),
+            ),
+        },
+    };
+    let long = page(id(&world, 1), 75, "Long gazette");
+    let short = page(id(&world, 2), 1, "Short gazette");
+    let draft = page(id(&world, 3), 1, "Unreleased gazette");
+    for (document, published) in [(&long, true), (&short, true), (&draft, false)] {
+        author.revision = store.save_entry_layout(author, document, published, Uuid::new_v4())?;
+    }
+    let public = |author: ViewContext| ViewContext {
+        scope: Scope::Public,
+        ..author
+    };
+    let control = QueryControl::new(Duration::from_secs(5))?;
+    let grouped = store.search_public_articles(public(author), "GAZETTE", 2, &control)?;
+    assert_eq!(grouped.matches.len(), 2);
+    assert_eq!(grouped.matches[0].entry, long.entry);
+    assert_eq!(grouped.matches[1].entry, short.entry);
+    assert!(!grouped.truncated);
+    let within = store
+        .search_entry_text(public(author), long.entry, "gazette", 2)?
+        .unwrap();
+    assert!(within.truncated);
+    assert_eq!(within.matches[0].0, grouped.matches[0].element);
+    let limited = store.search_public_articles(public(author), "gazette", 1, &control)?;
+    assert!(limited.truncated);
+    assert_eq!(limited.matches[0], grouped.matches[0]);
+    assert!(
+        store
+            .search_public_articles(public(author), "Private catalogue", 2, &control)?
+            .matches
+            .is_empty()
+    );
+    let preceding = author;
+    author.revision = store.save_entry_layout(author, &long, false, Uuid::new_v4())?;
+    assert!(matches!(
+        store.search_public_articles(public(preceding), "gazette", 2, &control),
+        Err(Error::InvalidRevision)
+    ));
+    let revoked = store.search_public_articles(public(author), "gazette", 1, &control)?;
+    assert_eq!(revoked.matches.len(), 1);
+    assert_eq!(revoked.matches[0], grouped.matches[1]);
+    assert!(!revoked.truncated);
+    Ok(())
+}

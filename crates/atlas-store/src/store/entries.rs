@@ -323,6 +323,29 @@ impl Store {
         limit: usize,
         control: &QueryControl,
     ) -> Result<PublicPageSearch, Error> {
+        self.search_public_matches(view, text, limit, control, false)
+    }
+
+    /// World Bible directory results: one authorized matching block per article.
+    /// Preserve block-level search as a separate operation.
+    pub fn search_public_articles(
+        &self,
+        view: ViewContext,
+        text: &str,
+        limit: usize,
+        control: &QueryControl,
+    ) -> Result<PublicPageSearch, Error> {
+        self.search_public_matches(view, text, limit, control, true)
+    }
+
+    fn search_public_matches(
+        &self,
+        view: ViewContext,
+        text: &str,
+        limit: usize,
+        control: &QueryControl,
+        group_by_entry: bool,
+    ) -> Result<PublicPageSearch, Error> {
         if view.scope != Scope::Public {
             return Err(Error::CapabilityDenied);
         }
@@ -391,7 +414,11 @@ impl Store {
                     continue;
                 };
                 let remaining = limit - result.matches.len();
-                let found = find_text_blocks(page, &needle, remaining);
+                let found = find_text_blocks(
+                    page,
+                    &needle,
+                    if group_by_entry { 1 } else { remaining },
+                );
                 // A hidden destination cannot consume the visible-page budget.
                 // Raw candidate work remains subject to query cancellation/deadline.
                 if text_hit || found.truncated || !found.matches.is_empty() {
@@ -400,6 +427,10 @@ impl Store {
                         return Err(Error::QueryBudgetExceeded);
                     }
                 }
+                if group_by_entry && remaining == 0 && !found.matches.is_empty() {
+                    result.truncated = true;
+                    break;
+                }
                 for (element, text) in found.matches {
                     result.matches.push(PublicPageMatch {
                         entry,
@@ -407,7 +438,7 @@ impl Store {
                         text,
                     });
                 }
-                if found.truncated {
+                if !group_by_entry && found.truncated {
                     result.truncated = true;
                     break;
                 }

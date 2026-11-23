@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 export type ObjectRef = { world: string; id: string };
 export type ObjectLink = { target: ObjectRef; label: string };
 export type ProjectedImage = {width:number;height:number;png_base64:string;alt:string;hotspots:{id:string;x:number;y:number;link:ObjectLink}[]};
-export type PublicDisplay = { content: { Text?: string; Stack?: PublicDisplay[]; Panel?: PublicDisplay[];
+export type PublicDisplay = { id?: string; content: { Text?: string; Stack?: PublicDisplay[]; Panel?: PublicDisplay[];
   Grid?: { columns: number; children: PublicDisplay[] }; ObjectLink?: ObjectLink;
   Image?: ProjectedImage;
   StatementRows?: { statements: string[]; truncated: boolean }; ReferenceRows?: { links: ObjectLink[]; truncated: boolean } } };
@@ -48,7 +48,7 @@ export function publicReader(host: HTMLElement, worldId: string, day: number,
   valid: () => boolean, unavailable: () => void) {
   let sequence = 0;
   let history: string[] = [];
-  async function load(entryId: string, back = false) {
+  async function load(entryId: string, back = false, anchor?: string) {
     const current = ++sequence;
     host.textContent = "Loading current publication…";
     try {
@@ -78,7 +78,9 @@ export function publicReader(host: HTMLElement, worldId: string, day: number,
         button.addEventListener("click", () => { if (valid()) void load(target.id); });
         parent.append(button);
       }
+      const anchors = new Map<string, HTMLElement>();
       function render(node: PublicDisplay, parent = host) {
+        const previous = parent.lastElementChild;
         if (node.content.Text !== undefined) {
           const p = document.createElement("p");
           p.textContent = node.content.Text;
@@ -113,8 +115,23 @@ export function publicReader(host: HTMLElement, worldId: string, day: number,
           const container = layoutContainer(parent, "grid", node.content.Grid.columns);
           node.content.Grid.children.forEach(child => render(child, container));
         }
+        const rendered = previous ? previous.nextElementSibling : parent.firstElementChild;
+        if (node.id && rendered instanceof HTMLElement) anchors.set(node.id, rendered);
       }
       render(page);
+      if (anchor) {
+        const destination = anchors.get(anchor);
+        if (destination) {
+          destination.tabIndex = -1;
+          destination.focus();
+          destination.scrollIntoView({ block: "nearest" });
+        } else {
+          const notice = document.createElement("p");
+          notice.setAttribute("role", "status");
+          notice.textContent = "Matching section changed or is no longer visible. Search again.";
+          host.append(notice);
+        }
+      }
       const incoming = document.createElement("button");
       incoming.type = "button";
       incoming.textContent = "Find published backlinks";
@@ -145,5 +162,5 @@ export function publicReader(host: HTMLElement, worldId: string, day: number,
       if (current === sequence && valid()) host.textContent = String(error);
     }
   }
-  return { open: (entryId: string) => { history = []; return load(entryId); } };
+  return { open: (entryId: string, anchor?: string) => { history = []; return load(entryId, false, anchor); } };
 }

@@ -16,3 +16,7 @@ The entry shell now reuses the existing reference picker to select compatible ou
 ## Mutation/navigation hardening
 
 The directory creation and contextual network command now share the connected in-flight guard with the article editor. Disable mutation input controls during invocation, prevent navigation that would discard a newly opened draft, reopen only in the same world/day after a strictly newer loaded revision, and distinguish a committed write from a failed refresh. Delayed-create browser check ensures Back cannot replace the current entry during creation. The guard status is generic to entry changes, not a claim that semantic facts are page data.
+
+## Reader search refactor
+
+World-wide search now budgets distinct authorized articles through the original native query/candidate/compile path; only one matching element is returned per article. Existing block search in a single page and the prior block-result API remain intact. Pagination remains bounded/refine-required (not a new completion claim). The reader reloads current publication, then focuses the authorized matching element if still present; otherwise it shows an explicit changed/unavailable notice without exposing author labels or hidden text. Regression covers 75 matches in one article, second article inclusion, hidden and unreleased content, revocation, exact authorized anchor, and original block semantics. No schema change or publication lifecycle change.

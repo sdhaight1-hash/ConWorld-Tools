@@ -617,8 +617,8 @@ export async function showAuthorWorkspace(
       const found = await invoke<{ matches: Hit[]; truncated: boolean }>(
         "workspace_search_public_pages", { worldId, day, text, requestId });
       if (sequence !== publicSequence) return;
-      publicStatus.textContent = found.truncated ? "Showing first 50 matching blocks." :
-        found.matches.length + " matching public blocks.";
+      publicStatus.textContent = found.truncated ? "Showing first 50 matching published articles. Refine your search." :
+        found.matches.length + " matching published articles.";
       for (const hit of found.matches) {
         const item = document.createElement("li");
         const passage = document.createElement("p");
@@ -630,7 +630,7 @@ export async function showAuthorWorkspace(
           const preview = ++publicPreviewSequence;
           void publicReader(publicPreview, worldId, day,
             () => sequence === publicSequence && preview === publicPreviewSequence,
-            () => { clearPublicSearch(); publicStatus.textContent = "Publication changed. Search again."; }).open(hit.entry.id);
+            () => { clearPublicSearch(); publicStatus.textContent = "Publication changed. Search again."; }).open(hit.entry.id, hit.element);
         });
         item.append(passage, open);
         publicResults.append(item);

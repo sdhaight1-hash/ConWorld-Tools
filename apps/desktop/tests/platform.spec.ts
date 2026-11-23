@@ -1513,7 +1513,7 @@ test("world public search opens only the current reader projection", async ({ pa
             ] : [], truncated: false,
           };
           if (command === "workspace_public_entry" && payload.entryId === "alice") return {
-            content: { Stack: [{ content: { Text: "Gazette biography" } }, { content: { Text: "Released context" } }] },
+            content: { Stack: [{ id:"one", content: { Text: "Gazette biography" } }, { id:"two", content: { Text: "Released context" } }] },
           };
           if (command === "workspace_cancel_query") return null;
           throw new Error("Unexpected mock command: " + command);
@@ -1525,9 +1525,10 @@ test("world public search opens only the current reader projection", async ({ pa
   const search = page.getByRole("region", { name: "Published page search" });
   await search.getByLabel("Text in public pages").fill("gazette");
   await search.getByRole("button", { name: "Search published pages" }).click();
-  await expect(search.getByText("1 matching public blocks.")).toBeVisible();
+  await expect(search.getByText("1 matching published articles.")).toBeVisible();
   await search.getByRole("button", { name: "Read published page" }).click();
   await expect(search.getByText("Released context")).toBeVisible();
+  await expect(search.locator("#public-page-preview").getByText("Gazette biography", {exact:true})).toBeFocused();
   if (process.env.ATLAS_CAPTURE_PHASE3 === "1") {
     const timestamp = new Date().toISOString().slice(0, 19).replace("T", "_").replaceAll(":", "-") + "Z";
     await search.screenshot({
@@ -1537,7 +1538,7 @@ test("world public search opens only the current reader projection", async ({ pa
   }
   await search.getByLabel("Text in public pages").fill("private");
   await search.getByRole("button", { name: "Search published pages" }).click();
-  await expect(search.getByText("0 matching public blocks.")).toBeVisible();
+  await expect(search.getByText("0 matching published articles.")).toBeVisible();
   await expect(search.getByText("Released context")).toHaveCount(0);
 });
 
