@@ -45,8 +45,8 @@ export function mountWorldBible(host: HTMLElement, context: Context, editable: b
     <ul data-bible-results aria-label="World Bible directory"></ul>
     <form class="editor-form" data-bible-create><h3>Create identity</h3><label>Entry type<select name="kind"></select></label>
     <label>Entry name<input name="name" required maxlength="200"></label><button>Create identity only</button>
-    <p class="hint">Creates a canonical identity effective from the selected world day, not a page or inferred relationship.</p></form>
-    <p role="status" data-bible-create-status></p></div>
+    <p class="hint">Creates a canonical identity effective from the selected world day, not a page or inferred relationship.</p>
+    <p role="status" tabindex="-1" data-bible-create-status data-draft-status></p></form></div>
     <section class="world-bible-entry" aria-label="World Bible entry"><p>Choose an identity to edit its article or inspect typed connections.</p></section></div>`;
   const search = host.querySelector<HTMLFormElement>("[data-bible-search]")!;
   const phrase = search.elements.namedItem("phrase") as HTMLInputElement;
@@ -166,15 +166,28 @@ export function mountWorldBible(host: HTMLElement, context: Context, editable: b
     const label = (create.elements.namedItem("name") as HTMLInputElement).value.trim();
     if (!label) return;
     creating = true;
-    const save = create.querySelector<HTMLButtonElement>("button")!; save.disabled = true;
+    create.dataset.entryDraftState = "saving";
+    const controls = create.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>("input,select,button");
     const type = kind.value;
+    controls.forEach(control => control.disabled = true);
+    createStatus.textContent = "Creating identity…";
+    let record: Ref;
     try {
-      const record = await invoke<Ref>("workspace_create_identity", { request: context, kind: type, label });
-      if (!current() || record.world !== context.world_id) return;
-      createStatus.textContent = "Identity created. Loading its entry…";
-      await refresh(); reopen({ id: record.id, label, kind: type });
-    } catch (error) { if (current()) createStatus.textContent = String(error); }
-    finally { creating = false; if (current()) save.disabled = !editable; }
+      record = await invoke<Ref>("workspace_create_identity", { request: context, kind: type, label });
+      if (record.world !== context.world_id) throw new Error("Creation response belongs to another world.");
+    } catch (error) {
+      delete create.dataset.entryDraftState;
+      creating = false; controls.forEach(control => control.disabled = !editable);
+      if (current()) createStatus.textContent = String(error);
+      return;
+    }
+    delete create.dataset.entryDraftState;
+    createStatus.textContent = "Identity created. Loading its entry…";
+    // A committed write must not be retried solely because refresh failed.
+    if (current()) {
+      try { await refresh(); reopen({ id: record.id, label, kind: type }); }
+      catch (error) { createStatus.textContent = "Identity created, but refresh failed: " + String(error); }
+    }
   });
   if (initial) open(initial, initialConnections);
   return { clear: () => { invalidate(); ++inspected; host.replaceChildren(); } };

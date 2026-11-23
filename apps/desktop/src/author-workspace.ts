@@ -478,7 +478,7 @@ export async function showAuthorWorkspace(
     const reopen = (target: EntryTarget, showConnections = false) => {
       const next = snapshot;
       if (!next || next.world.id !== view.world.id || next.day !== view.day ||
-          next.view_revision < view.view_revision || revisionInput.value.trim() || !validView(next)) return;
+          next.view_revision <= view.view_revision || revisionInput.value.trim() || !validView(next) || !canLeaveEntryDrafts()) return;
       bible?.clear();
       installBible(next, target, showConnections);
     };

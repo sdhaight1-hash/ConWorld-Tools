@@ -110,7 +110,10 @@ export function appendConnectionEditor(parent: HTMLElement, subject: Candidate,
     const roleValue = (p.roles ? choice.value : role.value).trim();
     if (!roleValue || !source.value.trim()) { status.textContent = "A role and evidence source are required."; return; }
     const ref = (id: string) => ({world:context.world_id,id});
-    writing = true; submit.disabled = true;
+    writing = true;
+    const controls = [...host.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>("input,select,button")];
+    const states = controls.map(control => control.disabled);
+    controls.forEach(control => control.disabled = true);
     host.dataset.entryDraftState = "saving";
     status.textContent = "Recording connection…";
     try {
@@ -120,7 +123,8 @@ export function appendConnectionEditor(parent: HTMLElement, subject: Candidate,
       }});
     } catch (error) {
       delete host.dataset.entryDraftState;
-      writing = false; syncRole(); status.textContent = String(error); return;
+      writing = false; controls.forEach((control,index) => control.disabled = states[index]);
+      syncRole(); status.textContent = String(error); return;
     }
     delete host.dataset.entryDraftState;
     status.textContent = "Connection recorded.";

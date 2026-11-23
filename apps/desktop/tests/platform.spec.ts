@@ -2692,7 +2692,8 @@ test("World Bible opens and creates typed entries independently of the scene and
     const entries = [{id:"guild",label:"Vale",kind:"organization"}, {id:"estate",label:"Vale",kind:"place"}, {id:"register",label:"Register",kind:"source"}];
     const calls: {command: string; args: Record<string, unknown>}[] = [];
     const layouts = new Map<string, unknown>();
-    Object.assign(window, {isTauri: true, __bibleCalls: calls, __TAURI_INTERNALS__: {
+    let finishCreate: (() => void) | undefined;
+    Object.assign(window, {isTauri: true, __bibleCalls: calls, __finishBibleCreate: () => finishCreate?.(), __TAURI_INTERNALS__: {
       invoke: async (command: string, args: Record<string, unknown>) => {
         if (command === "platform_scene") return {target:"test-native",smoke:false,scene:{nodes:[],edges:[]}};
         if (command === "northbridge_history") return {day:0,relationships:[],cause:null};
@@ -2705,6 +2706,7 @@ test("World Bible opens and creates typed entries independently of the scene and
         if (command === "workspace_record_network_fact") { world.revision++; return "new-fact"; }
         if (command === "workspace_network_facts") return [{id:"fact-1",subject_label:"Vale",target_label:"Vale",input:{subject:{world:world.id,id:"guild"},target:{world:world.id,id:"estate"},source:{world:world.id,id:"register"},kind:"located_at",role:"headquarters",starts_at:0,ends_before:null}}];
         if (command === "workspace_create_identity") {
+          await new Promise<void>(resolve => { finishCreate = resolve; });
           entries.push({id:"new-title",label:String(args.label),kind:String(args.kind)}); world.revision++;
           return {world:world.id,id:"new-title"};
         }
@@ -2748,6 +2750,11 @@ test("World Bible opens and creates typed entries independently of the scene and
   await bible.getByLabel("Entry type").selectOption("title");
   await bible.getByLabel("Entry name").fill("Basin Warden");
   await bible.getByRole("button",{name:"Create identity only"}).click();
+  await expect(bible.locator("[data-bible-create-status]")).toHaveText("Creating identity…");
+  await entry.getByRole("button",{name:"Back to directory"}).click();
+  await expect(bible.locator("[data-bible-create-status]")).toContainText("Wait for the result");
+  await expect(entry.locator("[data-entry-identity]")).toContainText("estate");
+  await page.evaluate(() => (window as unknown as {__finishBibleCreate:()=>void}).__finishBibleCreate());
   await expect(entry.getByRole("heading",{name:"Basin Warden",exact:true})).toBeVisible();
   await expect(entry.locator("[data-entry-identity]")).toContainText("Identity only");
   const calls = await page.evaluate(() => (window as unknown as {__bibleCalls:{command:string;args:Record<string,unknown>}[]}).__bibleCalls);
